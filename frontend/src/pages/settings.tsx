@@ -12,7 +12,7 @@ import { useAuthStore } from '@/lib/stores/auth.store'
 import { PasswordChecklist, passwordIsValid } from '@/pages/auth/password-checklist'
 
 const selectCls =
-  'h-9 w-full appearance-none rounded-md border border-input bg-transparent pl-3 pr-9 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring'
+  'h-10 w-full appearance-none rounded-md border border-input bg-transparent pl-3 pr-9 text-base shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring'
 
 export function SettingsPage() {
   const navigate = useNavigate()
