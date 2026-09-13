@@ -11,6 +11,7 @@ import type {
   AiStatusPayload,
   EvaluationFeedbackPayload,
   JoinedPayload,
+  LeftPayload,
   QuestionDeliveredPayload,
   StateChangePayload,
   TimerExpiredPayload,
@@ -29,6 +30,18 @@ type SocketHookResult = {
   submitCode: (questionId: string, language: string, code: string) => void;
   requestNextQuestion: () => void;
   cancelInterview: () => void;
+};
+
+const WS_ERROR_MESSAGES: Record<WsErrorPayload["code"], string> = {
+  AUTH_UNAUTHORIZED: "Please sign in again to continue the interview.",
+  AUTH_SESSION_EXPIRED: "Your session expired. Reconnecting securely…",
+  AUTH_FORBIDDEN: "You do not have access to this interview.",
+  INTERVIEW_NOT_FOUND: "This interview could not be found.",
+  INTERVIEW_INVALID_STATE: "This action is not available in the interview’s current state.",
+  QUESTION_NOT_FOUND: "The requested interview question could not be found.",
+  ANSWER_REJECTED: "That answer could not be accepted. Please try the current question again.",
+  CONTEXT_MISSING: "The interview session is no longer available. Please return to the lobby.",
+  INTERNAL_ERROR: "The interview service encountered an unexpected error. Please try again.",
 };
 
 function questionFromPayload(payload: QuestionDeliveredPayload): Question {
@@ -180,6 +193,11 @@ export function useInterviewSocket(
           );
       }, 1000);
     });
+    socket.on(SOCKET_EVENTS.server.left, (_payload: LeftPayload) => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+      store.getState().reset();
+    });
     socket.on(SOCKET_EVENTS.server.stateChange, (payload: StateChangePayload) =>
       store.getState().applyStateChange(payload.status),
     );
@@ -216,7 +234,7 @@ export function useInterviewSocket(
       }),
     );
     socket.on(SOCKET_EVENTS.server.error, (payload: WsErrorPayload) => {
-      store.getState().setError(payload.message);
+      store.getState().setError(WS_ERROR_MESSAGES[payload.code]);
       if (
         payload.code === "AUTH_UNAUTHORIZED" ||
         payload.code === "AUTH_SESSION_EXPIRED"

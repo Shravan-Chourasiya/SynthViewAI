@@ -126,7 +126,16 @@ export interface HeartbeatPingPayload extends WsBase {
 
 export interface WsErrorPayload extends WsBase {
   event: "ws:error";
-  code: string;
+  code:
+    | "AUTH_UNAUTHORIZED"
+    | "AUTH_SESSION_EXPIRED"
+    | "AUTH_FORBIDDEN"
+    | "INTERVIEW_NOT_FOUND"
+    | "INTERVIEW_INVALID_STATE"
+    | "QUESTION_NOT_FOUND"
+    | "ANSWER_REJECTED"
+    | "CONTEXT_MISSING"
+    | "INTERNAL_ERROR";
   message: string;
   interviewId?: string;
   timestamp: string;

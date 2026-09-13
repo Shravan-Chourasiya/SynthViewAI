@@ -1,4 +1,4 @@
-import { httpGet, httpPost, httpPut } from "../http";
+import { httpGet, httpPost } from "../http";
 import { ENDPOINTS } from "../constants/endpoints";
 import type {
   InterviewResponse,
@@ -134,5 +134,5 @@ export function submitAnswer(
   interviewId: string,
   body: AnswerRequest,
 ): Promise<void> {
-  return httpPut(ENDPOINTS.interviews.answer(interviewId, body.questionId), body);
+  return httpPost(ENDPOINTS.interviews.answer(interviewId, body.questionId), body);
 }
