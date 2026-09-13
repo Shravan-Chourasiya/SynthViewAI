@@ -34,7 +34,7 @@ function normalizeUser(u: MeResponse): User {
   return {
     id: u.id,
     name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username,
-    email: "",
+    email: u.email,
     joinedAt: u.createdAt ?? new Date().toISOString(),
     role: u.userrole === "admin" ? "admin" : "candidate",
   };
@@ -175,20 +175,24 @@ export const api = {
   // ── Profile ────────────────────────────────────────────────────────────────
 
   async updateProfile(
-    patch: Partial<Pick<User, "name" | "email">>,
+    patch: Pick<User, "name">,
   ): Promise<User> {
-    if (patch.email) {
-      await authSvc.updateEmail({ email: patch.email });
-    }
-    return normalizeUser(await authSvc.me());
+    const [firstName, ...rest] = patch.name.trim().split(/\s+/);
+    return normalizeUser(
+      await authSvc.updateProfile({
+        firstName,
+        lastName: rest.join(" "),
+      }),
+    );
   },
 
   async changePassword(
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
+    const user = await authSvc.me();
     return authSvc.updatePassword({
-      email: pendingEmail(),
+      email: user.email,
       currentPassword,
       newPassword,
     });

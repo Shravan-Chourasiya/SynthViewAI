@@ -1,4 +1,4 @@
-import { httpDelete, httpGet, httpPost, httpPut } from "../http";
+import { httpDelete, httpGet, httpPatch, httpPost } from "../http";
 import { ENDPOINTS } from "../constants/endpoints";
 import type {
   MeResponse,
@@ -13,6 +13,7 @@ import type {
   UpdatePasswordRequest,
   UpdateEmailRequest,
   UpdateEmailVerifyRequest,
+  UpdateProfileRequest,
 } from "../types/api";
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export function forgotPasswordVerify(
 // ── Update password ───────────────────────────────────────────────────────────
 
 export function updatePassword(body: UpdatePasswordRequest): Promise<void> {
-  return httpPut(ENDPOINTS.auth.updatePassword, body);
+  return httpPost(ENDPOINTS.auth.updatePassword, body);
 }
 
 // ── Update email ──────────────────────────────────────────────────────────────
@@ -103,6 +104,10 @@ export function updateEmail(body: UpdateEmailRequest): Promise<void> {
 
 export function updateEmailVerify(body: UpdateEmailVerifyRequest): Promise<void> {
   return httpPost(ENDPOINTS.auth.updateEmailVerify, body);
+}
+
+export function updateProfile(body: UpdateProfileRequest): Promise<MeResponse> {
+  return httpPatch<MeResponse>(ENDPOINTS.auth.profile, body);
 }
 
 // ── Delete account ────────────────────────────────────────────────────────────

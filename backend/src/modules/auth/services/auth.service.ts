@@ -26,6 +26,7 @@ import type {
   RecoverAccountOtpInput,
   UpdatePasswordInput,
   UpdateEmailInput,
+  UpdateProfileInput,
   EmailUpdateOtpVerifyInput,
 } from "../zodschemas/auth.zschema.js";
 import type { LoginResult } from "../types/user.types.js";
@@ -657,6 +658,7 @@ export async function getMeService(userId: string) {
   const [user] = await db
     .select({
       id: usersTable.id,
+      email: usersTable.email,
       username: usersTable.username,
       firstName: usersTable.firstName,
       lastName: usersTable.lastName,
@@ -668,6 +670,39 @@ export async function getMeService(userId: string) {
     .from(usersTable)
     .where(eq(usersTable.id, userId))
     .limit(1);
+
+  if (!user) {
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
+  }
+
+  return user;
+}
+
+export async function updateProfileService(
+  userId: string,
+  input: UpdateProfileInput,
+) {
+  const db = getPgDb();
+  const [user] = await db
+    .update(usersTable)
+    .set({
+      ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
+      ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
+    })
+    .where(eq(usersTable.id, userId))
+    .returning({
+      id: usersTable.id,
+      email: usersTable.email,
+      username: usersTable.username,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      bio: usersTable.bio,
+      userrole: usersTable.userrole,
+      accountStatus: usersTable.accountStatus,
+      createdAt: usersTable.createdAt,
+    });
 
   if (!user) {
     throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {

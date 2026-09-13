@@ -13,6 +13,7 @@ import type {
   RecoverAccountOtpInput,
   UpdatePasswordInput,
   UpdateEmailInput,
+  UpdateProfileInput,
   EmailUpdateOtpVerifyInput,
 } from "../zodschemas/auth.zschema.js";
 import {
@@ -30,6 +31,7 @@ import {
   updateEmailService,
   emailUpdateOtpVerifyService,
   getMeService,
+  updateProfileService,
   getSessionsService,
   deleteAllSessionsService,
   deleteSessionService,
@@ -417,6 +419,26 @@ export const getMeController = async (
       success: true,
       statusCode: StatusCodes.OK,
       message: "User information retrieved successfully.",
+      data: user,
+    };
+    res.status(StatusCodes.OK).json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateProfileController = async (
+  req: ValidatedRequest<UpdateProfileInput>,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const user = await updateProfileService(authReq.auth.userId, req.body);
+    const response: SuccessResponse = {
+      success: true,
+      statusCode: StatusCodes.OK,
+      message: "Profile updated successfully.",
       data: user,
     };
     res.status(StatusCodes.OK).json(response);

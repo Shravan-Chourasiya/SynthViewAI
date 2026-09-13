@@ -126,6 +126,10 @@ export function httpPut<T>(path: string, body?: unknown): Promise<T> {
   return axiosInstance.put(path, body).then(unwrap<T>);
 }
 
+export function httpPatch<T>(path: string, body?: unknown): Promise<T> {
+  return axiosInstance.patch(path, body).then(unwrap<T>);
+}
+
 export function httpDelete<T>(path: string): Promise<T> {
   return axiosInstance.delete(path).then(unwrap<T>);
 }

@@ -68,6 +68,15 @@ export const updateEmailSchema = z.object({
   email: z.string().regex(userRegex.emailRegex, { message: "Invalid email format" }),
 });
 
+export const updateProfileSchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(100).optional(),
+    lastName: z.string().trim().max(100).optional(),
+  })
+  .refine((data) => data.firstName !== undefined || data.lastName !== undefined, {
+    message: "At least one profile field is required",
+  });
+
 export const emailUpdateOtpVerifySchema = z.object({
   email: z.string().regex(userRegex.emailRegex, { message: "Invalid email format" }),
   otp: z
@@ -91,5 +100,6 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ForgotPasswordOtpVerifyInput = z.infer<typeof forgotPasswordOtpVerifySchema>;
 export type UpdatePasswordInput = z.infer<typeof updatePasswordSchema>;
 export type UpdateEmailInput = z.infer<typeof updateEmailSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type EmailUpdateOtpVerifyInput = z.infer<typeof emailUpdateOtpVerifySchema>;
 export type RecoverAccountOtpInput = z.infer<typeof recoverAccountOtpSchema>;

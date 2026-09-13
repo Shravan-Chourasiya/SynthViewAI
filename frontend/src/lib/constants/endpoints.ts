@@ -10,6 +10,7 @@ export const ENDPOINTS = {
     refresh: "/auth/refresh",
     logout: "/usr/logout",
     me: "/usr/me",
+    profile: "/usr/profile",
     sessions: "/usr/sessions",
     session: (id: string) => `/usr/session/${id}`,
     recoverAccount: "/auth/recover-account",

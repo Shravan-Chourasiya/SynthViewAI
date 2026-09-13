@@ -98,11 +98,17 @@ export interface UpdateEmailVerifyRequest {
   otp: string;
 }
 
+export interface UpdateProfileRequest {
+  firstName?: string;
+  lastName?: string;
+}
+
 // ── User / Session ────────────────────────────────────────────────────────────
 
-// Shape returned by getMeService — note: no `email` field, role is `userrole`
+// Shape returned by getMeService; role is `userrole` to mirror the backend.
 export interface MeResponse {
   id: string;
+  email: string;
   username: string;
   firstName?: string | null;
   lastName?: string | null;

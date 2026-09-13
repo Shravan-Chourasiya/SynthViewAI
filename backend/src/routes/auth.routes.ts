@@ -12,6 +12,7 @@ import {
   recoverAccountOtpSchema,
   updatePasswordSchema,
   updateEmailSchema,
+  updateProfileSchema,
   emailUpdateOtpVerifySchema,
 } from "../modules/auth/zodschemas/auth.zschema.js";
 import {
@@ -29,6 +30,7 @@ import {
   emailUpdateOtpVerifyController,
   updateEmailController,
   getMeController,
+  updateProfileController,
   getSessionsController,
   deleteAllSessionsController,
   deleteSessionController,
@@ -121,6 +123,13 @@ export const createAuthRouter = (): Router => {
   );
 
   router.get("/usr/me", requireAuth, csrfTokenMiddleware, authLimiter, getMeController);
+  router.patch(
+    "/usr/profile",
+    requireAuth,
+    csrfTokenMiddleware,
+    validateBody(updateProfileSchema),
+    updateProfileController,
+  );
   router.get("/usr/sessions", requireAuth, csrfTokenMiddleware, authLimiter, getSessionsController);
   router.delete(
     "/usr/sessions",
