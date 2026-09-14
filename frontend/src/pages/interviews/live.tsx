@@ -16,17 +16,10 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { useInterviewSocket } from '@/hooks/use-interview-socket'
 import { useLiveInterviewStore } from '@/lib/stores/live-interview.store'
-import type { CodeResult, Interview, SignalTone } from '@/lib/types'
+import type { CodeResult, Interview } from '@/lib/types'
 import type { AIState, ConnectionState } from '@/components/interview-room/widgets'
 import type { CodeRunState } from '@/components/interview-room/coding-panel'
 import { cn } from '@/lib/utils'
-
-const SIGNAL_STRIP: Record<SignalTone, string> = {
-  strong: 'bg-[var(--signal-strong)]/10 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30',
-  good: 'bg-[var(--signal-good)]/10 text-[var(--signal-good)] ring-[var(--signal-good)]/30',
-  vague: 'bg-[var(--signal-vague)]/10 text-[var(--signal-vague)] ring-[var(--signal-vague)]/30',
-  weak: 'bg-[var(--signal-weak)]/10 text-[var(--signal-weak)] ring-[var(--signal-weak)]/30',
-}
 
 export function LiveRoomPage() {
   const { id } = useParams()
@@ -36,10 +29,13 @@ export function LiveRoomPage() {
   const aiStatus = useLiveInterviewStore((s) => s.aiStatus)
   const currentQuestion = useLiveInterviewStore((s) => s.currentQuestion)
   const questionNumber = useLiveInterviewStore((s) => s.questionNumber)
+  const answeredCount = useLiveInterviewStore((s) => s.answeredCount)
   const totalQuestions = useLiveInterviewStore((s) => s.totalQuestions)
-  const lastEvaluation = useLiveInterviewStore((s) => s.lastEvaluation)
   const interviewStatus = useLiveInterviewStore((s) => s.interviewStatus)
   const socketError = useLiveInterviewStore((s) => s.error)
+  const mediaStream = useLiveInterviewStore((s) => s.mediaStream)
+  const clearMediaStream = useLiveInterviewStore((s) => s.clearMediaStream)
+  const setMediaStream = useLiveInterviewStore((s) => s.setMediaStream)
   const [interview, setInterview] = useState<Interview | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [ended, setEnded] = useState(false)
@@ -52,15 +48,13 @@ export function LiveRoomPage() {
   const [micOn, setMicOn] = useState(true)
   const [sharing, setSharing] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
-  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const [endOpen, setEndOpen] = useState(false)
-  const { submitAnswer, submitCode, requestNextQuestion, cancelInterview } = useInterviewSocket(interview?.id)
+  const { submitAnswer, submitCode, endInterview } = useInterviewSocket(interview?.id)
 
   const conn = connectionState as ConnectionState
   const ai = aiStatus === 'thinking' ? 'preparing' : aiStatus === 'generating' ? 'adapting' : aiStatus === 'evaluating' ? 'evaluating' : aiStatus === 'idle' ? 'idle' : 'ready' as AIState
   const question = currentQuestion
-  const evaluation = lastEvaluation
   const busy = ai === 'evaluating' || ai === 'adapting' || ai === 'preparing' || ai === 'unavailable'
 
   /* load interview + enforce state rules */
@@ -79,42 +73,42 @@ export function LiveRoomPage() {
     }).catch((err: unknown) => setLoadError(err instanceof Error ? err.message : 'Unable to load live interview.'))
   }, [id])
 
+  // The lobby is the only place that calls getUserMedia. This room only
+  // consumes that in-memory stream and cleans it up when the session ends.
   useEffect(() => {
-    if (!interview || !navigator.mediaDevices?.getUserMedia) return
-    let active = true
-    void navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        if (!active) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-        setMediaStream(stream)
-        setMediaError(null)
-      })
-      .catch(() => {
-        if (active) setMediaError('Camera and microphone permission was denied or unavailable.')
-      })
-    return () => {
-      active = false
-      mediaStream?.getTracks().forEach((track) => track.stop())
-      screenStreamRef.current?.getTracks().forEach((track) => track.stop())
-    }
-  }, [interview])
+    setCameraOn(Boolean(mediaStream?.getVideoTracks().some((track) => track.enabled)))
+    setMicOn(Boolean(mediaStream?.getAudioTracks().some((track) => track.enabled)))
+  }, [mediaStream])
 
-  const toggleCamera = () => {
+  useEffect(() => () => {
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop())
+    screenStreamRef.current = null
+    clearMediaStream()
+  }, [clearMediaStream])
+
+  const toggleCamera = async () => {
     const track = mediaStream?.getVideoTracks()[0]
     if (track) {
       track.enabled = !cameraOn
       setCameraOn(track.enabled)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        setMediaStream(new MediaStream([...(mediaStream?.getTracks() ?? []), ...stream.getVideoTracks()]))
+      } catch { setMediaError('Camera permission was denied or no camera is available.') }
     }
   }
 
-  const toggleMic = () => {
+  const toggleMic = async () => {
     const track = mediaStream?.getAudioTracks()[0]
     if (track) {
       track.enabled = !micOn
       setMicOn(track.enabled)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        setMediaStream(new MediaStream([...(mediaStream?.getTracks() ?? []), ...stream.getAudioTracks()]))
+      } catch { setMediaError('Microphone permission was denied or no microphone is available.') }
     }
   }
 
@@ -143,9 +137,15 @@ export function LiveRoomPage() {
   }
 
   useEffect(() => {
-    if (interviewStatus === 'CANCELLED' && interview) navigate(`/interviews/${interview.id}`, { replace: true })
-    if (interviewStatus === 'COMPLETED' && interview) navigate(`/interviews/${interview.id}/completed`, { replace: true })
-  }, [interviewStatus, interview, navigate])
+    if (interviewStatus === 'CANCELLED' && interview) {
+      clearMediaStream()
+      navigate(`/interviews/${interview.id}`, { replace: true })
+    }
+    if (interviewStatus === 'COMPLETED' && interview) {
+      clearMediaStream()
+      navigate(`/interviews/${interview.id}/completed`, { replace: true })
+    }
+  }, [interviewStatus, interview, navigate, clearMediaStream])
 
   if (notFound) return <RoomNotice title="Interview not found" body="This interview doesn't exist or was removed." />
   if (ended)
@@ -188,7 +188,7 @@ export function LiveRoomPage() {
   }
 
   const qIndex = questionNumber || 1
-  const qTotal = totalQuestions ?? interview.rounds
+  const qTotal = Math.max(qIndex, totalQuestions ?? 0, answeredCount + 1)
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
@@ -205,9 +205,8 @@ export function LiveRoomPage() {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-4">
-          <ConnectionIndicator state={conn} />
-          <LiveTimer />
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="hidden text-xs text-muted-foreground sm:inline">Live interview</span>
         </div>
       </header>
 
@@ -215,35 +214,11 @@ export function LiveRoomPage() {
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_300px] lg:overflow-hidden lg:p-5">
         {/* main column */}
         <div className="flex min-h-0 flex-col gap-3">
-          <AiStatusBar state={ai} />
-
-          {evaluation ? (
-            <div
-              key={`${evaluation.score}-${evaluation.feedback}`}
-              className={cn(
-                'animate-reveal flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 ring-1',
-                SIGNAL_STRIP[evaluation.signal],
-              )}
-            >
-              <span className="size-2 shrink-0 rounded-full bg-current" />
-              <span className="text-xs font-medium">{evaluation.feedback}</span>
-              <span className="ml-auto font-mono text-[11px] tabular-nums">
-                score {evaluation.score}
-              </span>
-            </div>
-          ) : null}
-
-          {evaluation ? (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                onClick={requestNextQuestion}
-              >
-                Next question
-              </button>
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5">
+            <div className="min-w-0 flex-1"><AiStatusBar state={ai} /></div>
+            <ConnectionIndicator state={conn} />
+            <LiveTimer />
+          </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:p-6">
             {question.kind === 'code' ? (
@@ -252,14 +227,14 @@ export function LiveRoomPage() {
                 question={question}
                 index={qIndex}
                 total={qTotal}
-                language={interview.language ?? 'JavaScript'}
+                language="JavaScript"
                 runState={runState}
                 aiState={ai}
                 result={result}
                 busy={busy}
                 onSubmit={(code) => {
                   setRunState('running')
-                  submitCode(question.id, interview.language ?? 'JavaScript', code)
+                  submitCode(question.id, 'JavaScript', code)
                 }}
               />
             ) : (
@@ -329,8 +304,9 @@ export function LiveRoomPage() {
 
       <EndInterviewDialog
         open={endOpen}
+        answeredCount={answeredCount}
         onClose={() => setEndOpen(false)}
-        onConfirm={() => cancelInterview()}
+        onConfirm={() => { setEndOpen(false); endInterview() }}
       />
     </div>
   )

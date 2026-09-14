@@ -62,11 +62,18 @@ export interface JoinedPayload extends WsBase {
   reconnected: boolean;
   timerStartedAt: string;
   durationMinutes: number;
+  answeredQuestionIds: string[];
 }
 
 export interface LeftPayload extends WsBase {
   event: "interview:left";
   interviewId: string;
+}
+
+export interface AnswerAcceptedPayload extends WsBase {
+  event: "answer:accepted";
+  interviewId: string;
+  questionId: string;
 }
 
 export interface StateChangePayload extends WsBase {
@@ -102,6 +109,8 @@ export interface EvaluationFeedbackPayload extends WsBase {
   interviewId: string;
   questionId: string;
   answerId: string;
+  /** False when the backend has already decided that no next question exists. */
+  shouldAdvance?: boolean;
   score: number;
   correctness: number;
   relevance: number;

@@ -2,7 +2,9 @@
 
 export type InterviewType = "Behavioral" | "Technical" | "Coding" | "Mixed";
 export type Difficulty = "Easy" | "Medium" | "Hard" | "Adaptive";
-export type ExperienceLevel = "Entry" | "Mid-level" | "Senior";
+export type ExperienceLevel = "Entry" | "Junior" | "Mid-level" | "Senior";
+export type InterviewStyle = "FAANG" | "MAANG" | "STARTUP" | "REGULAR";
+export type EndingCriteria = "QUESTION_COUNT" | "DURATION";
 export type SignalTone = "strong" | "good" | "vague" | "weak";
 
 export const INTERVIEW_STATUSES = [
@@ -12,6 +14,7 @@ export const INTERVIEW_STATUSES = [
   "COMPLETED",
   "CANCELLED",
   "ABANDONED",
+  "EXPIRED",
 ] as const;
 export type InterviewStatus = (typeof INTERVIEW_STATUSES)[number];
 
@@ -26,14 +29,20 @@ export interface User {
 export interface InterviewConfig {
   domain: string;
   roleTitle: string;
+  /** Legacy/read-model fields; not collected or sent by the creation wizard. */
   company?: string;
+  targetedCompany?: string;
+  targetedCompanyOther?: string;
   experienceLevel: ExperienceLevel;
   difficulty: Difficulty;
   type: InterviewType;
   durationMin: number;
+  /** Read-only compatibility value for existing interview displays. */
   rounds: number;
   topics: string[];
-  language?: string;
+  interviewStyle: InterviewStyle;
+  endingCriteria: EndingCriteria;
+  questionCount?: number;
 }
 
 export interface Interview extends InterviewConfig {
@@ -162,6 +171,7 @@ export const STATUS_META: Record<
   COMPLETED: { label: "Completed", variant: "strong" },
   CANCELLED: { label: "Cancelled", variant: "weak" },
   ABANDONED: { label: "Abandoned", variant: "weak" },
+  EXPIRED: { label: "Expired", variant: "weak" },
 };
 
 export const DIFFICULTY_META: Record<Difficulty, { variant: BadgeVariant }> = {

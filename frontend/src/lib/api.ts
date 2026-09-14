@@ -50,6 +50,86 @@ function normalizeSession(s: SessionResponse): Session {
   };
 }
 
+type BackendReport = {
+  interviewId: string;
+  overallScore: string | number;
+  technicalScore: string | number;
+  communicationScore: string | number;
+  problemSolvingScore: string | number;
+  confidenceScore: string | number;
+  feedback?: string;
+  strengths?: string[];
+  weaknesses?: string[];
+  difficultyProgression?: string[];
+};
+
+type ReportHistory = {
+  questions?: Array<{
+    questionTitle?: string;
+    questionType?: string;
+    answerData?: string | null;
+    evaluationData?: {
+      score?: number;
+      feedback?: string;
+      strengths?: string[];
+      weaknesses?: string[];
+    } | null;
+  }>;
+};
+
+function asNumber(value: string | number | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function signalForScore(score: number): InterviewReport["questions"][number]["evaluation"]["signal"] {
+  if (score >= 80) return "strong";
+  if (score >= 60) return "good";
+  if (score >= 40) return "vague";
+  return "weak";
+}
+
+/** Convert the database report and history API contracts into the report-page model. */
+function normalizeReport(data: BackendReport, history: ReportHistory | null): InterviewReport {
+  const questions = (history?.questions ?? [])
+    .filter((question) => question.evaluationData)
+    .map((question) => {
+      const evaluation = question.evaluationData!;
+      const score = asNumber(evaluation.score);
+      return {
+        question: question.questionTitle ?? "Interview question",
+        answer: question.answerData ?? "No answer recorded.",
+        level: question.questionType ?? "Interview",
+        evaluation: {
+          score,
+          signal: signalForScore(score),
+          feedback: evaluation.feedback ?? "No written feedback was recorded.",
+          strengths: Array.isArray(evaluation.strengths) ? evaluation.strengths : [],
+          weaknesses: Array.isArray(evaluation.weaknesses) ? evaluation.weaknesses : [],
+        },
+      };
+    });
+  const strengths = Array.isArray(data.strengths) ? data.strengths : [];
+  const weaknesses = Array.isArray(data.weaknesses) ? data.weaknesses : [];
+
+  return {
+    interviewId: data.interviewId,
+    overallScore: asNumber(data.overallScore),
+    categoryScores: [
+      { label: "Technical", value: asNumber(data.technicalScore) },
+      { label: "Communication", value: asNumber(data.communicationScore) },
+      { label: "Problem solving", value: asNumber(data.problemSolvingScore) },
+      { label: "Confidence", value: asNumber(data.confidenceScore) },
+    ],
+    strengths,
+    weaknesses,
+    summary: data.feedback || `This report is based on ${questions.length} evaluated answer${questions.length === 1 ? "" : "s"}.`,
+    recommendations: weaknesses.map((gap) => ({ gap, resource: "Review this area and practise a focused follow-up response." })),
+    difficultyProgression: Array.isArray(data.difficultyProgression) ? data.difficultyProgression : [],
+    questions,
+  };
+}
+
 // ── api facade ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -160,16 +240,57 @@ export const api = {
   },
 
   async getReport(id: string): Promise<InterviewReport> {
-    const data = await interviewSvc.getInterviewReport(id);
-    return data as unknown as InterviewReport;
+    const data = await interviewSvc.getInterviewReport(id) as unknown as BackendReport;
+    // A report can exist before every history read succeeds. Preserve the
+    // aggregate report and render its question section empty in that case.
+    let history: ReportHistory | null = null;
+    try {
+      history = await interviewSvc.getInterviewHistory(id) as unknown as ReportHistory;
+    } catch {
+      history = null;
+    }
+    return normalizeReport(data, history);
   },
 
   async getMetrics(id: string): Promise<unknown> {
-    return interviewSvc.getInterviewMetrics(id);
+    const data = await interviewSvc.getInterviewMetrics(id) as { activeSeconds?: number; report?: { overallScore?: string | number; questionsAnswered?: number; totalDuration?: number } | null };
+    const report = data.report;
+    const history = await interviewSvc.getInterviewHistory(id) as unknown as { questions?: Array<{ sequenceNumber: number; questionType: string; answeredAt?: string | null; questionCreatedAt?: string; timeTakenSeconds?: number | null; evaluationData?: { score?: number } | null }> };
+    const questions = history.questions ?? [];
+    const scored = questions.filter((question) => question.evaluationData);
+    const byType = new Map<string, number[]>();
+    for (const question of scored) {
+      const score = asNumber(question.evaluationData?.score);
+      byType.set(question.questionType, [...(byType.get(question.questionType) ?? []), score]);
+    }
+    const typeLabels = [
+      ["BEHAVIORAL", "Behavioral"],
+      ["TECHNICAL", "Technical"],
+      ["MIXED", "Follow-up"],
+    ] as const;
+    return {
+      interviewId: id,
+      overall: asNumber(report?.overallScore),
+      questionScores: scored.map((question) => ({ label: `Q${question.sequenceNumber}`, value: asNumber(question.evaluationData?.score) })),
+      topics: typeLabels.map(([type, label]) => {
+        const values = byType.get(type) ?? [];
+        return { label, value: values.length ? Math.round(values.reduce((sum, score) => sum + score, 0) / values.length) : 0 };
+      }),
+      timePerQuestion: questions.filter((question) => question.answeredAt).map((question) => question.timeTakenSeconds ?? (question.questionCreatedAt ? Math.max(0, Math.round((new Date(question.answeredAt!).getTime() - new Date(question.questionCreatedAt).getTime()) / 1000)) : 0)),
+      activeSeconds: data.activeSeconds ?? 0,
+      coding: { passed: 0, total: 0, attempts: 0, runtime: "n/a", memory: "n/a" },
+    };
   },
 
   async getHistory(id: string): Promise<TimelineEvent[]> {
-    return interviewSvc.getInterviewHistory(id);
+    const data = await interviewSvc.getInterviewHistory(id) as unknown as { questions?: Array<{ questionId: string; sequenceNumber: number; questionTitle: string; questionType: string; answeredAt?: string | null; evaluationData?: unknown }> };
+    return (data.questions ?? []).flatMap((question) => {
+      const at = question.answeredAt ?? new Date().toISOString();
+      const events: TimelineEvent[] = [{ id: `${question.questionId}-asked`, type: "question_delivered", label: `Question ${question.sequenceNumber}`, detail: question.questionTitle, at }];
+      if (question.answeredAt) events.push({ id: `${question.questionId}-answered`, type: "answer_submitted", label: "Answer submitted", detail: `${question.questionType} response recorded.`, at: question.answeredAt });
+      if (question.evaluationData) events.push({ id: `${question.questionId}-evaluated`, type: "evaluation_completed", label: "Answer evaluated", detail: "AI evaluation completed.", at });
+      return events;
+    });
   },
 
   // ── Profile ────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
@@ -5,6 +6,7 @@ import { Alert } from '@/components/ui/alert'
 import { StatusBadge } from '@/components/ui/badge'
 import { DifficultyBadge, TypeBadge } from '@/components/interview-ui'
 import { fmtDate, fmtMinutes } from '@/lib/format'
+import { api } from '@/lib/api'
 import type { InterviewStatus } from '@/lib/types'
 import {
   DetailSkeleton,
@@ -24,11 +26,20 @@ const STATUS_ALERT: Record<
   COMPLETED: { variant: 'strong', message: 'Interview finished. The full report is ready.' },
   CANCELLED: { variant: 'destructive', message: 'This interview was cancelled and can no longer be resumed.' },
   ABANDONED: { variant: 'destructive', message: 'This interview was abandoned and can no longer be resumed.' },
+  EXPIRED: { variant: 'destructive', message: "This interview's scheduled window has passed and it can no longer be started." },
 }
 
 export function InterviewDetailPage() {
   const { id } = useParams()
   const { interview, loading, error } = useInterview(id)
+  const [actual, setActual] = useState<{ score: number; questions: number; sessionSeconds: number } | null>(null)
+
+  useEffect(() => {
+    if (!id || interview?.status !== 'COMPLETED') return
+    ;(api.getMetrics(id) as Promise<{ overall: number; questionScores: unknown[]; activeSeconds: number }>)
+      .then((metrics) => setActual({ score: metrics.overall, questions: metrics.questionScores.length, sessionSeconds: metrics.activeSeconds }))
+      .catch(() => undefined)
+  }, [id, interview?.status])
 
   if (loading) {
     return (
@@ -46,18 +57,18 @@ export function InterviewDetailPage() {
   }
 
   const alert = STATUS_ALERT[interview.status]
-  const pct = Math.round(interview.progress * 100)
+  const pct = interview.status === 'COMPLETED' ? 100 : Math.round(interview.progress * 100)
 
   return (
     <AppShell title="Interview Detail">
-      <div className="animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
+      <div className="interview-print-root animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
         <InterviewHeader interview={interview} active="overview" />
 
         {/* stats */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Overall score" value={interview.score !== null ? String(interview.score) : '—'} />
-          <StatCard label="Duration" value={fmtMinutes(interview.durationMin)} />
-          <StatCard label="Rounds" value={String(interview.rounds)} />
+          <StatCard label="Overall score" value={actual ? String(actual.score) : interview.score !== null ? String(interview.score) : '—'} />
+          <StatCard label="Session time" value={actual ? formatDuration(actual.sessionSeconds) : fmtMinutes(interview.durationMin)} />
+          <StatCard label="Questions" value={actual ? String(actual.questions) : String(interview.currentQuestion)} />
           <StatCard label="Progress" value={`${pct}%`} />
         </div>
 
@@ -68,7 +79,7 @@ export function InterviewDetailPage() {
             <div className="mt-2">
               <ConfigRow label="Domain">{interview.domain}</ConfigRow>
               <ConfigRow label="Target role">{interview.roleTitle}</ConfigRow>
-              <ConfigRow label="Company">{interview.company || '—'}</ConfigRow>
+              <ConfigRow label="Target company">{interview.company || 'No target company'}</ConfigRow>
               <ConfigRow label="Type">
                 <TypeBadge type={interview.type} />
               </ConfigRow>
@@ -76,7 +87,13 @@ export function InterviewDetailPage() {
                 <DifficultyBadge difficulty={interview.difficulty} />
               </ConfigRow>
               <ConfigRow label="Experience">{interview.experienceLevel}</ConfigRow>
-              <ConfigRow label="Language">{interview.language ?? '—'}</ConfigRow>
+              <ConfigRow label="Interview style">{interview.interviewStyle === 'REGULAR' ? 'Other / regular' : interview.interviewStyle}</ConfigRow>
+              <ConfigRow label="Duration">{fmtMinutes(interview.durationMin)}</ConfigRow>
+              <ConfigRow label="End interview by">
+                {interview.endingCriteria === 'QUESTION_COUNT'
+                  ? `${interview.questionCount ?? '—'} questions (duration safety limit)`
+                  : 'Duration limit'}
+              </ConfigRow>
             </div>
             <div className="mt-4">
               <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -156,6 +173,8 @@ export function InterviewDetailPage() {
     </AppShell>
   )
 }
+
+function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const remainder = seconds % 60; return minutes ? `${minutes}m ${remainder}s` : `${remainder}s` }
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (

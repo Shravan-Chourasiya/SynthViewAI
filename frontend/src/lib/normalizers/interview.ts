@@ -1,19 +1,21 @@
 import type { InterviewResponse } from "../types/api";
-import type { Difficulty, Interview, InterviewStatus, InterviewType } from "../types";
+import type { Difficulty, Interview, InterviewStatus, InterviewStyle, InterviewType } from "../types";
 
 type BackendInterview = InterviewResponse & {
   interviewStatus?: InterviewResponse["status"];
   interviewDifficulty?: string;
   interviewType?: string;
+  interviewCompanyStyle?: string;
   interviewDuration?: number;
-  interviewMetaData?: { jobRole?: string; jobSkills?: string[] };
+  interviewMetaData?: { jobRole?: string; domain?: string; experience?: string; jobSkills?: string[]; targetedCompany?: string; targetedCompanyOther?: string; endingCriteria?: "QUESTION_COUNT" | "DURATION"; questionCount?: number; isAdaptive?: boolean };
 };
 
 function normalizeStatus(status: InterviewResponse["status"]): InterviewStatus {
   if (status === "INPROGRESS") return "IN_PROGRESS";
   if (status === "DRAFT") return "CREATED";
   if (status === "SCHEDULED") return "READY";
-  if (status === "TIMED_OUT" || status === "EXPIRED") return "ABANDONED";
+  if (status === "TIMED_OUT") return "ABANDONED";
+  if (status === "EXPIRED") return "EXPIRED";
   return status as InterviewStatus;
 }
 
@@ -31,6 +33,11 @@ function normalizeType(value: string | undefined): InterviewType {
   return "Mixed";
 }
 
+function normalizeStyle(value: string | undefined): InterviewStyle {
+  if (value === "FAANG" || value === "MAANG" || value === "STARTUP" || value === "REGULAR") return value;
+  return "REGULAR";
+}
+
 export function normalizeInterview(value: InterviewResponse): Interview {
   const raw = value as BackendInterview & Partial<Interview>;
   return {
@@ -38,13 +45,19 @@ export function normalizeInterview(value: InterviewResponse): Interview {
     id: raw.id,
     userId: raw.userId,
     status: normalizeStatus(raw.interviewStatus ?? raw.status),
-    difficulty: normalizeDifficulty(raw.interviewDifficulty),
+    difficulty: raw.interviewMetaData?.isAdaptive ? "Adaptive" : normalizeDifficulty(raw.interviewDifficulty),
     type: normalizeType(raw.interviewType),
+    interviewStyle: normalizeStyle(raw.interviewCompanyStyle),
     roleTitle: raw.interviewMetaData?.jobRole ?? "Software Engineer",
-    domain: raw.interviewMetaData?.jobRole ?? "Software Engineering",
-    experienceLevel: "Entry",
+    domain: raw.interviewMetaData?.domain ?? raw.interviewMetaData?.jobRole ?? "Software Engineering",
+    company: raw.interviewMetaData?.targetedCompany ?? raw.interviewMetaData?.targetedCompanyOther,
+    experienceLevel: raw.interviewMetaData?.experience === "senior" ? "Senior" : raw.interviewMetaData?.experience === "mid-level" ? "Mid-level" : raw.interviewMetaData?.experience === "junior" ? "Junior" : "Entry",
     rounds: raw.rounds ?? 1,
     topics: raw.interviewMetaData?.jobSkills ?? [],
+    targetedCompany: raw.interviewMetaData?.targetedCompany,
+    targetedCompanyOther: raw.interviewMetaData?.targetedCompanyOther,
+    endingCriteria: raw.interviewMetaData?.endingCriteria ?? "DURATION",
+    questionCount: raw.interviewMetaData?.questionCount,
     durationMin: raw.interviewDuration ?? 0,
     createdAt: raw.createdAt,
     lastActivityAt: raw.lastActivityAt ?? raw.createdAt,

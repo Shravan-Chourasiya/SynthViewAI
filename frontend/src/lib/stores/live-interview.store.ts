@@ -22,15 +22,23 @@ export type LiveInterviewState = {
   questionNumber: number;
   totalQuestions: number | null;
   aiStatus: LiveAiStatus;
+  // The backend is authoritative for all score aggregation and final reports.
+  // Keep only the current evaluation for transport/adaptive-session state; do
+  // not duplicate server-side report aggregation in the browser.
   lastEvaluation: Evaluation | null;
+  answeredCount: number;
+  answeredQuestionIds: string[];
   transcript: string[];
   error: string | null;
+  /** Runtime-only browser object; never persisted by this store. */
+  mediaStream: MediaStream | null;
   setConnectionState: (connectionState: LiveConnectionState) => void;
   setInterviewId: (interviewId: string) => void;
   applyJoined: (payload: {
     interviewId: string;
     timerStartedAt: string;
     durationMinutes: number;
+    answeredQuestionIds: string[];
   }) => void;
   applyStateChange: (status: BackendInterviewStatus) => void;
   applyQuestion: (
@@ -40,9 +48,12 @@ export type LiveInterviewState = {
   ) => void;
   setAiStatus: (aiStatus: LiveAiStatus) => void;
   applyEvaluation: (evaluation: Evaluation) => void;
+  markAnswered: (questionId: string) => void;
   setRemainingSeconds: (remainingSeconds: number) => void;
   appendTranscript: (entry: string) => void;
   setError: (error: string | null) => void;
+  setMediaStream: (mediaStream: MediaStream | null) => void;
+  clearMediaStream: () => void;
   reset: () => void;
 };
 
@@ -58,20 +69,25 @@ const initialState = {
   totalQuestions: null,
   aiStatus: "idle" as LiveAiStatus,
   lastEvaluation: null,
+  answeredCount: 0,
+  answeredQuestionIds: [],
   transcript: [],
   error: null,
+  mediaStream: null as MediaStream | null,
 };
 
 export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
   ...initialState,
   setConnectionState: (connectionState) => set({ connectionState }),
   setInterviewId: (interviewId) => set({ interviewId }),
-  applyJoined: ({ interviewId, timerStartedAt, durationMinutes }) =>
+  applyJoined: ({ interviewId, timerStartedAt, durationMinutes, answeredQuestionIds }) =>
     set({
       interviewId,
       timerStartedAt,
       durationMinutes,
       remainingSeconds: durationMinutes * 60,
+      answeredQuestionIds,
+      answeredCount: answeredQuestionIds.length,
     }),
   applyStateChange: (interviewStatus) => set({ interviewStatus }),
   applyQuestion: (currentQuestion, questionNumber, totalQuestions) =>
@@ -84,11 +100,23 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
     }),
   setAiStatus: (aiStatus) => set({ aiStatus }),
   applyEvaluation: (lastEvaluation) => set({ lastEvaluation }),
+  markAnswered: (questionId: string) => set((state) => state.answeredQuestionIds.includes(questionId)
+    ? state
+    : { answeredQuestionIds: [...state.answeredQuestionIds, questionId], answeredCount: state.answeredCount + 1 }),
   setRemainingSeconds: (remainingSeconds) => set({ remainingSeconds }),
   appendTranscript: (entry) =>
     set((state) => ({ transcript: [...state.transcript, entry] })),
   setError: (error) => set({ error }),
+  setMediaStream: (mediaStream) => set({ mediaStream }),
+  clearMediaStream: () =>
+    set((state) => {
+      state.mediaStream?.getTracks().forEach((track) => track.stop());
+      return { mediaStream: null };
+    }),
   reset() {
-    set(initialState);
+    set((state) => {
+      state.mediaStream?.getTracks().forEach((track) => track.stop());
+      return initialState;
+    });
   },
 }));

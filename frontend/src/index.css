@@ -191,6 +191,13 @@
 }
 
 @layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
   .bg-grid {
     background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
       linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
@@ -209,6 +216,49 @@
     );
   }
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  aside, .app-shell-topbar, .interview-print-root .interview-context-header, .interview-print-root nav, .report-footer, details:has(> summary[aria-label="Export options"]) {
+    display: none !important;
+  }
+
+  .app-shell-main {
+    padding: 0 !important;
+  }
+
+  .interview-print-root {
+    max-width: none !important;
+    animation: none !important;
+  }
+
+  .interview-print-root section, .interview-print-root article, .interview-print-root details {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+
+  .print-chart-bar,
+  .interview-print-root .flex.items-end > div > div {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    forced-color-adjust: none;
+  }
+
+  .print-document-title { display: block; }
+  .print-document-title h1 { font-size: 18pt; font-weight: 700; }
+  .print-document-title p { margin-top: 2mm; color: #525252 !important; font-size: 9pt; }
+}
+
+.print-document-title { display: none; }
 
 /* ------------------------------------------------------------------ */
 /* Keyframes                                                           */

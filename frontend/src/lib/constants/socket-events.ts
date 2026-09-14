@@ -13,11 +13,13 @@ export const SOCKET_EVENTS = {
     codeSubmit: "code:submit",
     nextQuestion: "question:next",
     cancel: "interview:cancel",
+    end: "interview:end",
   },
   /** Events emitted by the server → client */
   server: {
     joined: "interview:joined",
     left: "interview:left",
+    answerAccepted: "answer:accepted",
     stateChange: "interview:state_change",
     questionDelivered: "question:delivered",
     aiStatus: "ai:status",

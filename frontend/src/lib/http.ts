@@ -10,12 +10,14 @@ import type { ErrorCode } from "./types/api";
 export class ApiError extends Error {
   readonly code: ErrorCode | string;
   readonly status: number;
+  readonly details: unknown;
 
-  constructor(code: ErrorCode | string, message: string, status = 500) {
+  constructor(code: ErrorCode | string, message: string, status = 500, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -45,13 +47,17 @@ function canRefresh(url?: string): boolean {
 }
 
 function toApiError(error: unknown): ApiError {
-  const axiosError = error as AxiosError<{ message?: string; error?: { code?: string } }>;
+  const axiosError = error as AxiosError<{
+    message?: string;
+    error?: { code?: string; details?: unknown };
+  }>;
   const response = axiosError.response;
   const body = response?.data;
   return new ApiError(
     body?.error?.code ?? `HTTP_${response?.status ?? 500}`,
     body?.message ?? axiosError.message ?? "Request failed",
     response?.status ?? 500,
+    body?.error?.details,
   );
 }
 
@@ -110,7 +116,8 @@ axiosInstance.interceptors.response.use(
         onAuthExpired?.();
       }
     }
-    return Promise.reject(toApiError(error));
+    const apiError = toApiError(error);
+    return Promise.reject(apiError);
   },
 );
 

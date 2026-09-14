@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Activity, Code2, ListChecks, Timer } from 'lucide-react'
+import { Activity, ListChecks, Timer } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Alert } from '@/components/ui/alert'
 import { Bars } from '@/components/charts'
 import { api } from '@/lib/api'
 import {
   DetailSkeleton,
+  interviewDisplayTitle,
   InterviewHeader,
   InterviewNotFound,
   useInterview,
@@ -18,7 +19,7 @@ interface Metrics {
   questionScores: { label: string; value: number }[]
   topics: { label: string; value: number }[]
   timePerQuestion: number[]
-  activePercent: number
+  activeSeconds: number
   coding: {
     passed: number
     total: number
@@ -72,7 +73,6 @@ export function InterviewMetricsPage() {
     )
   }
 
-  const hasCoding = interview.type !== 'Behavioral'
   const timeData = metrics.timePerQuestion.map((v, i) => ({
     label: `Q${i + 1}`,
     value: v,
@@ -80,70 +80,48 @@ export function InterviewMetricsPage() {
 
   return (
     <AppShell title="Interview Metrics">
-      <div className="animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
+      <div className="interview-print-root animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
         <InterviewHeader interview={interview} active="metrics" />
+        <div className="print-document-title">
+          <h1>{interviewDisplayTitle(interview)} — Metrics</h1>
+          <p>{interview.company ?? 'No target company'} · {interview.domain}</p>
+        </div>
 
         {/* stats */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           <StatCard icon={Activity} label="Overall score" value={String(metrics.overall)} />
-          <StatCard icon={Timer} label="Active time" value={`${metrics.activePercent}%`} />
+          <StatCard icon={Timer} label="Session time" value={formatDuration(metrics.activeSeconds)} />
           <StatCard icon={ListChecks} label="Questions" value={String(metrics.questionScores.length)} />
-          {hasCoding ? (
-            <StatCard
-              icon={Code2}
-              label="Tests passed"
-              value={`${metrics.coding.passed}/${metrics.coding.total}`}
-            />
-          ) : (
-            <StatCard icon={Code2} label="Coding" value="n/a" />
-          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <ChartCard title="Question-level scores" note="per-question evaluation">
-            <Bars data={metrics.questionScores} height={150} color="var(--chart-1)" />
+            {metrics.questionScores.length ? <Bars data={metrics.questionScores} height={150} color="var(--chart-1)" /> : <EmptyChart label="No evaluated answers yet" />}
           </ChartCard>
-          <ChartCard title="Topic performance" note="strength by topic">
-            <Bars data={metrics.topics} height={150} color="var(--chart-2)" />
+          <ChartCard title="Interview mix" note="average score by question type">
+            {metrics.topics.length ? <Bars data={metrics.topics} height={150} color="var(--chart-2)" /> : <EmptyChart label="No topic scores yet" />}
           </ChartCard>
           <ChartCard title="Time per question" note="seconds spent">
-            <Bars data={timeData} height={150} color="var(--chart-3)" />
+            {timeData.length ? <Bars data={timeData} height={150} color="var(--chart-3)" /> : <EmptyChart label="Timing data is not available" />}
           </ChartCard>
 
-          {/* coding metrics */}
-          {hasCoding ? (
-            <section className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="text-sm font-semibold">Coding metrics</h2>
-              <div className="mt-3">
-                <MetricRow label="Test cases">
-                  {metrics.coding.passed} of {metrics.coding.total} passed
-                </MetricRow>
-                <MetricRow label="Attempts">{metrics.coding.attempts}</MetricRow>
-                <MetricRow label="Runtime">{metrics.coding.runtime}</MetricRow>
-                <MetricRow label="Memory">{metrics.coding.memory}</MetricRow>
-              </div>
-              <p className="mt-4 rounded-lg bg-primary/5 px-3.5 py-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground ring-1 ring-primary/20">
-                Code ran in an isolated Codebox sandbox while the next question
-                was prepared in parallel (NFR-02).
-              </p>
-            </section>
-          ) : (
-            <section className="flex items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-6">
-              <p className="max-w-xs text-center text-sm text-muted-foreground">
-                This was a behavioral interview — no coding metrics were
-                collected.
-              </p>
-            </section>
-          )}
+          <section className="flex items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-6">
+            <p className="max-w-xs text-center text-sm text-muted-foreground">
+              Code execution is not available yet, so no coding metrics are displayed.
+            </p>
+          </section>
         </div>
 
         <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          {metrics.activePercent}% active · {100 - metrics.activePercent}% reconnecting / idle
+          Session time is measured from start until the interview was ended.
         </p>
       </div>
     </AppShell>
   )
 }
+
+function EmptyChart({ label }: { label: string }) { return <div className="flex h-[150px] items-center justify-center rounded-xl bg-secondary/40 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div> }
+function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const remainder = seconds % 60; return minutes ? `${minutes}m ${remainder}s` : `${remainder}s` }
 
 function StatCard({
   icon: Icon,
@@ -188,16 +166,5 @@ function ChartCard({
       </div>
       {children}
     </section>
-  )
-}
-
-function MetricRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-2.5 last:border-0">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="text-sm">{children}</span>
-    </div>
   )
 }

@@ -13,7 +13,7 @@ export function LoginPage() {
             mode="login"
             onModeChange={(mode) => navigate(mode === 'login' ? '/login' : '/register')}
             loginSlot={<LoginForm onSuccess={() => navigate(from, { replace: true })} />}
-            registerSlot={<RegisterForm onSuccess={(email) => navigate('/verify-email', { state: { email } })} />}
+            registerSlot={<RegisterForm onSuccess={(email) => navigate('/verify-email', { state: { email } })} showModeLink={false} />}
         />
     )
 }

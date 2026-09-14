@@ -2,7 +2,7 @@
 // Kept for backwards compatibility — prefer importing from ./env directly.
 export { env, HTTP_BASE_URL } from "./env";
 
-// Legacy named exports used by api-client.ts and other existing files
+// Compatibility named exports used by older application modules.
 import { env } from "./env";
 export const API_BASE_URL = env.apiBaseUrl;
 export const API_VERSION = env.apiVersion;
