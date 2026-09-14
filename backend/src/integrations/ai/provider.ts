@@ -122,6 +122,14 @@ const stubProvider: ModelProvider = {
   contextWindowTokens: PROVIDER_CONTEXT_WINDOWS.stub!,
   isReady: () => true,
   generateQuestion: async (_, input) => {
+    if (input.config.interviewType === "MIXED") {
+      // Keep the offline fallback truthful to the selected type too: mixed
+      // sessions alternate behavioral and technical questions.
+      const questionType = input.sequenceNumber % 2 === 0 ? "TECHNICAL" : "BEHAVIORAL";
+      const pool = STUB_QUESTIONS[questionType];
+      const entry = pool[(Math.ceil(input.sequenceNumber / 2) - 1) % pool.length]!;
+      return { questionTitle: entry.title, questionDescription: entry.description, questionType };
+    }
     const pool = STUB_QUESTIONS[input.config.interviewType] ?? STUB_QUESTIONS.MIXED;
     const entry = pool[(input.sequenceNumber - 1) % pool.length]!;
     return {

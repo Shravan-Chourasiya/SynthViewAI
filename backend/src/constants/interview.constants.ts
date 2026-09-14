@@ -1,3 +1,5 @@
+// Keep this in sync with frontend/src/pages/interviews/new.tsx until this curated list
+// is exposed by a backend configuration endpoint; update both locations together.
 export const TARGET_COMPANIES = [
   "Google",
   "Microsoft",

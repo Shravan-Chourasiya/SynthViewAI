@@ -107,6 +107,11 @@ export interface CancelInterviewPayload extends BasePayload {
   interviewId: string;
 }
 
+export interface EndInterviewPayload extends BasePayload {
+  event: "interview:end";
+  interviewId: string;
+}
+
 export interface ClientToServerEvents {
   "interview:join": (payload: JoinInterviewPayload) => void;
   "interview:leave": (payload: LeaveInterviewPayload) => void;
@@ -115,6 +120,7 @@ export interface ClientToServerEvents {
   "code:submit": (payload: SubmitCodePayload) => void;
   "question:next": (payload: RequestNextQuestionPayload) => void;
   "interview:cancel": (payload: CancelInterviewPayload) => void;
+  "interview:end": (payload: EndInterviewPayload) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,11 +136,19 @@ export interface InterviewJoinedPayload extends BasePayload {
   // Sent on join so the client can derive the countdown without a separate fetch
   timerStartedAt: string; // ISO-8601
   durationMinutes: number;
+  // Persisted ANSWERED/EVALUATED question ids, used only for honest client copy.
+  answeredQuestionIds: string[];
 }
 
 export interface InterviewLeftPayload extends BasePayload {
   event: "interview:left";
   interviewId: string;
+}
+
+export interface AnswerAcceptedPayload extends BasePayload {
+  event: "answer:accepted";
+  interviewId: string;
+  questionId: string;
 }
 
 // ── Interview state changes ───────────────────────────────────────────────────
@@ -192,6 +206,8 @@ export interface EvaluationFeedbackPayload extends BasePayload {
   interviewId: string;
   questionId: string;
   answerId: string;
+  // False when adaptive/system completion has already decided no next question exists.
+  shouldAdvance: boolean;
   score: number; // 0–100
   correctness: number; // 0–100
   relevance: number; // 0–100
@@ -224,6 +240,7 @@ export interface ServerToClientEvents {
   // Connection / session
   "interview:joined": (payload: InterviewJoinedPayload) => void;
   "interview:left": (payload: InterviewLeftPayload) => void;
+  "answer:accepted": (payload: AnswerAcceptedPayload) => void;
   // State
   "interview:state_change": (payload: InterviewStateChangePayload) => void;
   // Question lifecycle

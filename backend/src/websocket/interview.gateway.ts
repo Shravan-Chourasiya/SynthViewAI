@@ -21,6 +21,8 @@ import {
   fetchInterviewById,
   submitAnswerService,
   cancelInterviewService,
+  endInterviewService,
+  getAnsweredQuestionIdsService,
   generateAndDeliverQuestionService,
   requestNextQuestionService,
   pauseInterviewService,
@@ -209,6 +211,7 @@ export function registerInterviewGateway(io: IoServer): void {
             reconnected: isReconnect,
             timerStartedAt: context.timerStartedAt,
             durationMinutes: context.config.durationMinutes,
+            answeredQuestionIds: await getAnsweredQuestionIdsService(interviewId),
           };
           socket.emit("interview:joined", joined);
           logger.info(
@@ -265,6 +268,14 @@ export function registerInterviewGateway(io: IoServer): void {
             typeof submitAnswerService
           >[0];
           await submitAnswerService(fakeAuthReq, interviewId, { questionId, answerData, answerType }, io);
+          if (answerData.trim()) {
+            socket.emit("answer:accepted", {
+              eventVersion: EVENT_VERSION,
+              event: "answer:accepted",
+              interviewId,
+              questionId,
+            });
+          }
           logger.info({ socketId: socket.id, interviewId, questionId }, "[ws] answer submitted");
         } catch (err) {
           const code = toWsErrorCode(err);
@@ -288,6 +299,14 @@ export function registerInterviewGateway(io: IoServer): void {
             answerData: `[${language}]\n${code}`,
             answerType: "TEXT",
           }, io);
+          if (code.trim()) {
+            socket.emit("answer:accepted", {
+              eventVersion: EVENT_VERSION,
+              event: "answer:accepted",
+              interviewId,
+              questionId,
+            });
+          }
           logger.info(
             { socketId: socket.id, interviewId, questionId, language },
             "[ws] code submitted",
@@ -343,6 +362,32 @@ export function registerInterviewGateway(io: IoServer): void {
         } catch (err) {
           const code = toWsErrorCode(err);
           socket.emit("ws:error", wsError(code, `Cancel failed: ${code}`, interviewId));
+        }
+      })();
+    });
+
+    socket.on("interview:end", (payload) => {
+      void (async () => {
+        const { interviewId } = payload;
+        try {
+          // endInterviewService is deliberately idempotent. Ownership is the
+          // only gateway precondition so a duplicate request can receive the
+          // terminal result instead of being rejected after the first wins.
+          await assertInterviewOwnership(socket, interviewId);
+          const fakeAuthReq = { auth: { userId: socket.data.userId } } as Parameters<typeof endInterviewService>[0];
+          const updated = await endInterviewService(fakeAuthReq, interviewId);
+          await deleteSocketSession(interviewId);
+          const stateChange: InterviewStateChangePayload = {
+            eventVersion: EVENT_VERSION,
+            event: "interview:state_change",
+            interviewId,
+            status: updated?.interviewStatus ?? "CANCELLED",
+            timestamp: new Date().toISOString(),
+          };
+          io.to(INTERVIEW_ROOM(interviewId)).emit("interview:state_change", stateChange);
+        } catch (err) {
+          const code = toWsErrorCode(err);
+          socket.emit("ws:error", wsError(code, `End failed: ${code}`, interviewId));
         }
       })();
     });

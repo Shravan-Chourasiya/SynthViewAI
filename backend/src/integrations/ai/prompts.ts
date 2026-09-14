@@ -12,10 +12,12 @@ import type { QuestionHistoryEntry, InterviewerMode, GraphTurnInput } from "./ai
 // Minimal state shape prompts.ts needs — no LangGraph dependency
 export interface PromptStateContext {
   jobRole: string | null;
+  domain: string | undefined;
+  targetedCompany: string | undefined;
   jobSkills: string[];
   difficulty: "EASY" | "MEDIUM" | "HARD";
   interviewType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
-  interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM";
+  interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR";
   currentInput: GraphTurnInput | null;
 }
 
@@ -34,6 +36,8 @@ export function buildInterviewerPrompt(
   hint: { mode: string; difficulty: string; topicHint?: string } | null = null,
 ): InterviewerPromptResult {
   const role = state.jobRole ?? "a software engineer";
+  const companyContext = state.targetedCompany ? ` Target company: ${state.targetedCompany}.` : "";
+  const domainContext = state.domain ? ` Domain: ${state.domain}.` : "";
   const skills =
     state.jobSkills.length > 0 ? state.jobSkills.join(", ") : "general software engineering";
   // Hint difficulty overrides state difficulty when the adaptive engine has decided
@@ -62,13 +66,14 @@ export function buildInterviewerPrompt(
   const systemPrompt = [
     `You are an AI interviewer conducting a ${style}-style ${type} interview.`,
     `Your sole responsibility in this turn is to generate the next interview question.`,
-    `The candidate is applying for the role of ${role}. Relevant skills: ${skills}. Difficulty: ${difficulty}.`,
+    `The candidate is applying for the role of ${role}.${domainContext}${companyContext} Relevant skills: ${skills}. Difficulty: ${difficulty}.`,
     `Interaction rules:`,
     `  - Generate exactly ONE question that is appropriate for the current difficulty and interview type.`,
     `  - Never repeat a question that has already been asked in this session.`,
     `  - Maintain natural interview flow: do not jump topics abruptly unless instructed to change topic.`,
     `  - Do not evaluate, score, or comment on previous answers — that is handled separately.`,
     `  - Do not ask multiple questions in a single turn.`,
+    ...(type === "MIXED" ? ["  - Alternate question types across the session: behavioral/situational questions and technical/domain questions must both be included. Do not make every question technical."] : []),
     `Respond with a JSON object only — no markdown, no explanation.`,
     `Schema: { "questionTitle": string, "questionDescription": string | null, "questionType": "${type}" }`,
     `questionDescription should be a brief clarifying note (1–2 sentences) or null if the question is self-explanatory.`,

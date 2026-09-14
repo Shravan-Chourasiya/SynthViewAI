@@ -52,8 +52,8 @@ export const InterviewGraphAnnotation = Annotation.Root({
     reducer: last<"BEHAVIORAL" | "TECHNICAL" | "MIXED">,
     default: () => "MIXED" as const,
   }),
-  interviewStyle: Annotation<"MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM">({
-    reducer: last<"MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM">,
+  interviewStyle: Annotation<"MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR">({
+    reducer: last<"MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR">,
     default: () => "CUSTOM" as const,
   }),
   difficulty: Annotation<"EASY" | "MEDIUM" | "HARD">({
@@ -63,6 +63,8 @@ export const InterviewGraphAnnotation = Annotation.Root({
   durationMinutes: Annotation<number>({ reducer: last<number>, default: () => 30 }),
   maxFollowUps: Annotation<number>({ reducer: last<number>, default: () => 3 }),
   jobRole: Annotation<string | null>({ reducer: last<string | null>, default: () => null }),
+  domain: Annotation<string | undefined>({ reducer: last<string | undefined>, default: () => undefined }),
+  targetedCompany: Annotation<string | undefined>({ reducer: last<string | undefined>, default: () => undefined }),
   jobSkills: Annotation<string[]>({ reducer: last<string[]>, default: () => [] }),
   candidateExperience: Annotation<string>({ reducer: last<string>, default: () => "unknown" }),
 
@@ -142,6 +144,8 @@ export function sessionInputToGraphState(
     durationMinutes: input.config.durationMinutes,
     maxFollowUps: input.config.maxFollowUps,
     jobRole: input.config.jobRole ?? null,
+    domain: input.config.domain,
+    targetedCompany: input.config.targetedCompany,
     jobSkills: input.config.jobSkills ?? [],
     candidateExperience: input.candidateExperience,
     questionHistory: [],
@@ -160,13 +164,20 @@ export function sessionInputToGraphState(
 export function nextQuestionInputToGraphState(
   input: AiNextQuestionInput,
 ): Partial<InterviewGraphState> {
+  const adaptationHint = input.adaptationHint
+    ? {
+        mode: input.adaptationHint.mode,
+        difficulty: input.adaptationHint.difficulty,
+        ...(input.adaptationHint.topicHint ? { topicHint: input.adaptationHint.topicHint } : {}),
+      }
+    : undefined;
   return {
     interviewId: input.interviewId,
     threadId: input.threadId,
     currentInput: {
       operation: "generate",
       sequenceNumber: input.sequenceNumber,
-      ...(input.adaptationHint ? { adaptationHint: input.adaptationHint } : {}),
+      ...(adaptationHint ? { adaptationHint } : {}),
     },
   };
 }
