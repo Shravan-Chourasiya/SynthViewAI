@@ -1,0 +1,1 @@
+ALTER TYPE "interview_company_style" ADD VALUE 'REGULAR';
