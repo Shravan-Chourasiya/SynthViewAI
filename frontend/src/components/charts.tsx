@@ -91,10 +91,10 @@ export function Bars({
             {d.value}
           </span>
           <div
-            className="w-full max-w-10 rounded-t-md"
+            className="print-chart-bar w-full max-w-10 rounded-t-md"
             style={{
               height: `${(d.value / max) * 78}%`,
-              background: color,
+              backgroundColor: color,
               opacity: 0.55 + 0.45 * (d.value / max),
             }}
           />

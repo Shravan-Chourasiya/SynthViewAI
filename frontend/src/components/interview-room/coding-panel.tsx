@@ -35,7 +35,7 @@ export function CodingPanel({
   const testPassed = result?.passed ?? 0
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col rounded-xl bg-card/30 p-1">
       {/* meta */}
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="default" dot>
@@ -51,7 +51,7 @@ export function CodingPanel({
       </div>
 
       {/* problem */}
-      <h2 className="animate-reveal mt-4 text-pretty text-lg font-medium leading-relaxed sm:text-xl">
+      <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
         {question.text}
       </h2>
 

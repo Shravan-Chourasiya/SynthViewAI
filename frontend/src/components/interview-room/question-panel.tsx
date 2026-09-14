@@ -26,7 +26,7 @@ export function QuestionPanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col rounded-xl bg-card/30 p-1">
       {/* meta */}
       <div className="flex flex-wrap items-center gap-2">
         {question.isFollowUp ? (
@@ -56,7 +56,7 @@ export function QuestionPanel({
       </div>
 
       {/* question */}
-      <h2 className="animate-reveal mt-4 text-pretty text-lg font-medium leading-relaxed sm:text-xl">
+      <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
         {question.text}
       </h2>
 
@@ -73,7 +73,7 @@ export function QuestionPanel({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Be specific — the interviewer adapts to what you say…"
-          className="min-h-36 flex-1 resize-none"
+          className="min-h-44 flex-1 resize-none rounded-xl bg-background/60 p-4 text-sm leading-relaxed"
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">

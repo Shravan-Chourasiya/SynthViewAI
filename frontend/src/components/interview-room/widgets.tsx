@@ -300,10 +300,12 @@ function ControlButton({
 
 export function EndInterviewDialog({
   open,
+  answeredCount,
   onConfirm,
   onClose,
 }: {
   open: boolean
+  answeredCount: number
   onConfirm: () => void
   onClose: () => void
 }) {
@@ -322,8 +324,7 @@ export function EndInterviewDialog({
           </div>
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Your progress is saved and the interview is marked as cancelled. You
-          won't be able to rejoin this session afterwards.
+          You have answered {answeredCount} question{answeredCount === 1 ? '' : 's'}. Are you sure you want to end this interview? The live session cannot be resumed after ending it.
         </p>
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>
@@ -338,3 +339,4 @@ export function EndInterviewDialog({
     </Dialog>
   )
 }
+

@@ -184,7 +184,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
 
       {/* main column */}
       <div className="flex min-h-screen flex-col lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <header className="app-shell-topbar sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <button
               className="rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground lg:hidden"
@@ -206,7 +206,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className="app-shell-main flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
       </div>
     </div>
   )

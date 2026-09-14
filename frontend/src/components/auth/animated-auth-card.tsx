@@ -13,6 +13,8 @@ type AnimatedAuthCardProps = {
     onModeChange: (mode: AuthMode) => void
     loginSlot: ReactNode
     registerSlot: ReactNode
+    /** Hide the desktop footer when the register form supplies its own flow link. */
+    showModeSwitcher?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,6 +230,7 @@ export function AnimatedAuthCard({
     onModeChange,
     loginSlot,
     registerSlot,
+    showModeSwitcher = true,
 }: AnimatedAuthCardProps) {
     const loginActive = mode === 'login'
 
@@ -304,26 +307,13 @@ export function AnimatedAuthCard({
                                     {registerSlot}
                                 </FormPanel>
 
-                                {/* Mode switcher button at bottom */}
-                                <div
-                                    className={cn(
-                                        'absolute left-0 right-0 text-center',
-                                        loginActive ? 'bottom-16' : 'bottom-4',
-                                    )}
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => onModeChange(loginActive ? 'register' : 'login')}
-                                        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                                    >
-                                        {loginActive
-                                            ? "Don't have an account? "
-                                            : 'Already have an account? '}
-                                        <span className="font-medium text-primary">
-                                            {loginActive ? 'Create one' : 'Sign in'}
-                                        </span>
+                                {/* Login needs a mode switcher; register keeps its link in
+                                    the form flow so it cannot overlap the submit button. */}
+                                {showModeSwitcher ? <div className={cn('absolute left-0 right-0 text-center', loginActive ? 'bottom-16' : 'bottom-4')}>
+                                    <button type="button" onClick={() => onModeChange(loginActive ? 'register' : 'login')} className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+                                        {loginActive ? <>Don&apos;t have an account? <span className="font-medium text-primary">Create one</span></> : <>Already have an account? <span className="font-medium text-primary">Sign in</span></>}
                                     </button>
-                                </div>
+                                </div> : null}
                             </div>
                         </div>
                     </div>
