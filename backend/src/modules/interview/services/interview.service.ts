@@ -62,7 +62,7 @@ const RESUMABLE_STATUSES: InterviewStatus[] = ["SCHEDULED"];
 const VALID_TRANSITIONS: Record<InterviewStatus, InterviewStatus[]> = {
   DRAFT: ["READY"],
   READY: ["INPROGRESS", "SCHEDULED", "CANCELLED"],
-  SCHEDULED: ["INPROGRESS", "CANCELLED"],
+  SCHEDULED: ["INPROGRESS", "CANCELLED", "EXPIRED"],
   INPROGRESS: ["SCHEDULED", "COMPLETED", "CANCELLED", "ABANDONED", "TIMED_OUT"],
   COMPLETED: [],
   CANCELLED: [],
@@ -115,8 +115,19 @@ async function transitionInterview(
   const [updated] = await db
     .update(interviewsTable)
     .set({ interviewStatus: to, lastActivityAt: new Date() })
-    .where(eq(interviewsTable.id, interviewId))
+    // The source status is part of the update predicate, not just a
+    // precondition. This prevents concurrent terminal actions from replacing
+    // one another after they have both read INPROGRESS.
+    .where(and(eq(interviewsTable.id, interviewId), eq(interviewsTable.interviewStatus, from)))
     .returning();
+  if (!updated) {
+    throw new AppError(
+      "Interview status changed before this action could complete",
+      StatusCodes.CONFLICT,
+      ErrorCodes.INTERVIEW_INVALID_STATE,
+      { isOperational: true },
+    );
+  }
   return updated;
 }
 
@@ -126,21 +137,27 @@ export async function createInterviewService(
   authreq: AuthenticatedRequest,
   interviewData: {
     jobrole: string;
+    domain?: string;
     experience: string;
     jobSkills?: string[];
     difficulty: "EASY" | "MEDIUM" | "HARD";
-    interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM";
+    isAdaptive: boolean;
+    interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR";
     interviewType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
     duration: number;
     maxFollowUps: number;
     isScheduled: boolean;
     scheduledDate?: Date;
     targetedCompany?: string;
+    targetedCompanyOther?: string;
+    endingCriteria: "QUESTION_COUNT" | "DURATION";
+    questionCount?: number;
   },
 ) {
   const db = getPgDb();
 
-  const title = `${interviewData.jobrole} — ${interviewData.interviewType} Interview`;
+  const targetCompany = interviewData.targetedCompany ?? interviewData.targetedCompanyOther;
+  const title = `${interviewData.jobrole}${targetCompany ? ` at ${targetCompany}` : ""} — ${interviewData.interviewType} Interview`;
   const description = interviewData.targetedCompany
     ? `Targeting ${interviewData.targetedCompany} (${interviewData.experience})`
     : `${interviewData.experience} level`;
@@ -157,8 +174,17 @@ export async function createInterviewService(
       interviewDuration: interviewData.duration,
       interviewMetaData: {
         jobRole: interviewData.jobrole,
+        ...(interviewData.domain ? { domain: interviewData.domain } : {}),
+        experience: interviewData.experience,
+        isAdaptive: interviewData.isAdaptive,
         ...(interviewData.jobSkills?.length ? { jobSkills: interviewData.jobSkills } : {}),
+        ...(interviewData.targetedCompany ? { targetedCompany: interviewData.targetedCompany } : {}),
         maxFollowUps: interviewData.maxFollowUps,
+        ...(interviewData.targetedCompanyOther ? { targetedCompanyOther: interviewData.targetedCompanyOther } : {}),
+        endingCriteria: interviewData.endingCriteria,
+        ...(interviewData.endingCriteria === "QUESTION_COUNT" && interviewData.questionCount
+          ? { questionCount: interviewData.questionCount }
+          : {}),
       },
       // Unscheduled interviews can be started immediately. Scheduled
       // interviews remain drafts until they are explicitly prepared/scheduled.
@@ -277,12 +303,19 @@ export async function startInterviewService(authreq: AuthenticatedRequest, inter
       difficulty: interview.interviewDifficulty,
       durationMinutes: interview.interviewDuration,
       maxFollowUps: meta.maxFollowUps ?? 3,
+      endingCriteria: meta.endingCriteria ?? "DURATION",
+      ...(meta.questionCount ? { questionCount: meta.questionCount } : {}),
       ...(meta.jobRole ? { jobRole: meta.jobRole } : {}),
+      ...(meta.domain ? { domain: meta.domain } : {}),
+      ...(meta.targetedCompany ? { targetedCompany: meta.targetedCompany } : {}),
       ...(meta.jobSkills?.length ? { jobSkills: meta.jobSkills } : {}),
     },
     questionState: {
       currentIndex: 0,
-      totalQuestions: null,
+      // This is a display estimate for duration-based sessions; an explicit
+      // question target remains exact. It prevents the client from treating
+      // one interview round as one total question.
+      totalQuestions: meta.questionCount ?? Math.max(1, Math.ceil(interview.interviewDuration / 5)),
       currentQuestionId: null,
     },
     timerStartedAt: now.toISOString(),
@@ -718,6 +751,9 @@ export async function getInterviewReportService(
   }
 
   const db = getPgDb();
+  const difficultyProgression = interview.interviewMetaData.isAdaptive
+    ? (await readInterviewContext(interviewId))?.performanceState.difficultyHistory ?? []
+    : [];
   const [report] = await db
     .select()
     .from(interviewResultsTable)
@@ -733,19 +769,38 @@ export async function getInterviewReportService(
       .from(interviewResultsTable)
       .where(eq(interviewResultsTable.interviewId, interviewId))
       .limit(1);
-    return generated ?? null;
+    return generated ? { ...generated, difficultyProgression } : null;
   }
 
-  return report;
+  return { ...report, difficultyProgression };
 }
 
 export async function endInterviewService(authreq: AuthenticatedRequest, interviewId: string) {
   const interview = await resolveInterview(authreq, interviewId);
-  const updated = await transitionInterview(interviewId, interview.interviewStatus, "COMPLETED");
-  // Fire-and-forget — report failure must not roll back the completion
-  void generateInterviewReportService(interviewId).catch((err) => {
-    logger.error({ err, interviewId }, "[report] generateInterviewReportService failed after endInterviewService");
-  });
+  if (TERMINAL_STATUSES.includes(interview.interviewStatus)) return interview;
+  const db = getPgDb();
+  const answered = await db
+    .select({ questionState: interviewQuestionsTable.questionState })
+    .from(interviewQuestionsTable)
+    .where(eq(interviewQuestionsTable.interviewId, interviewId));
+  const answeredCount = answered.filter((question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED").length;
+  const nextStatus: InterviewStatus = answeredCount >= 3 ? "COMPLETED" : "CANCELLED";
+  let updated;
+  try {
+    updated = await transitionInterview(interviewId, interview.interviewStatus, nextStatus);
+  } catch (error) {
+    // A concurrent end/cancel may have won the compare-and-set race. Preserve
+    // that terminal result and never initiate a second report generation.
+    const latest = await fetchInterviewById(interviewId);
+    if (latest && TERMINAL_STATUSES.includes(latest.interviewStatus)) return latest;
+    throw error;
+  }
+  if (nextStatus === "COMPLETED") {
+    // Fire-and-forget — report failure must not roll back the completion.
+    void generateInterviewReportService(interviewId).catch((err) => {
+      logger.error({ err, interviewId }, "[report] generateInterviewReportService failed after endInterviewService");
+    });
+  }
   return updated;
 }
 
@@ -755,7 +810,15 @@ export async function endInterviewService(authreq: AuthenticatedRequest, intervi
 export async function endInterviewSystemService(interviewId: string) {
   const interview = await fetchInterviewById(interviewId);
   if (!interview) return null;
-  const updated = await transitionInterview(interviewId, interview.interviewStatus, "COMPLETED");
+  if (TERMINAL_STATUSES.includes(interview.interviewStatus)) return interview;
+  let updated;
+  try {
+    updated = await transitionInterview(interviewId, interview.interviewStatus, "COMPLETED");
+  } catch (error) {
+    const latest = await fetchInterviewById(interviewId);
+    if (latest && TERMINAL_STATUSES.includes(latest.interviewStatus)) return latest;
+    throw error;
+  }
   void generateInterviewReportService(interviewId).catch((err) => {
     logger.error({ err, interviewId }, "[report] generateInterviewReportService failed after endInterviewSystemService");
   });
@@ -806,6 +869,27 @@ export async function detectAndAbandonStaleInterviews() {
   return { abandoned: stale.length };
 }
 
+// Scheduled interviews remain startable for six hours after their appointment.
+// This uses the same state-machine transition as every other terminal change.
+export async function detectAndExpireScheduledInterviews() {
+  const db = getPgDb();
+  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const stale = await db
+    .select({ id: interviewsTable.id })
+    .from(interviewsTable)
+    .where(
+      and(
+        eq(interviewsTable.interviewStatus, "SCHEDULED"),
+        eq(interviewsTable.isInterviewScheduled, true),
+        lt(interviewsTable.interviewScheduledDate, cutoff),
+      ),
+    );
+  for (const interview of stale) {
+    await transitionInterview(interview.id, "SCHEDULED", "EXPIRED");
+  }
+  return { expired: stale.length };
+}
+
 export async function getInterviewHistoryService(
   authreq: AuthenticatedRequest,
   interviewId: string,
@@ -828,6 +912,7 @@ export async function getInterviewHistoryService(
       questionId: interviewQuestionsTable.id,
       sequenceNumber: interviewQuestionsTable.sequenceNumber,
       questionTitle: interviewQuestionsTable.questionTitle,
+      questionCreatedAt: interviewQuestionsTable.createdAt,
       questionType: interviewQuestionsTable.questionType,
       questionState: interviewQuestionsTable.questionState,
       timedOutAt: interviewQuestionsTable.timedOutAt,
@@ -838,6 +923,7 @@ export async function getInterviewHistoryService(
       answerState: interviewAnswersTable.answerState,
       evaluationData: interviewAnswersTable.evaluationData,
       answeredAt: interviewAnswersTable.answeredAt,
+      timeTakenSeconds: interviewAnswersTable.timeTakenSeconds,
     })
     .from(interviewQuestionsTable)
     .leftJoin(
@@ -852,6 +938,21 @@ export async function getInterviewHistoryService(
     interviewStatus: interview.interviewStatus,
     questions,
   };
+}
+
+/**
+ * Live clients use these persisted question ids only for truthful end-dialog
+ * copy. Terminal-state decisions remain exclusively in endInterviewService.
+ */
+export async function getAnsweredQuestionIdsService(interviewId: string): Promise<string[]> {
+  const db = getPgDb();
+  const questions = await db
+    .select({ id: interviewQuestionsTable.id, questionState: interviewQuestionsTable.questionState })
+    .from(interviewQuestionsTable)
+    .where(eq(interviewQuestionsTable.interviewId, interviewId));
+  return questions
+    .filter((question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED")
+    .map((question) => question.id);
 }
 
 export async function submitAnswerService(
@@ -908,6 +1009,15 @@ export async function submitAnswerService(
     return skipQuestionInternal(db, interviewId, payload.questionId, now, "SKIPPED");
   }
 
+  const [deliveredQuestion] = await db
+    .select({ createdAt: interviewQuestionsTable.createdAt })
+    .from(interviewQuestionsTable)
+    .where(eq(interviewQuestionsTable.id, payload.questionId))
+    .limit(1);
+  const timeTakenSeconds = deliveredQuestion
+    ? Math.max(0, Math.round((now.getTime() - deliveredQuestion.createdAt.getTime()) / 1000))
+    : null;
+
   // Bump lastActivityAt on every real answer submission
   await db
     .update(interviewsTable)
@@ -927,6 +1037,7 @@ export async function submitAnswerService(
       answerData: payload.answerData,
       answerType: payload.answerType,
       answeredAt: now,
+      timeTakenSeconds,
     })
     .returning();
 
@@ -990,22 +1101,25 @@ export async function submitAnswerService(
         .set({ questionState: "EVALUATED" })
         .where(eq(interviewQuestionsTable.id, payload.questionId));
 
-      io?.to(`interview:${interviewId}`).emit("evaluation:feedback", {
-        eventVersion: EVENT_VERSION,
-        event: "evaluation:feedback",
-        interviewId,
-        questionId: payload.questionId,
-        answerId: answer!.id,
-        score: evalResult.score,
-        correctness: evalResult.correctness,
-        relevance: evalResult.relevance,
-        clarity: evalResult.clarity,
-        technicalDepth: evalResult.technicalDepth,
-        feedback: evalResult.feedback,
-        strengths: evalResult.strengths,
-        weaknesses: evalResult.weaknesses,
-        timestamp: new Date().toISOString(),
-      });
+      const emitEvaluationFeedback = (shouldAdvance: boolean) => {
+        io?.to(`interview:${interviewId}`).emit("evaluation:feedback", {
+          eventVersion: EVENT_VERSION,
+          event: "evaluation:feedback",
+          interviewId,
+          questionId: payload.questionId,
+          answerId: answer!.id,
+          shouldAdvance,
+          score: evalResult.score,
+          correctness: evalResult.correctness,
+          relevance: evalResult.relevance,
+          clarity: evalResult.clarity,
+          technicalDepth: evalResult.technicalDepth,
+          feedback: evalResult.feedback,
+          strengths: evalResult.strengths,
+          weaknesses: evalResult.weaknesses,
+          timestamp: new Date().toISOString(),
+        });
+      };
 
       // ── Step 3: Update performance state ─────────────────────────────────
       const historyEntry = {
@@ -1058,6 +1172,7 @@ export async function submitAnswerService(
 
       // ── Step 6: Handle terminate ──────────────────────────────────────────
       if (decision.action === "terminate") {
+        emitEvaluationFeedback(false);
         logger.info(
           { interviewId, reason: decision.reason },
           "[adaptive] terminating interview early",
@@ -1065,6 +1180,10 @@ export async function submitAnswerService(
         await endInterviewSystemService(interviewId);
         return; // no lookahead needed
       }
+
+      // This event is the live client's canonical cue to advance. It is sent
+      // only after adaptive termination has been ruled out.
+      emitEvaluationFeedback(true);
 
       // ── Step 7: Discard stale lookahead on topic change ───────────────────
       if (decision.action === "new_topic") {
@@ -1211,6 +1330,29 @@ export async function requestNextQuestionService(
     );
   }
 
+  // Reaching a user-selected question target is a natural completion, not a
+  // manual early exit. The current index is zero-based, so index + 1 is the
+  // just-completed question's sequence number.
+  if (
+    context.config.endingCriteria === "QUESTION_COUNT" &&
+    context.config.questionCount !== undefined &&
+    // A restored or retried context may already be beyond the target; it is
+    // still a natural completion and must never generate another question.
+    context.questionState.currentIndex + 1 >= context.config.questionCount
+  ) {
+    const completed = await endInterviewSystemService(interviewId);
+    if (completed) {
+      io.to(`interview:${interviewId}`).emit("interview:state_change", {
+        eventVersion: EVENT_VERSION,
+        event: "interview:state_change",
+        interviewId,
+        status: completed.interviewStatus,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
   // Advance index and clear currentQuestionId so generateAndDeliver creates a new one
   const advancedContext: InterviewContext = {
     ...context,
@@ -1253,6 +1395,7 @@ export async function getInterviewMetricsService(
       interviewDuration: interviewsTable.interviewDuration,
       interviewQuestionsGeneratedCount: interviewsTable.interviewQuestionsGeneratedCount,
       interviewQuestionsAnsweredCount: interviewsTable.interviewQuestionsAnsweredCount,
+      interviewStartedAt: interviewsTable.interviewStartedAt,
       createdAt: interviewsTable.createdAt,
       updatedAt: interviewsTable.updatedAt,
     })
@@ -1300,6 +1443,9 @@ export async function getInterviewMetricsService(
     questionsAnswered: interview.interviewQuestionsAnsweredCount,
     createdAt: interview.createdAt,
     updatedAt: interview.updatedAt,
+    activeSeconds: interview.interviewStartedAt
+      ? Math.max(0, Math.round((interview.updatedAt.getTime() - interview.interviewStartedAt.getTime()) / 1000))
+      : 0,
     report: report ?? null,
   };
 }

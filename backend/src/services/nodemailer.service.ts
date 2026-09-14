@@ -25,7 +25,7 @@ export async function verifyMailTransporter(): Promise<boolean> {
     logger.info("Mail transporter verified successfully.");
     return true;
   } catch (error) {
-    logger.error({ error }, "Mail transporter verification failed.");
+    logger.error({ err: error }, "Mail transporter verification failed.");
     return false;
   }
 }

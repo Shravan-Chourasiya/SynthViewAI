@@ -11,11 +11,15 @@ export type { CandidatePerformanceState, AdaptationDecision, AdaptationHint };
 
 export interface InterviewConfig {
   interviewType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
-  interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM";
+  interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR";
   difficulty: "EASY" | "MEDIUM" | "HARD";
   durationMinutes: number;
   maxFollowUps: number;
+  endingCriteria?: "QUESTION_COUNT" | "DURATION";
+  questionCount?: number;
   jobRole?: string;
+  domain?: string;
+  targetedCompany?: string;
   jobSkills?: string[];
 }
 

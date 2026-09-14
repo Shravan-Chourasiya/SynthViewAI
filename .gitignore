@@ -24,9 +24,13 @@ backend/docs/temp/postgres-init.md
 *.json
 !backend/docs/postman/
 !backend/docs/postman/*.json
+!backend/src/db/migrations/
+!backend/src/db/migrations/**/
+!backend/src/db/migrations/**/*.sql
+!backend/src/db/migrations/**/*.json
 backend/docs/review.txt
 backend/Untitled-1.txt
-backend/TODOS.txt
+TODOS.txt
 backend/socketTodos.txt
 .amazonq/chats/q-dev-chat-2026-09-06.md
 .amazonq/rules/memory-bank/guidelines.md

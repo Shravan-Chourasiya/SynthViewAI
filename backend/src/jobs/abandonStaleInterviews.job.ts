@@ -2,6 +2,7 @@ import {
   detectAndAbandonStaleInterviews,
   detectAndTimeoutStaleQuestions,
   detectAndTimeoutOverdueInterviews,
+  detectAndExpireScheduledInterviews,
 } from "../modules/interview/services/interview.service.js";
 import { logger } from "../utils/logger.js";
 
@@ -30,6 +31,11 @@ export function startAbandonStaleInterviewsJob(): NodeJS.Timeout {
       const { abandoned } = await detectAndAbandonStaleInterviews();
       if (abandoned > 0) {
         logger.info(`[job] interviewMaintenance: abandoned ${abandoned} stale interview(s)`);
+      }
+
+      const { expired } = await detectAndExpireScheduledInterviews();
+      if (expired > 0) {
+        logger.info(`[job] interviewMaintenance: expired ${expired} scheduled interview(s)`);
       }
     } catch (err) {
       logger.error({ err }, "[job] interviewMaintenance: failed");

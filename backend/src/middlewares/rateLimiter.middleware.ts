@@ -14,6 +14,9 @@ export function createRateLimiter(key: RateLimitKey) {
     limit: config.limit,
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    // Authentication must remain available if the distributed counter is
+    // temporarily reconnecting. Redis still enforces limits whenever healthy.
+    passOnStoreError: true,
     store: new RedisStore({
       sendCommand: ((...args: [string, ...string[]]) => redisClient.call(...args)) as (
         ...args: string[]

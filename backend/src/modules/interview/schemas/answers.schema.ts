@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, pgEnum, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, integer, pgEnum, jsonb, timestamp } from "drizzle-orm/pg-core";
 import { dbNow } from "../../../utils/db.util.js";
 import { interviewsTable } from "./interview.schema.js";
 import { interviewQuestionsTable } from "./question.schema.js";
@@ -28,6 +28,7 @@ export const interviewAnswersTable = pgTable("interview_answers", {
     weaknesses: string[];
   }>(),
   answeredAt: timestamp("answered_at", { withTimezone: true }),
+  timeTakenSeconds: integer("time_taken_seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

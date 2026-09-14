@@ -3,7 +3,9 @@ import type { UserType } from "../../types/schemas/userschema.type.js";
 
 export const userRegex = {
   emailRegex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  passwordRegex: /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/,
+  // Symbols are valid password characters; only whitespace is rejected.
+  // This matches the registration UI: 8+ chars, a letter, and a number.
+  passwordRegex: /^(?=.*[A-Za-z])(?=.*\d)\S{8,}$/,
   usernameRegex: /^[a-zA-Z0-9_]{3,30}$/,
 };
 

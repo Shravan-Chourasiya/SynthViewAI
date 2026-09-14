@@ -17,7 +17,7 @@ export const interviewSchema = z.object({
       .max(10, { message: "Maximum of 10 technical job skills allowed" })
       .optional(),
     interviewCompanyStyle: z
-      .enum(["MANGOS", "FAANG", "MAANG", "STARTUP", "CUSTOM"], {
+      .enum(["MANGOS", "FAANG", "MAANG", "STARTUP", "CUSTOM", "REGULAR"], {
         message: "Invalid interview style",
       })
       .optional(),

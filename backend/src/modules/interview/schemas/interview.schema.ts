@@ -28,6 +28,9 @@ export const interviewCompanyStyleEnum = pgEnum("interview_company_style", [
   "MAANG",
   "STARTUP",
   "CUSTOM",
+  // CUSTOM remains available for explicitly bespoke/internal styles; REGULAR is
+  // the candidate-facing standard interview option with no culture slant.
+  "REGULAR",
 ]);
 export const interviewTypeEnum = pgEnum("interview_type", ["BEHAVIORAL", "TECHNICAL", "MIXED"]);
 export const interviewVerdictEnum = pgEnum("interview_verdict", ["PASS", "FAIL", "INCONCLUSIVE"]);
@@ -49,12 +52,19 @@ export const interviewsTable = pgTable("interviews", {
   interviewDifficulty: interviewDifficultyEnum("interview_difficulty").notNull().default("MEDIUM"),
   interviewDuration: integer("interview_duration").notNull(),
 
-  // Dynamic metadata (jobRole, jobSkills, maxFollowUps — fields that vary per interview)
+  // Dynamic metadata (jobRole, skills and end conditions — fields that vary per interview)
   interviewMetaData: jsonb("interview_meta_data")
     .$type<{
       jobRole?: string;
+      domain?: string;
+      experience?: string;
       jobSkills?: string[];
+      targetedCompany?: string;
       maxFollowUps?: number;
+      targetedCompanyOther?: string;
+      endingCriteria?: "QUESTION_COUNT" | "DURATION";
+      questionCount?: number;
+      isAdaptive?: boolean;
     }>()
     .notNull(),
 

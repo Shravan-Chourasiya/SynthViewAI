@@ -31,7 +31,10 @@ export const getEmailTemplate = (otp: string, emailto: string, subject: string):
 };
 
 export const handlerNodeMailerError = (error: unknown): never => {
-  logger.error({ error }, "Nodemailer error occurred");
+  // Pino serializes Error instances under the conventional `err` key. This
+  // preserves the provider error/message for diagnostics without exposing it
+  // in the HTTP response.
+  logger.error({ err: error }, "Nodemailer error occurred");
   throw new AppError(
     "Failed to send email. Please try again later.",
     StatusCodes.INTERNAL_SERVER_ERROR,
