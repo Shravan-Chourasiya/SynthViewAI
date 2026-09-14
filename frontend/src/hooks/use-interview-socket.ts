@@ -10,6 +10,7 @@ import { EVENT_VERSION, SOCKET_EVENTS } from "@/lib/constants/socket-events";
 import type {
   AiStatusPayload,
   EvaluationFeedbackPayload,
+  AnswerAcceptedPayload,
   JoinedPayload,
   LeftPayload,
   QuestionDeliveredPayload,
@@ -30,6 +31,7 @@ type SocketHookResult = {
   submitCode: (questionId: string, language: string, code: string) => void;
   requestNextQuestion: () => void;
   cancelInterview: () => void;
+  endInterview: () => void;
 };
 
 const WS_ERROR_MESSAGES: Record<WsErrorPayload["code"], string> = {
@@ -95,10 +97,23 @@ export function useInterviewSocket(
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const intentionalCloseRef = useRef(false);
   const reconnectingAuthRef = useRef(false);
+  const advancedEvaluationRef = useRef(new Set<string>());
   const store = useLiveInterviewStore;
   const connectionState = useLiveInterviewStore(
     (state) => state.connectionState,
   );
+
+  // Keep one advancement helper for every path, including server evaluation
+  // feedback. This makes the canonical next-question transition easy to audit
+  // and keeps the websocket payload consistent.
+  const requestNextQuestion = useCallback(() => {
+    if (!interviewId) return;
+    socketRef.current?.emit(SOCKET_EVENTS.client.nextQuestion, {
+      interviewId,
+      eventVersion: EVENT_VERSION,
+      event: SOCKET_EVENTS.client.nextQuestion,
+    });
+  }, [interviewId]);
 
   const cleanup = useCallback(() => {
     const socket = socketRef.current;
@@ -198,6 +213,9 @@ export function useInterviewSocket(
       timerRef.current = null;
       store.getState().reset();
     });
+    socket.on(SOCKET_EVENTS.server.answerAccepted, (payload: AnswerAcceptedPayload) =>
+      store.getState().markAnswered(payload.questionId),
+    );
     socket.on(SOCKET_EVENTS.server.stateChange, (payload: StateChangePayload) =>
       store.getState().applyStateChange(payload.status),
     );
@@ -218,8 +236,16 @@ export function useInterviewSocket(
     socket.on(
       SOCKET_EVENTS.server.evaluationFeedback,
       (payload: EvaluationFeedbackPayload) => {
+        const duplicate = advancedEvaluationRef.current.has(payload.questionId);
+        if (duplicate) return;
+        advancedEvaluationRef.current.add(payload.questionId);
         store.getState().applyEvaluation(evaluationFromPayload(payload));
         store.getState().setAiStatus("idle");
+        // Evaluation feedback is the canonical advancement signal. Keying by
+        // question id makes duplicate websocket deliveries harmless.
+        if (payload.shouldAdvance !== false) {
+          requestNextQuestion();
+        }
       },
     );
     socket.on(
@@ -260,7 +286,7 @@ export function useInterviewSocket(
       window.removeEventListener("beforeunload", onBeforeUnload);
       cleanup();
     };
-  }, [cleanup, interviewId, store]);
+  }, [cleanup, interviewId, requestNextQuestion, store]);
 
   const emit = useCallback(
     (event: string, payload: Record<string, unknown>) => {
@@ -306,12 +332,12 @@ export function useInterviewSocket(
     [emit, interviewId],
   );
 
-  const requestNextQuestion = useCallback(() => {
-    if (interviewId) emit(SOCKET_EVENTS.client.nextQuestion, { interviewId });
-  }, [emit, interviewId]);
-
   const cancelInterview = useCallback(() => {
     if (interviewId) emit(SOCKET_EVENTS.client.cancel, { interviewId });
+  }, [emit, interviewId]);
+
+  const endInterview = useCallback(() => {
+    if (interviewId) emit(SOCKET_EVENTS.client.end, { interviewId });
   }, [emit, interviewId]);
 
   return {
@@ -320,5 +346,6 @@ export function useInterviewSocket(
     submitCode,
     requestNextQuestion,
     cancelInterview,
+    endInterview,
   };
 }
