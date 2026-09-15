@@ -29,6 +29,7 @@ function normalizeDifficulty(value: string | undefined): Difficulty {
 function normalizeType(value: string | undefined): InterviewType {
   if (value?.toLowerCase() === "behavioral") return "Behavioral";
   if (value?.toLowerCase() === "technical") return "Technical";
+  // Reserved for legacy rows only: the current backend enum has no CODING value.
   if (value?.toLowerCase() === "coding") return "Coding";
   return "Mixed";
 }

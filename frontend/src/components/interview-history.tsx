@@ -20,7 +20,7 @@ const entries: Entry[] = [
     status: 'Completed',
   },
   {
-    type: 'Coding Interview',
+    type: 'Mixed Interview',
     date: 'Today',
     score: null,
     status: 'In Progress',

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type MouseEvent } from 'react'
-import { Activity, Code2, MessageSquare, Sparkles } from 'lucide-react'
+import { Activity, Gauge, MessageSquare, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -120,9 +120,9 @@ function Interactive3DScene({ mode }: { mode: AuthMode }) {
                     }}
                 >
                     <div className="flex h-full flex-col items-center justify-center p-6 text-center text-primary-foreground">
-                        <Code2 className="mb-3 size-10 opacity-80" strokeWidth={1.5} />
-                        <p className="text-sm font-medium opacity-90">Adaptive Coding Rounds</p>
-                        <p className="mt-1 text-xs opacity-60">Sandboxed · Parallel · Real-time</p>
+                        <Gauge className="mb-3 size-10 opacity-80" strokeWidth={1.5} />
+                        <p className="text-sm font-medium opacity-90">Adaptive Rounds</p>
+                        <p className="mt-1 text-xs opacity-60">Behavioral · Technical · Real-time</p>
                     </div>
                 </div>
 

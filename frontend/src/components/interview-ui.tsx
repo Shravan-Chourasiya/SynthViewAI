@@ -17,6 +17,7 @@ export function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
 const TYPE_VARIANT: Record<InterviewType, BadgeProps['variant']> = {
   Behavioral: 'good',
   Technical: 'default',
+  // Reserved: no picker can select "Coding" and the backend never returns it.
   Coding: 'strong',
   Mixed: 'vague',
 }

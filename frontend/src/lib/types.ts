@@ -1,5 +1,7 @@
 // Domain types for SynthView AI. These normalize backend responses for the UI.
 
+/** "Coding" is reserved: the backend interview-type enum is BEHAVIORAL | TECHNICAL | MIXED,
+ * so no picker offers it and the create service maps it to MIXED. */
 export type InterviewType = "Behavioral" | "Technical" | "Coding" | "Mixed";
 export type Difficulty = "Easy" | "Medium" | "Hard" | "Adaptive";
 export type ExperienceLevel = "Entry" | "Junior" | "Mid-level" | "Senior";
@@ -58,6 +60,8 @@ export interface Interview extends InterviewConfig {
   currentQuestion: number;
 }
 
+/** "code" is reserved for the codebox integration, which is not built. The backend only
+ * emits text questions, so the live room renders every question as text by default. */
 export type QuestionKind = "text" | "code";
 
 export interface Question {
@@ -68,16 +72,10 @@ export interface Question {
   topic: string;
   difficulty: Exclude<Difficulty, "Adaptive">;
   text: string;
+  /** Reserved for the code editor's seed content. Code execution (codebox) is not
+   * built, so nothing renders this field and the live room shows text questions only. */
   starter?: string;
   isFollowUp?: boolean;
-}
-
-export interface CodeResult {
-  passed: number;
-  total: number;
-  runtime: string;
-  memory: string;
-  stdout: string;
 }
 
 export interface Evaluation {

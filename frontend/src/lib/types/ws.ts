@@ -36,6 +36,8 @@ export interface AnswerSubmitPayload extends WsBase {
   answerType: "TEXT" | "AUDIO" | "VIDEO";
 }
 
+// Protocol-complete for the backend contract, but not emitted by this UI: the server
+// folds code:submit into a TEXT answer and code execution (codebox) is out of scope.
 export interface CodeSubmitPayload extends WsBase {
   event: "code:submit";
   interviewId: string;

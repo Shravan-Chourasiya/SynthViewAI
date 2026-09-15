@@ -278,7 +278,6 @@ export const api = {
       }),
       timePerQuestion: questions.filter((question) => question.answeredAt).map((question) => question.timeTakenSeconds ?? (question.questionCreatedAt ? Math.max(0, Math.round((new Date(question.answeredAt!).getTime() - new Date(question.questionCreatedAt).getTime()) / 1000)) : 0)),
       activeSeconds: data.activeSeconds ?? 0,
-      coding: { passed: 0, total: 0, attempts: 0, runtime: "n/a", memory: "n/a" },
     };
   },
 

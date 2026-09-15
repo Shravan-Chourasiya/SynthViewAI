@@ -20,13 +20,6 @@ interface Metrics {
   topics: { label: string; value: number }[]
   timePerQuestion: number[]
   activeSeconds: number
-  coding: {
-    passed: number
-    total: number
-    attempts: number
-    runtime: string
-    memory: string
-  }
 }
 
 export function InterviewMetricsPage() {
