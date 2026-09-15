@@ -28,7 +28,6 @@ type SocketHookResult = {
     answerData: string,
     answerType?: "TEXT" | "AUDIO" | "VIDEO",
   ) => void;
-  submitCode: (questionId: string, language: string, code: string) => void;
   requestNextQuestion: () => void;
   cancelInterview: () => void;
   endInterview: () => void;
@@ -318,19 +317,9 @@ export function useInterviewSocket(
     [emit, interviewId, store],
   );
 
-  const submitCode = useCallback(
-    (questionId: string, language: string, code: string) => {
-      if (!interviewId) return;
-      store.getState().setAiStatus("evaluating");
-      emit(SOCKET_EVENTS.client.codeSubmit, {
-        interviewId,
-        questionId,
-        language,
-        code,
-      });
-    },
-    [emit, interviewId],
-  );
+  // code:submit is deliberately not exposed here: the backend folds coding
+  // submissions into TEXT answers (codebox is out of scope) and no UI offers a
+  // coding round. Re-add this only when code execution actually ships.
 
   const cancelInterview = useCallback(() => {
     if (interviewId) emit(SOCKET_EVENTS.client.cancel, { interviewId });
@@ -343,7 +332,6 @@ export function useInterviewSocket(
   return {
     connectionState,
     submitAnswer,
-    submitCode,
     requestNextQuestion,
     cancelInterview,
     endInterview,

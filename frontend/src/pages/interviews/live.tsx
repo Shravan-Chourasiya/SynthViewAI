@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Activity, Loader2 } from 'lucide-react'
-import { CodingPanel } from '@/components/interview-room/coding-panel'
 import { QuestionPanel } from '@/components/interview-room/question-panel'
 import {
   AiStatusBar,
@@ -16,9 +15,8 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { useInterviewSocket } from '@/hooks/use-interview-socket'
 import { useLiveInterviewStore } from '@/lib/stores/live-interview.store'
-import type { CodeResult, Interview } from '@/lib/types'
+import type { Interview } from '@/lib/types'
 import type { AIState, ConnectionState } from '@/components/interview-room/widgets'
-import type { CodeRunState } from '@/components/interview-room/coding-panel'
 import { cn } from '@/lib/utils'
 
 export function LiveRoomPage() {
@@ -41,16 +39,13 @@ export function LiveRoomPage() {
   const [ended, setEnded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [runState, setRunState] = useState<CodeRunState>('idle')
-  const [result] = useState<CodeResult | null>(null)
-
   const [cameraOn, setCameraOn] = useState(true)
   const [micOn, setMicOn] = useState(true)
   const [sharing, setSharing] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const [endOpen, setEndOpen] = useState(false)
-  const { submitAnswer, submitCode, endInterview } = useInterviewSocket(interview?.id)
+  const { submitAnswer, endInterview } = useInterviewSocket(interview?.id)
 
   const conn = connectionState as ConnectionState
   const ai = aiStatus === 'thinking' ? 'preparing' : aiStatus === 'generating' ? 'adapting' : aiStatus === 'evaluating' ? 'evaluating' : aiStatus === 'idle' ? 'idle' : 'ready' as AIState
@@ -221,32 +216,17 @@ export function LiveRoomPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:p-6">
-            {question.kind === 'code' ? (
-              <CodingPanel
-                key={question.id}
-                question={question}
-                index={qIndex}
-                total={qTotal}
-                language="JavaScript"
-                runState={runState}
-                aiState={ai}
-                result={result}
-                busy={busy}
-                onSubmit={(code) => {
-                  setRunState('running')
-                  submitCode(question.id, 'JavaScript', code)
-                }}
-              />
-            ) : (
-              <QuestionPanel
-                key={question.id}
-                question={question}
-                index={qIndex}
-                total={qTotal}
-                busy={busy}
-                onSubmit={(text) => submitAnswer(question.id, text)}
-              />
-            )}
+            {/* No code execution environment exists, so a coding question type is not
+                reachable. If the backend ever delivers one, it is answered as text
+                instead of rendering a run-code panel. */}
+            <QuestionPanel
+              key={question.id}
+              question={question}
+              index={qIndex}
+              total={qTotal}
+              busy={busy}
+              onSubmit={(text) => submitAnswer(question.id, text)}
+            />
           </div>
         </div>
 
@@ -284,8 +264,8 @@ export function LiveRoomPage() {
             </p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               The interviewer adapts after every answer — strong responses raise
-              difficulty, vague ones trigger follow-ups. During coding rounds,
-              the next question is prepared while your code executes.
+              difficulty, and vague ones trigger follow-ups. Your next question is
+              prepared while the current answer is evaluated.
             </p>
           </div>
         </aside>
