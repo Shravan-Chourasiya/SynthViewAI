@@ -102,7 +102,7 @@ export function InterviewsPage() {
           </div>
           <FilterSelect label="Filter by type" value={type} onChange={setType}>
             <option value="">All types</option>
-            {['Behavioral', 'Technical', 'Coding', 'Mixed'].map((t) => (
+            {['Behavioral', 'Technical', 'Mixed'].map((t) => (
               <option key={t} value={t}>{t}</option>
             ))}
           </FilterSelect>

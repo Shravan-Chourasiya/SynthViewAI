@@ -43,8 +43,9 @@ const initialState: WizardState = {
 const TYPE_OPTIONS: { value: InterviewType; title: string; description: string }[] = [
   { value: 'Behavioral', title: 'Behavioral', description: 'Communication, STAR stories, situational judgment.' },
   { value: 'Technical', title: 'Technical', description: 'Concepts, system design, domain knowledge.' },
-  { value: 'Coding', title: 'Coding', description: 'Hands-on problems run in the Codebox sandbox.' },
-  { value: 'Mixed', title: 'Mixed', description: 'A realistic blend of all round types.' },
+  // No 'Coding' option: the backend interview-type enum is BEHAVIORAL | TECHNICAL | MIXED,
+  // and there is no code execution environment, so a coding round cannot be created.
+  { value: 'Mixed', title: 'Mixed', description: 'A realistic blend of both round types.' },
 ]
 const STYLE_OPTIONS: { value: InterviewStyle; title: string; description: string }[] = [
   { value: 'FAANG', title: 'FAANG', description: 'Big-tech interview conventions.' },
@@ -120,7 +121,7 @@ export function NewInterviewPage() {
     <div className="rounded-2xl border border-border bg-card p-6 sm:p-7">
       {errors.length > 0 && <div className="mb-4"><Alert variant="destructive" icon={<AlertTriangle className="size-4" />}><ul className="list-inside list-disc">{errors.map((error) => <li key={error}>{error}</li>)}</ul></Alert></div>}
       {step === 0 && <RoleContext state={state} patch={patch} />}
-      {step === 1 && <OptionCards options={TYPE_OPTIONS} selected={state.type} onSelect={(type) => patch({ type })} />}
+      {step === 1 && <div className="flex flex-col gap-4"><OptionCards options={TYPE_OPTIONS} selected={state.type} onSelect={(type) => patch({ type })} /><div className="rounded-xl border border-dashed border-border bg-card/50 p-4"><p className="text-xs leading-relaxed text-muted-foreground">Coding rounds are not available yet — this build has no code execution environment, so every session is a writing-based behavioral, technical or mixed interview.</p></div></div>}
       {step === 2 && <OptionCards options={STYLE_OPTIONS} selected={state.interviewStyle} onSelect={(interviewStyle) => patch({ interviewStyle })} />}
       {step === 3 && <div className="flex flex-col gap-5"><div className="flex flex-col gap-1.5"><Label htmlFor="experience">Experience level</Label><SelectShell><select id="experience" className={selectCls} value={state.experienceLevel} onChange={(event) => patch({ experienceLevel: event.target.value as ExperienceLevel })}>{(['Entry', 'Junior', 'Mid-level', 'Senior'] as const).map((level) => <option key={level} value={level}>{level}</option>)}</select></SelectShell></div><OptionCards options={DIFFICULTY_OPTIONS} selected={state.difficulty} onSelect={(difficulty) => patch({ difficulty })} /></div>}
       {step === 4 && <Topics state={state} topicInput={topicInput} topicsFull={topicsFull} setTopicInput={setTopicInput} addTopic={addTopic} removeTopic={removeTopic} />}

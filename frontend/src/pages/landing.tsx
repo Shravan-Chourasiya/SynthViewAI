@@ -4,7 +4,6 @@ import { Hero } from '@/components/hero'
 import { Differentiator } from '@/components/differentiator'
 import { InterviewTypes } from '@/components/interview-types'
 import { LiveExperience } from '@/components/live-experience'
-import { CodingExperience } from '@/components/coding-experience'
 import { EvaluationAnalytics } from '@/components/evaluation-analytics'
 import { AdaptiveExample } from '@/components/adaptive-example'
 import { FinalReport } from '@/components/final-report'
@@ -31,7 +30,6 @@ export function LandingPage() {
         <Differentiator />
         <InterviewTypes />
         <LiveExperience />
-        <CodingExperience />
         <EvaluationAnalytics />
         <AdaptiveExample />
         <FinalReport />

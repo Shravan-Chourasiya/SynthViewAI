@@ -133,7 +133,7 @@ export function SettingsPage() {
               <Label htmlFor="type">Default interview type</Label>
               <SelectShell>
                 <select id="type" className={selectCls} value={defaultType} onChange={(e) => setDefaultType(e.target.value)}>
-                  {['Behavioral', 'Technical', 'Coding', 'Mixed'].map((t) => (
+                  {['Behavioral', 'Technical', 'Mixed'].map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
