@@ -12,7 +12,7 @@ export function LoginPage() {
         <AnimatedAuthCard
             mode="login"
             onModeChange={(mode) => navigate(mode === 'login' ? '/login' : '/register')}
-            loginSlot={<LoginForm onSuccess={() => navigate(from, { replace: true })} />}
+            loginSlot={<LoginForm onSuccess={() => navigate(from, { replace: true })} showModeLink={false} />}
             registerSlot={<RegisterForm onSuccess={(email) => navigate('/verify-email', { state: { email } })} showModeLink={false} />}
         />
     )

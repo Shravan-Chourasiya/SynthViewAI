@@ -383,7 +383,20 @@ async function runWithFallback<T>(
   for (const provider of ready) {
     for (let attempt = 0; attempt <= MAX_RETRIES_PER_PROVIDER; attempt++) {
       try {
-        return await withTimeout(operation(provider), CALL_TIMEOUT_MS);
+        const response = await withTimeout(operation(provider), CALL_TIMEOUT_MS);
+        // Log provider/model metadata only. Prompts and outputs may contain
+        // candidate responses and must never be emitted to application logs.
+        logger.info(
+          {
+            provider: provider.name,
+            model: modelNameFor(provider),
+            attempt,
+            interviewId,
+            operation: opName,
+          },
+          "[ai] model responded",
+        );
+        return response;
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         logger.warn(
@@ -411,6 +424,12 @@ async function runWithFallback<T>(
 
   logger.error({ interviewId, op: opName }, "[ai] all providers exhausted — returning fallback");
   return fallback();
+}
+
+function modelNameFor(provider: ModelProvider): string {
+  if (provider.name === "groq") return env.GROQ_MODEL;
+  if (provider.name === "mistral") return env.MISTRAL_MODEL;
+  return "built-in-stub";
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

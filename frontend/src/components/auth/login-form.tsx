@@ -62,8 +62,8 @@ export function LoginForm({ onSuccess, showModeLink = true }: { onSuccess: () =>
 
     return (
         <div className="mx-auto w-full max-w-md">
-            <div className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-primary/15 ring-1 ring-primary/30">
-                <Lock className="size-5 text-primary" />
+            <div className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-primary/15 ring-1 ring-primary/30 shadow-[0_0_28px_-8px_var(--primary)]">
+                <Lock className="size-5 text-primary" strokeWidth={1.75} />
             </div>
             <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
             <p className="mt-1.5 text-sm text-muted-foreground">Sign in to continue your interview practice.</p>

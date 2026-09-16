@@ -195,15 +195,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
             </button>
             <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
           </div>
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <Link to="/interviews/new">
-              <button className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/90">
-                <Plus className="size-3.5" />
-                New Interview
-              </button>
-            </Link>
-          </div>
+          <ThemeToggle />
         </header>
 
         <main className="app-shell-main flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
