@@ -15,6 +15,12 @@ export default defineConfig({
     globals: true,
     css: true,
     reporters: ['verbose'],
+    env: {
+      VITE_API_BASE_URL: 'http://localhost:4000',
+      VITE_SOCKET_URL: 'http://localhost:4000',
+      VITE_SOCKET_PATH: '/socket.io',
+      VITE_API_VERSION: 'api/v1',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -31,6 +37,14 @@ export default defineConfig({
         '**/tests/**',
         '**/test/**',
       ],
+      thresholds: {
+        global: {
+          lines: 50,
+          functions: 50,
+          branches: 50,
+          statements: 50,
+        },
+      },
     },
   },
 });

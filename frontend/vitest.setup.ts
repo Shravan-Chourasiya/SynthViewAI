@@ -1,5 +1,23 @@
 import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
+import { server } from './src/__tests__/mocks/node';
+
+// Establish API mocking before all tests
+beforeAll(() => {
+  server.listen({
+    onUnhandledRequest: 'error', // This will help catch unhandled requests
+  });
+});
+
+// Reset any request handlers between tests
+afterEach(() => {
+  server.resetHandlers();
+});
+
+// Clean up after all tests
+afterAll(() => {
+  server.close();
+});
 
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {
