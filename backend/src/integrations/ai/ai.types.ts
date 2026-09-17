@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { InterviewConfig } from "../../modules/interview/types/interview.context.js";
+import type { PriorQuestion, GeneratedQuestionShape } from "./ai.graph.types.js";
 
 // ── Question generation (used by provider.ts / question.generator.ts) ─────────
 
@@ -15,17 +16,11 @@ export interface GenerateQuestionInput {
   previousQuestions: PreviousQuestion[];
 }
 
-export interface PreviousQuestion {
-  questionTitle: string;
-  questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
-  wasAnswered: boolean;
-}
+// The summary shape lives in ai.graph.types.ts (dependency-free) so the graph,
+// prompts and tests all share one definition.
+export type PreviousQuestion = PriorQuestion;
 
-export interface GeneratedQuestion {
-  questionTitle: string;
-  questionDescription: string | null;
-  questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
-}
+export type GeneratedQuestion = GeneratedQuestionShape;
 
 // ── Module contract — the only surface modules/interview calls into ────────────
 // These are the four operations the AI module exposes as plain async functions.
@@ -66,6 +61,7 @@ export const aiNextQuestionInputSchema = z.object({
       questionTitle: z.string(),
       questionType: z.enum(["BEHAVIORAL", "TECHNICAL", "MIXED"]),
       wasAnswered: z.boolean(),
+      topic: z.string().max(60).optional(),
     }),
   ),
   adaptationHint: z
@@ -73,6 +69,8 @@ export const aiNextQuestionInputSchema = z.object({
       mode: z.enum(["initial", "follow_up", "topic_change"]),
       difficulty: z.enum(["EASY", "MEDIUM", "HARD"]),
       topicHint: z.string().optional(),
+      // Set by the adaptive engine in the final stretch of a session.
+      wrapUp: z.boolean().optional(),
     })
     .optional(),
 });
@@ -117,6 +115,10 @@ export const generatedQuestionSchema = z.object({
   questionTitle: z.string().min(1),
   questionDescription: z.string().nullable(),
   questionType: z.enum(["BEHAVIORAL", "TECHNICAL", "MIXED"]),
+  // Short subdomain tag used for topic-diversity checks. Optional so an older or
+  // sloppier model response still validates; the graph falls back to a tag
+  // derived from the title.
+  topic: z.string().min(1).max(60).nullish(),
 });
 
 const detectionSignalSchema = z.enum([

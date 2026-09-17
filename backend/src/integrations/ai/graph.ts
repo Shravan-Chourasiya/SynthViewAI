@@ -15,10 +15,12 @@ import type {
   RoutingMetadata,
   DetectionSignal,
   QuestionHistoryEntry,
+  GeneratedQuestionShape,
 } from "./graph.state.js";
 import { callGenerateWithFallback, callEvaluateWithFallback } from "./provider.js";
 import { buildInterviewerPrompt, buildEvaluatorPrompt } from "./prompts.js";
 import { trimHistory } from "./context.manager.js";
+import { normalizeTitle, resolveQuestionCategory, summarizeCategoryMix, topicTagFromTitle } from "./coverage.js";
 import { logger } from "../../utils/logger.js";
 
 // ── Node: router ──────────────────────────────────────────────────────────────
@@ -102,11 +104,20 @@ async function routerNode(state: InterviewGraphState): Promise<Partial<Interview
 }
 
 // ── Node: interviewer ─────────────────────────────────────────────────────────
-// Generates the next question. Checks for repetition against history.
-// If the model returns a question already asked, retries once with an explicit
-// "avoid this question" instruction before accepting the result.
+// Generates the next question. Two quality guards run against session history:
+//   - repetition: an already-asked question title must not be returned again
+//   - type balance: in a MIXED interview the question must use the category the
+//     mix requires (behavioural vs technical), so the session really alternates
+// Either guard triggers one retry with an explicit instruction, then the result is
+// accepted — a turn is never failed over question quality.
+//
+// Session history comes from two places, deliberately:
+//   - priorQuestions: the persisted rows the interview module hands in (ordered,
+//     and restart-safe) — the source for counts and the avoid-list
+//   - questionHistory: what this graph remembers, which is the ONLY place the
+//     generated subdomain tags exist (tags are not persisted)
 
-const MAX_REPETITION_RETRIES = 1;
+const MAX_QUESTION_RETRIES = 1;
 
 async function interviewerNode(state: InterviewGraphState): Promise<Partial<InterviewGraphState>> {
   const mode = (state.routingMetadata?.mode ?? "follow_up") as InterviewerMode;
@@ -114,7 +125,39 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
   const hint = state.currentInput?.adaptationHint;
   const effectiveDiff = hint?.difficulty ?? state.difficulty;
   const providerName = "groq";
-  const trimmedHistory = trimHistory(state.questionHistory, providerName);
+
+  // Subdomain tags issued earlier in this session, keyed by normalised title so
+  // they can be re-attached to the persisted rows.
+  const topicByTitle = new Map<string, string>();
+  for (const entry of state.questionHistory) {
+    if (entry.topic) topicByTitle.set(normalizeTitle(entry.questionTitle), entry.topic);
+  }
+
+  // Restart-safe history when the caller supplied it; otherwise fall back to the
+  // graph's own memory so the guards still work for direct graph callers.
+  const sessionHistory: QuestionHistoryEntry[] =
+    state.priorQuestions.length > 0
+      ? state.priorQuestions.map((q, index) => {
+          const topic = topicByTitle.get(normalizeTitle(q.questionTitle));
+          return {
+            questionId: `prior-${index + 1}`,
+            questionTitle: q.questionTitle,
+            questionType: q.questionType,
+            ...(topic ? { topic } : {}),
+            sequenceNumber: index + 1,
+            wasAnswered: q.wasAnswered,
+            score: null,
+          };
+        })
+      : state.questionHistory;
+
+  const trimmedHistory = trimHistory(sessionHistory, providerName);
+
+  // The category this question must use — null when either is acceptable.
+  const requiredCategory =
+    state.interviewType === "MIXED" ? summarizeCategoryMix(sessionHistory).requiredCategory : null;
+
+  const sequenceNumber = state.currentInput?.sequenceNumber ?? sessionHistory.length + 1;
 
   const input = {
     interviewId: state.interviewId,
@@ -127,7 +170,7 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
       ...(state.jobRole ? { jobRole: state.jobRole } : {}),
       ...(state.jobSkills.length ? { jobSkills: state.jobSkills } : {}),
     },
-    sequenceNumber: state.currentInput?.sequenceNumber ?? state.questionHistory.length + 1,
+    sequenceNumber,
     previousQuestions: trimmedHistory.map((h: QuestionHistoryEntry) => ({
       questionTitle: h.questionTitle,
       questionType: h.questionType,
@@ -135,55 +178,109 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
     })),
   };
 
-  const askedTitles = new Set(
-    state.questionHistory.map((h: QuestionHistoryEntry) => h.questionTitle.toLowerCase().trim()),
-  );
+  const askedTitles = new Set(sessionHistory.map((h) => normalizeTitle(h.questionTitle)));
 
-  let prompt = buildInterviewerPrompt(state, mode, trimmedHistory, hint ?? null);
+  // Fails when the question repeats a title, or when a MIXED session returns a
+  // category that would push the split outside the 40–60% band.
+  const violatesGuards = (candidate: GeneratedQuestionShape): boolean => {
+    if (askedTitles.has(normalizeTitle(candidate.questionTitle))) return true;
+    return requiredCategory !== null && candidate.questionType !== requiredCategory;
+  };
+
+  let prompt = buildInterviewerPrompt(state, mode, trimmedHistory, hint ?? null, sessionHistory);
   let generated = await callGenerateWithFallback(prompt, input);
 
-  // Repetition check — retry once if the model returned an already-asked question
-  if (askedTitles.has(generated.questionTitle.toLowerCase().trim())) {
+  if (violatesGuards(generated)) {
     logger.warn(
-      { interviewId: state.interviewId, title: generated.questionTitle },
-      "[graph] interviewer — repetition detected, retrying",
+      {
+        interviewId: state.interviewId,
+        title: generated.questionTitle,
+        questionType: generated.questionType,
+        requiredCategory,
+      },
+      "[graph] interviewer — repetition or question-type imbalance detected, retrying",
     );
 
-    for (let i = 0; i < MAX_REPETITION_RETRIES; i++) {
-      // Re-build prompt with the repeated title explicitly in the avoid list
-      const extendedHistory = [
-        ...trimmedHistory,
-        // Inject the repeated question as a synthetic history entry so the prompt avoids it
+    for (let i = 0; i < MAX_QUESTION_RETRIES; i++) {
+      // Re-build the prompt with the rejected question in the avoid list so the
+      // retry cannot hand back the same title or the same category.
+      const extendedHistory: QuestionHistoryEntry[] = [
+        ...sessionHistory,
         {
-          questionId: "repeat-guard",
+          questionId: "guard-reject",
           questionTitle: generated.questionTitle,
           questionType: generated.questionType,
-          sequenceNumber: input.sequenceNumber,
+          sequenceNumber,
           wasAnswered: false,
           score: null,
         },
       ];
-      prompt = buildInterviewerPrompt(state, mode, extendedHistory, hint ?? null);
+      prompt = buildInterviewerPrompt(
+        state,
+        mode,
+        trimHistory(extendedHistory, providerName),
+        hint ?? null,
+        extendedHistory,
+      );
       generated = await callGenerateWithFallback(prompt, input);
-      if (!askedTitles.has(generated.questionTitle.toLowerCase().trim())) break;
+      if (!violatesGuards(generated)) break;
     }
 
-    // Repetition exhaustion: if the retry still produced a repeat, accept it.
-    // Rejecting here would crash the interview; the candidate will see a duplicate
-    // question rather than a broken session. This is the safest degraded behavior.
-    if (askedTitles.has(generated.questionTitle.toLowerCase().trim())) {
+    // Guard exhaustion: accept the degraded result rather than crashing the turn —
+    // the candidate sees a repeat or a less even mix instead of a broken session.
+    // The next turn recomputes the balance from history, so the mix self-corrects.
+    if (violatesGuards(generated)) {
       logger.warn(
-        { interviewId: state.interviewId, title: generated.questionTitle },
-        "[graph] interviewer — repetition retry exhausted, accepting repeated question",
+        {
+          interviewId: state.interviewId,
+          title: generated.questionTitle,
+          questionType: generated.questionType,
+          requiredCategory,
+        },
+        "[graph] interviewer — guard retry exhausted, accepting question",
       );
     }
   }
 
+  // A MIXED session must record a real per-question category — see
+  // resolveQuestionCategory for why the session-level "MIXED" is never recorded.
+  const questionType = resolveQuestionCategory(
+    state.interviewType,
+    generated.questionType,
+    requiredCategory,
+  );
+  if (state.interviewType === "MIXED" && generated.questionType !== questionType) {
+    logger.warn(
+      { interviewId: state.interviewId, title: generated.questionTitle },
+      `[graph] interviewer — model did not type the question, recording ${questionType}`,
+    );
+  }
+
+  const topic = generated.topic ?? topicTagFromTitle(generated.questionTitle);
+  const recorded: GeneratedQuestionShape = { ...generated, questionType, topic };
+
   logger.info(
-    { interviewId: state.interviewId, mode, title: generated.questionTitle },
+    { interviewId: state.interviewId, mode, title: recorded.questionTitle, questionType, topic },
     "[graph] interviewer — question generated",
   );
-  return { generatedQuestion: generated };
+
+  return {
+    generatedQuestion: recorded,
+    // Remember what was asked (with its subdomain tag) so the next turn can avoid
+    // repeating the theme. Session-scoped by design: losing this checkpoint only
+    // weakens topic avoidance, never correctness.
+    questionHistory: [
+      {
+        questionId: `generated-${sequenceNumber}`,
+        questionTitle: recorded.questionTitle,
+        questionType: recorded.questionType,
+        ...(recorded.topic ? { topic: recorded.topic } : {}),
+        sequenceNumber,
+        wasAnswered: false,
+        score: null,
+      },
+    ],
+  };
 }
 
 // ── Node: evaluator ───────────────────────────────────────────────────────────

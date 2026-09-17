@@ -20,6 +20,7 @@
 
 export type {
   QuestionHistoryEntry,
+  PriorQuestion,
   PerformanceMetrics,
   GraphTurnInput,
   GeneratedQuestionShape,
@@ -31,6 +32,7 @@ export type {
 
 import type {
   QuestionHistoryEntry,
+  PriorQuestion,
   PerformanceMetrics,
   GraphTurnInput,
   GeneratedQuestionShape,
@@ -78,6 +80,17 @@ export const InterviewGraphAnnotation = Annotation.Root({
       for (const entry of next) map.set(entry.questionId, entry);
       return Array.from(map.values());
     },
+    default: () => [],
+  }),
+
+  // Session history handed in by modules/interview from the persisted
+  // interview_questions rows. `last` is correct because the caller always sends
+  // the complete, ordered list — which also makes repetition avoidance and the
+  // behavioural/technical split survive a checkpoint loss. This is the graph's
+  // only window onto what has already been asked, so it must stay in sync with
+  // AiNextQuestionInput.previousQuestions.
+  priorQuestions: Annotation<PriorQuestion[]>({
+    reducer: last<PriorQuestion[]>,
     default: () => [],
   }),
 
@@ -169,11 +182,20 @@ export function nextQuestionInputToGraphState(
         mode: input.adaptationHint.mode,
         difficulty: input.adaptationHint.difficulty,
         ...(input.adaptationHint.topicHint ? { topicHint: input.adaptationHint.topicHint } : {}),
+        ...(input.adaptationHint.wrapUp ? { wrapUp: input.adaptationHint.wrapUp } : {}),
       }
     : undefined;
   return {
     interviewId: input.interviewId,
     threadId: input.threadId,
+    // Carry the session shape into graph state: without it the interviewer node
+    // has no idea what was already asked, which is how MIXED sessions used to end
+    // up all-technical and how identical questions slipped through.
+    priorQuestions: input.previousQuestions.map((q) => ({
+      questionTitle: q.questionTitle,
+      questionType: q.questionType,
+      wasAnswered: q.wasAnswered,
+    })),
     currentInput: {
       operation: "generate",
       sequenceNumber: input.sequenceNumber,

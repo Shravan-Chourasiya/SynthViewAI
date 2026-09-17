@@ -6,10 +6,31 @@
 export interface QuestionHistoryEntry {
   questionId: string;
   questionTitle: string;
+  /**
+   * Per-question category. For MIXED interviews the model returns the actual
+   * category of each question, so this holds "BEHAVIORAL" | "TECHNICAL" instead
+   * of echoing the session's overall MIXED type — that is what lets the prompt
+   * count the split and alternate. "MIXED" is only expected on legacy rows
+   * written before per-question typing existed.
+   */
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /** Short subdomain tag (e.g. "feature-store") used for topic-diversity checks. */
+  topic?: string;
   sequenceNumber: number;
   wasAnswered: boolean;
   score: number | null;
+}
+
+/**
+ * One previously asked question as handed in by modules/interview, sourced from
+ * the persisted interview_questions rows. Deliberately without score/questionId:
+ * this is the session-shape summary the graph needs to keep questions balanced
+ * and non-repetitive, and it survives a graph checkpoint loss.
+ */
+export interface PriorQuestion {
+  questionTitle: string;
+  questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  wasAnswered: boolean;
 }
 
 export interface PerformanceMetrics {
@@ -38,7 +59,10 @@ export interface GraphTurnInput {
 export interface GeneratedQuestionShape {
   questionTitle: string;
   questionDescription: string | null;
+  /** Per-question category — see QuestionHistoryEntry.questionType. */
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /** Short subdomain tag returned by the model, null/undefined when unavailable. */
+  topic?: string | null;
 }
 
 export type DetectionSignal = "strong" | "weak" | "vague" | "incomplete" | "off_topic" | "none";
