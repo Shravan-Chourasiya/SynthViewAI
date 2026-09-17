@@ -230,6 +230,9 @@ describe("interviews table", () => {
       .values({
         userId: user.id,
         interviewTitle: "SWE Interview",
+        // interviewType / interviewCompanyStyle are NOT NULL without defaults.
+        interviewType: "MIXED",
+        interviewCompanyStyle: "REGULAR",
         interviewMetaData: { jobRole: "Engineer", interviewType: "MIXED" },
         interviewDuration: 30,
       })
@@ -246,6 +249,8 @@ describe("interviews table", () => {
     await db.insert(interviewsTable).values({
       userId: user.id,
       interviewTitle: "Test Interview",
+      interviewType: "MIXED",
+      interviewCompanyStyle: "REGULAR",
       interviewMetaData: {},
       interviewDuration: 45,
     });
@@ -257,13 +262,15 @@ describe("interviews table", () => {
     expect(found.userId).toBe(user.id);
   });
 
-  it("defaults interviewStatus to DRAFT", async () => {
+  it("defaults interviewStatus to READY", async () => {
     const { db } = getContainers();
     const user = await createUser();
 
     await db.insert(interviewsTable).values({
       userId: user.id,
       interviewTitle: "Draft Interview",
+      interviewType: "MIXED",
+      interviewCompanyStyle: "REGULAR",
       interviewMetaData: {},
       interviewDuration: 20,
     });
@@ -272,7 +279,8 @@ describe("interviews table", () => {
       .select()
       .from(interviewsTable)
       .where(eq(interviewsTable.userId, user.id));
-    expect(found.interviewStatus).toBe("DRAFT");
+    // Schema default is READY (unscheduled interviews are startable immediately).
+    expect(found.interviewStatus).toBe("READY");
   });
 
   it("cascades delete when user is deleted", async () => {
@@ -282,6 +290,8 @@ describe("interviews table", () => {
     await db.insert(interviewsTable).values({
       userId: user.id,
       interviewTitle: "To be deleted",
+      interviewType: "MIXED",
+      interviewCompanyStyle: "REGULAR",
       interviewMetaData: {},
       interviewDuration: 10,
     });
@@ -302,12 +312,16 @@ describe("interviews table", () => {
     await db.insert(interviewsTable).values({
       userId: u1.id,
       interviewTitle: "U1 Interview",
+      interviewType: "MIXED",
+      interviewCompanyStyle: "REGULAR",
       interviewMetaData: {},
       interviewDuration: 30,
     });
     await db.insert(interviewsTable).values({
       userId: u2.id,
       interviewTitle: "U2 Interview",
+      interviewType: "MIXED",
+      interviewCompanyStyle: "REGULAR",
       interviewMetaData: {},
       interviewDuration: 30,
     });
