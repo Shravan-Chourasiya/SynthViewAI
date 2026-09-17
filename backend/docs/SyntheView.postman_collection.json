@@ -1,0 +1,363 @@
+{
+  "info": {
+    "name": "SyntheView API",
+    "_postman_id": "syntheview-api-v1",
+    "description": "SyntheView AI backend API collection. Base URL: {{baseUrl}}/{{apiVersion}}\n\n**Setup:**\n1. Set `baseUrl` = `http://localhost:4000`\n2. Set `apiVersion` = `api/v1`\n3. Run **Login** — cookies + `csrfToken` variable are set automatically.\n4. All protected routes use the saved `csrfToken` via the collection-level pre-request script.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "apiVersion", "value": "api/v1" },
+    { "key": "csrfToken", "value": "" },
+    { "key": "sessionId", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Attach saved CSRF token to every request",
+          "const csrf = pm.collectionVariables.get('csrfToken');",
+          "if (csrf) pm.request.headers.upsert({ key: 'x-csrf-token', value: csrf });"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Basic liveness check."
+          }
+        },
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ping"
+          }
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ready",
+            "description": "Checks DB + Redis connectivity."
+          }
+        },
+        {
+          "name": "Version",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/version"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Registration",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password1\",\n  \"username\": \"test_user\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\"\n}"
+            },
+            "description": "Creates a new account. Sends OTP to email."
+          }
+        },
+        {
+          "name": "Verify OTP (Registration)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/verify-otp",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"123456\"\n}"
+            },
+            "description": "Verifies the 6-digit OTP sent during registration."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Login / Logout",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  // Save csrfToken from response body",
+                  "  if (json.data && json.data.csrfToken) {",
+                  "    pm.collectionVariables.set('csrfToken', json.data.csrfToken);",
+                  "  }",
+                  "  // Cookies (access_token, refresh_token, csrf_token, device_id) are set automatically by Postman",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password1\",\n  \"deviceType\": \"desktop\"\n}"
+            },
+            "description": "Returns `csrfToken` in body and sets 4 cookies: `access_token`, `refresh_token`, `csrf_token`, `device_id`."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.csrfToken) {",
+                  "    pm.collectionVariables.set('csrfToken', json.data.csrfToken);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/refresh",
+            "description": "Rotates access + refresh tokens. Uses `refresh_token` cookie. Updates `csrfToken` variable."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/logout",
+            "description": "Invalidates current session. Requires auth cookies + CSRF header."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Account Management",
+      "item": [
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/me",
+            "description": "Returns the authenticated user's profile."
+          }
+        },
+        {
+          "name": "Get Sessions",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/sessions",
+            "description": "Lists all active sessions for the current user."
+          }
+        },
+        {
+          "name": "Delete All Sessions",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/sessions",
+            "description": "Revokes all sessions except the current one."
+          }
+        },
+        {
+          "name": "Delete Session by ID",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/session/{{sessionId}}",
+            "description": "Revokes a specific session by its ID. Set `sessionId` variable."
+          }
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/account",
+            "description": "Permanently deletes the authenticated user's account."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Password",
+      "item": [
+        {
+          "name": "Forgot Password (Send OTP)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/forgot-password",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+            },
+            "description": "Sends a password-reset OTP to the given email."
+          }
+        },
+        {
+          "name": "Forgot Password (Verify OTP + Set New Password)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/forgot-password/verify",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"123456\",\n  \"newPassword\": \"NewPassword1\",\n  \"confirmPassword\": \"NewPassword1\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Password (Authenticated)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/update-password",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"currentPassword\": \"Password1\",\n  \"newPassword\": \"NewPassword1\"\n}"
+            },
+            "description": "Changes password while logged in. `newPassword` must differ from `currentPassword`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Email",
+      "item": [
+        {
+          "name": "Update Email (Send OTP)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/update-email",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newemail@example.com\"\n}"
+            },
+            "description": "Sends an OTP to the new email address."
+          }
+        },
+        {
+          "name": "Update Email (Verify OTP)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/usr/update-email/verify",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newemail@example.com\",\n  \"otp\": \"123456\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Account Recovery",
+      "item": [
+        {
+          "name": "Recover Account (Send OTP)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/recover-account",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+            },
+            "description": "Sends a recovery OTP for a locked/disabled account."
+          }
+        },
+        {
+          "name": "Recover Account (Verify OTP)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/auth/recover-account/verify",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"123456\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Interviews",
+      "item": [
+        {
+          "name": "Create Interview",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/{{apiVersion}}/interviews",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jobrole\": \"Software Engineer\",\n  \"experience\": \"junior\",\n  \"interviewStyle\": \"FAANG\",\n  \"interviewType\": \"MIXED\",\n  \"duration\": 30,\n  \"isScheduled\": false,\n  \"targetedCompany\": \"Google\"\n}"
+            },
+            "description": "Creates a new interview session. Rate limited to 10/hr.\n\n`experience`: fresher | junior | mid-level | senior\n`interviewStyle`: MANGOS | FAANG | MAANG | STARTUP | CUSTOM\n`interviewType`: BEHAVIORAL | TECHNICAL | MIXED\n`targetedCompany`: Google | Microsoft | Amazon | Meta | Apple | Netflix | OpenAI | Nvidia | TCS | Infosys | JPMorgan | Wipro | Deloitte | Adobe | Anthropic"
+          }
+        },
+        {
+          "name": "Get All Interviews",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/{{apiVersion}}/interviews",
+            "description": "Returns all interviews belonging to the authenticated user."
+          }
+        },
+        {
+          "name": "Get Interview by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/{{apiVersion}}/interviews/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["{{apiVersion}}", "interviews", ":id"],
+              "variable": [{ "key": "id", "value": "<interview-uuid>" }]
+            },
+            "description": "Returns a single interview. Returns 403 if the interview belongs to another user."
+          }
+        },
+        {
+          "name": "Get Interview Metrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/{{apiVersion}}/interviews/:id/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["{{apiVersion}}", "interviews", ":id", "metrics"],
+              "variable": [{ "key": "id", "value": "<interview-uuid>" }]
+            },
+            "description": "Returns performance metrics for a specific interview. Returns 403 if not the owner."
+          }
+        }
+      ]
+    }
+  ]
+}

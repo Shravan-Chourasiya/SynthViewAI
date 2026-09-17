@@ -1,39 +1,77 @@
-# Node
+# Dependencies
 node_modules/
-dist/
-.env
-.env.*.local
-*.log
-
-# Python
-.venv/
+.pnp/
+.pnp.js
+backend/docs/temp/*
+.amazonq/*
+*txt
+# Testing
+coverage/
+.nyc_output/
 __pycache__/
 *.pyc
-.env
+.pytest_cache/
+*.log
 
-# PS scripts
-*.ps1
+# IDEs
+.vscode/
+.idea/
 
-# Misc
+# OS
 .DS_Store
-coverage/
-.turbo/
-backend/docs/temp/postgres-init.md
+Thumbs.db
 
-*.sql
-*.json
-!backend/docs/postman/
-!backend/docs/postman/*.json
-!backend/src/db/migrations/
-!backend/src/db/migrations/**/
-!backend/src/db/migrations/**/*.sql
-!backend/src/db/migrations/**/*.json
-backend/docs/review.txt
-backend/Untitled-1.txt
+# Builds
+dist/
+build/
+.next/
+out/
+
 TODOS.txt
-backend/socketTodos.txt
-.amazonq/chats/q-dev-chat-2026-09-06.md
-.amazonq/rules/memory-bank/guidelines.md
-.amazonq/rules/memory-bank/tech.md
-.amazonq/rules/memory-bank/product.md
-.amazonq/rules/memory-bank/structure.md
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# misc
+.svn/
+
+# Backend
+/backend/node_modules/
+/backend/package-lock.json
+
+# Frontend
+/frontend/node_modules/
+/frontend/package-lock.json
+/frontend/.vite/
+/frontend/.nyc_output/
+/frontend/coverage/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Local files that might be created during testing
+cypress/screenshots/
+cypress/videos/
+test-results/
+playwright-report/
+
+# Ignore any markdown files that are temporary notes
+*.tmp.md
+*.temp.md
+*_temp.md
+*_tmp.md
+*_backup.md
+*_bak.md
+backend_test_suite_plan.md
+frontend_test_suite_plan.md
+output.json
