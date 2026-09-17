@@ -68,36 +68,66 @@ function parseJsonResponse<T>(raw: string): T {
 
 // ── Stub provider ─────────────────────────────────────────────────────────────
 
+// Offline fallback questions. Each entry carries a subdomain `topic` tag so the
+// stub obeys the same mixing rules the prompt asks of a real model: for MIXED
+// interviews the pool alternates behavioural/technical questions, and the tags are
+// distinct so an 8-question session never repeats a theme.
 const STUB_QUESTIONS: Record<
   "BEHAVIORAL" | "TECHNICAL" | "MIXED",
-  { title: string; description: string | null }[]
+  { title: string; description: string | null; topic: string }[]
 > = {
   BEHAVIORAL: [
     {
       title: "Tell me about a time you handled a conflict within your team.",
       description: "Focus on the situation, your actions, and the outcome.",
+      topic: "team-conflict",
     },
     {
       title: "Describe a project where you had to meet a tight deadline.",
       description: "Walk through how you prioritised and what trade-offs you made.",
+      topic: "deadline-pressure",
     },
     {
       title: "Give an example of a time you had to adapt quickly to change.",
       description: "What triggered the change and how did you respond?",
+      topic: "adapting-to-change",
+    },
+    {
+      title: "Tell me about a time you disagreed with your manager's decision.",
+      description: "How did you raise it, and how was it resolved?",
+      topic: "disagreeing-upward",
+    },
+    {
+      title: "Describe a situation where you had to prioritise competing requests.",
+      description: "Explain how you decided what to drop and how you communicated it.",
+      topic: "prioritisation",
     },
   ],
   TECHNICAL: [
     {
       title: "Explain the difference between a process and a thread.",
       description: "Cover memory isolation, scheduling, and when you'd choose one over the other.",
+      topic: "process-vs-thread",
     },
     {
       title: "How would you design a URL shortener?",
       description: "Consider storage, collision handling, and read/write throughput.",
+      topic: "url-shortener",
     },
     {
       title: "What is the CAP theorem and how does it affect database selection?",
       description: "Give a concrete example of a trade-off you'd make.",
+      topic: "cap-theorem",
+    },
+    {
+      title: "How would you debug a memory leak in a long-running service?",
+      description: "Describe the tooling and the order in which you'd narrow it down.",
+      topic: "memory-leak",
+    },
+    {
+      title: "How do you choose between a relational and a document store?",
+      description: "Tie the decision to access patterns, consistency, and operational cost.",
+      topic: "sql-vs-document-store",
     },
   ],
   MIXED: [
@@ -105,14 +135,27 @@ const STUB_QUESTIONS: Record<
       title:
         "Describe a technically challenging problem you solved and how you communicated it to non-technical stakeholders.",
       description: null,
+      topic: "technical-communication",
     },
     {
       title: "How do you balance technical debt against feature delivery?",
       description: "Give a concrete example from your experience.",
+      topic: "tech-debt-vs-delivery",
     },
     {
       title: "Walk me through a time you had to make a decision with incomplete information.",
       description: "What was the outcome and what would you do differently?",
+      topic: "incomplete-information",
+    },
+    {
+      title: "Tell me about a time a project depended on another team's delivery.",
+      description: "How did you keep it unblocked without escalating unnecessarily?",
+      topic: "cross-team-dependency",
+    },
+    {
+      title: "How do you approach a post-incident review after a production outage?",
+      description: "Describe what you document and how you prevent a repeat.",
+      topic: "incident-retrospective",
     },
   ],
 };
@@ -124,11 +167,17 @@ const stubProvider: ModelProvider = {
   generateQuestion: async (_, input) => {
     if (input.config.interviewType === "MIXED") {
       // Keep the offline fallback truthful to the selected type too: mixed
-      // sessions alternate behavioral and technical questions.
+      // sessions alternate behavioural and technical questions, and each question
+      // carries its own subdomain tag for the topic-diversity rules.
       const questionType = input.sequenceNumber % 2 === 0 ? "TECHNICAL" : "BEHAVIORAL";
       const pool = STUB_QUESTIONS[questionType];
       const entry = pool[(Math.ceil(input.sequenceNumber / 2) - 1) % pool.length]!;
-      return { questionTitle: entry.title, questionDescription: entry.description, questionType };
+      return {
+        questionTitle: entry.title,
+        questionDescription: entry.description,
+        questionType,
+        topic: entry.topic,
+      };
     }
     const pool = STUB_QUESTIONS[input.config.interviewType] ?? STUB_QUESTIONS.MIXED;
     const entry = pool[(input.sequenceNumber - 1) % pool.length]!;
@@ -136,6 +185,7 @@ const stubProvider: ModelProvider = {
       questionTitle: entry.title,
       questionDescription: entry.description,
       questionType: input.config.interviewType,
+      topic: entry.topic,
     };
   },
   evaluateAnswer: async (_prompt) => ({
@@ -259,7 +309,9 @@ function parseAndValidateQuestion(
     logger.warn({ issues: result.error.issues }, "[ai] generated question failed validation");
     throw new Error("MALFORMED_RESPONSE");
   }
-  return result.data;
+  // Normalise the optional topic tag to an explicit null: the schema accepts an
+  // omitted field (`nullish`) and downstream only ever needs string | null.
+  return { ...result.data, topic: result.data.topic ?? null };
 }
 
 function parseAndValidateEvaluation(raw: string): AiEvaluateResult {

@@ -37,6 +37,7 @@ import {
   updateTimeoutCount,
   detectPatterns,
   computeAdaptation,
+  elapsedMinutesSince,
 } from "../../../integrations/ai/adaptive/index.js";
 import type { AdaptationDecision } from "../../../integrations/ai/adaptive/index.js";
 import type { IoServer } from "../../../websocket/socket.types.js";
@@ -396,6 +397,36 @@ export async function generateAndDeliverQuestionService(
     return;
   }
 
+  // ── Hard duration ceiling ─────────────────────────────────────────────────
+  // The adaptive engine terminates at the deadline on the next evaluated answer,
+  // but a candidate who never submits (skips / per-question timeouts) must not keep
+  // receiving fresh questions past the configured duration. Reaching the duration is
+  // a natural completion, exactly like reaching a question target — never an
+  // abandonment, and never a TIMED_OUT interview (the reaper covers the case where
+  // nobody is answering at all).
+  const elapsedMinutes = elapsedMinutesSince(context.timerStartedAt);
+  if (context.config.durationMinutes > 0 && elapsedMinutes >= context.config.durationMinutes) {
+    logger.info(
+      {
+        interviewId,
+        elapsedMinutes: Math.floor(elapsedMinutes),
+        durationMinutes: context.config.durationMinutes,
+      },
+      "[interview] configured duration reached — completing instead of generating a question",
+    );
+    const completed = await endInterviewSystemService(interviewId);
+    if (completed && io) {
+      io.to(`interview:${interviewId}`).emit("interview:state_change", {
+        eventVersion: EVENT_VERSION,
+        event: "interview:state_change",
+        interviewId,
+        status: completed.interviewStatus,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
   // ── Lazy AI session init for scheduled interviews ───────────────────────────
   // Scheduled interviews skip startAiSession at start time; the threadId is
   // empty until the candidate actually joins. Initialise it now, once.
@@ -438,7 +469,10 @@ export async function generateAndDeliverQuestionService(
         questionState: interviewQuestionsTable.questionState,
       })
       .from(interviewQuestionsTable)
-      .where(eq(interviewQuestionsTable.interviewId, interviewId));
+      .where(eq(interviewQuestionsTable.interviewId, interviewId))
+      // Sequence order matters: the prompt uses it for the behavioural/technical
+      // split, the avoid-list, and "the previous question" in follow-up mode.
+      .orderBy(interviewQuestionsTable.sequenceNumber);
 
     logger.info(
       { interviewId, sequenceNumber },
@@ -544,6 +578,17 @@ async function kickoffLookahead(
 ): Promise<void> {
   try {
     const nextSequence = context.questionState.currentIndex + 2;
+
+    // Never pre-warm a question that can no longer be delivered — the next
+    // generateAndDeliverQuestionService call completes the interview instead.
+    if (
+      context.config.durationMinutes > 0 &&
+      elapsedMinutesSince(context.timerStartedAt) >= context.config.durationMinutes
+    ) {
+      logger.info({ interviewId }, "[ai] lookahead skipped — configured duration reached");
+      return;
+    }
+
     const db = getPgDb();
     const previous = await db
       .select({
@@ -552,7 +597,8 @@ async function kickoffLookahead(
         questionState: interviewQuestionsTable.questionState,
       })
       .from(interviewQuestionsTable)
-      .where(eq(interviewQuestionsTable.interviewId, interviewId));
+      .where(eq(interviewQuestionsTable.interviewId, interviewId))
+      .orderBy(interviewQuestionsTable.sequenceNumber);
 
     const result = await generateNextQuestion({
       interviewId,
@@ -1147,7 +1193,10 @@ export async function submitAnswerService(
           questionState: interviewQuestionsTable.questionState,
         })
         .from(interviewQuestionsTable)
-        .where(eq(interviewQuestionsTable.interviewId, interviewId));
+        .where(eq(interviewQuestionsTable.interviewId, interviewId))
+        // sequenceNumber order keeps "most recent answered question" (pattern
+        // detection) and the category balance correct.
+        .orderBy(interviewQuestionsTable.sequenceNumber);
 
       const questionHistory = allQuestions.map((q) => ({
         questionId: q.questionId,
@@ -1159,7 +1208,16 @@ export async function submitAnswerService(
       }));
 
       const detection = detectPatterns(newPerfState, questionHistory);
-      const decision = computeAdaptation(newPerfState, detection, context.config, questionHistory);
+      // Wall-clock minutes since the session started. The adaptive engine uses it
+      // for the hard duration ceiling and the soft wrap-up window.
+      const elapsedMinutes = elapsedMinutesSince(context.timerStartedAt);
+      const decision = computeAdaptation(
+        newPerfState,
+        detection,
+        context.config,
+        questionHistory,
+        elapsedMinutes,
+      );
 
       // ── Step 5: Persist updated context atomically ────────────────────────
       const updatedPerfState = { ...newPerfState, currentDifficulty: decision.hint.difficulty };

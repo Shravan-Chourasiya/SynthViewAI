@@ -8,6 +8,12 @@
 //   - The model abstraction layer (provider.ts) sits cleanly underneath
 
 import type { QuestionHistoryEntry, InterviewerMode, GraphTurnInput } from "./ai.graph.types.js";
+import {
+  coveredTopics,
+  summarizeCategoryMix,
+  type CategoryMix,
+} from "./coverage.js";
+import type { QuestionCategory } from "./coverage.js";
 
 // Minimal state shape prompts.ts needs — no LangGraph dependency
 export interface PromptStateContext {
@@ -29,11 +35,90 @@ export interface InterviewerPromptResult {
   avoidTitles: string[]; // question titles already asked — for repetition check
 }
 
+/** Max topic tags listed in the prompt — keeps the instruction bounded. */
+const MAX_LISTED_TOPICS = 10;
+
+function categoryLabel(category: QuestionCategory): string {
+  return category === "BEHAVIORAL" ? "behavioral/situational" : "technical/domain";
+}
+
+/**
+ * Concrete per-session category instruction for MIXED interviews. This replaces
+ * a single vague "alternate question types" line with the real counts plus an
+ * explicit requirement, so the split stays inside the 40–60% band instead of
+ * depending on the model's judgement.
+ */
+function mixingLines(mix: CategoryMix): string[] {
+  if (mix.total === 0) {
+    return [
+      `Question-type balance: no questions asked yet.`,
+      `  - Opening question: either a behavioral or a technical question is acceptable.`,
+    ];
+  }
+
+  const lines = [
+    `Question-type balance: this session has asked ${mix.behavioralCount} behavioral and ${mix.technicalCount} technical question(s) — keep coverage roughly even (40–60% of each type).`,
+  ];
+
+  if (mix.requiredCategory) {
+    lines.push(
+      `  - The next question MUST be a ${categoryLabel(mix.requiredCategory)} question; ${
+        mix.requiredCategory === "BEHAVIORAL" ? "behavioral" : "technical"
+      } questions are under-represented${
+        mix.balanced ? " and the other type must not run ahead" : ""
+      }.`,
+    );
+  }
+
+  lines.push(
+    `  - "questionType" must be the type of THIS question ("BEHAVIORAL" or "TECHNICAL"), never "MIXED".`,
+  );
+
+  return lines;
+}
+
+/**
+ * Topic-diversity instruction built from the subdomain tags already covered.
+ * Titles alone are not enough: three differently-titled questions can all sit on
+ * the same theme.
+ */
+function topicLines(history: QuestionHistoryEntry[]): string[] {
+  const tags = coveredTopics(history);
+  if (tags.length === 0) {
+    return [
+      `Subdomain coverage: no subdomain has been covered yet — pick a distinct theme for this question.`,
+    ];
+  }
+
+  const listed = tags.slice(-MAX_LISTED_TOPICS);
+  return [
+    `Subdomains already covered in this session (do NOT generate another question on these themes):`,
+    ...listed.map((tag) => `  - "${tag}"`),
+    `Only revisit one of these themes if the question is a deliberate follow-up to the current line of questioning.`,
+  ];
+}
+
+/**
+ * Wrap-up bias for the final stretch of a session (soft duration threshold).
+ * The adaptive engine sets hint.wrapUp once the configured duration is ~90% used.
+ */
+function wrapUpLines(hint: { wrapUp?: boolean } | null): string[] {
+  if (!hint?.wrapUp) return [];
+  return [
+    `Wrap-up window: the configured interview duration is almost over.`,
+    `  - Ask a closing question on the CURRENT line of discussion instead of opening a new one.`,
+    `  - Keep it answerable in a single turn and do not escalate difficulty.`,
+  ];
+}
+
 export function buildInterviewerPrompt(
   state: PromptStateContext,
   mode: InterviewerMode,
   trimmedHistory: QuestionHistoryEntry[],
-  hint: { mode: string; difficulty: string; topicHint?: string } | null = null,
+  hint: { mode: string; difficulty: string; topicHint?: string; wrapUp?: boolean } | null = null,
+  // Complete session history — the category split and topic tags are computed
+  // from this, so context-window trimming can never skew the counts.
+  fullHistory: QuestionHistoryEntry[] = trimmedHistory,
 ): InterviewerPromptResult {
   const role = state.jobRole ?? "a software engineer";
   const companyContext = state.targetedCompany ? ` Target company: ${state.targetedCompany}.` : "";
@@ -45,6 +130,9 @@ export function buildInterviewerPrompt(
   const type = state.interviewType;
   const style = state.interviewStyle;
   const avoidTitles = trimmedHistory.map((h) => h.questionTitle);
+  const mix = summarizeCategoryMix(fullHistory);
+  // For MIXED sessions the model types each question itself.
+  const questionTypeSchema = type === "MIXED" ? `"BEHAVIORAL" | "TECHNICAL"` : `"${type}"`;
 
   const avoidSection =
     avoidTitles.length > 0
@@ -73,10 +161,14 @@ export function buildInterviewerPrompt(
     `  - Maintain natural interview flow: do not jump topics abruptly unless instructed to change topic.`,
     `  - Do not evaluate, score, or comment on previous answers — that is handled separately.`,
     `  - Do not ask multiple questions in a single turn.`,
-    ...(type === "MIXED" ? ["  - Alternate question types across the session: behavioral/situational questions and technical/domain questions must both be included. Do not make every question technical."] : []),
+    `  - Vary the subdomain of each question: never ask two questions on the same theme with different wording.`,
+    ...(type === "MIXED" ? mixingLines(mix) : []),
+    ...topicLines(fullHistory),
+    ...wrapUpLines(hint),
     `Respond with a JSON object only — no markdown, no explanation.`,
-    `Schema: { "questionTitle": string, "questionDescription": string | null, "questionType": "${type}" }`,
+    `Schema: { "questionTitle": string, "questionDescription": string | null, "questionType": ${questionTypeSchema}, "topic": string }`,
     `questionDescription should be a brief clarifying note (1–2 sentences) or null if the question is self-explanatory.`,
+    `"topic" is a short kebab-case subdomain tag for this question (2-4 words, e.g. "feature-store", "url-shortener", "team-conflict"). Use a NEW tag unless this question is a deliberate follow-up on the same subdomain.`,
   ].join("\n");
 
   let userPrompt: string;
@@ -103,6 +195,17 @@ export function buildInterviewerPrompt(
 
   return { systemPrompt, userPrompt, avoidTitles };
 }
+
+// ── Coverage instructions for MIXED sessions ──────────────────────────────────
+// Owned by coverage.ts (pure + unit-tested); re-exported here so prompt tests
+// can exercise the mixing rules without invoking a model.
+export {
+  coveredTopics,
+  summarizeCategoryMix,
+  CATEGORY_SHARE_MAX,
+  type CategoryMix,
+  type QuestionCategory,
+} from "./coverage.js";
 
 // ── Evaluator prompts ─────────────────────────────────────────────────────────
 

@@ -14,4 +14,4 @@ export type { PatternDetection } from "./detection.js";
 export { detectPatterns } from "./detection.js";
 
 export type { AdaptationAction, AdaptationHint, AdaptationDecision } from "./adaptation.js";
-export { computeAdaptation } from "./adaptation.js";
+export { computeAdaptation, elapsedMinutesSince } from "./adaptation.js";
