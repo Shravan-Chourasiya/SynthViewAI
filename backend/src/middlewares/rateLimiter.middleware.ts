@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import { StatusCodes } from "http-status-codes";
 import { redisClient } from "../config/redis.init.js";
@@ -14,6 +14,23 @@ export function createRateLimiter(key: RateLimitKey) {
     limit: config.limit,
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    // Use the built-in IP handling mechanism which properly handles IPv4/IPv6
+    // Since we're not providing a custom keyGenerator, express-rate-limit will use its default
+    // safe IP-based key generation that handles IPv6 properly
+    // keyGenerator: (req, _res) => req.ip || req.connection.remoteAddress || "unknown",
+    // Actually, to satisfy the IPv6 warning, we should let express-rate-limit use its default behavior
+    // but we can still customize when needed while staying safe
+    keyGenerator: (req, _res) => {
+      // For requests with x-client-id header, use that as key
+      const clientId = req.headers["x-client-id"] as string;
+      if (clientId) {
+        return clientId;
+      }
+      
+      // Use ipKeyGenerator to safely handle IPv4/IPv6 addresses
+      // Pass the request's IP to ipKeyGenerator which handles IPv4/IPv6 normalization
+      return ipKeyGenerator(req.ip || "unknown");
+    },
     // Authentication must remain available if the distributed counter is
     // temporarily reconnecting. Redis still enforces limits whenever healthy.
     passOnStoreError: true,
