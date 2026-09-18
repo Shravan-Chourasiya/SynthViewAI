@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Camera, CircleAlert, Loader2, Mic, Monitor, Play, RefreshCw, Wifi } from 'lucide-react'
+import { Camera, CircleAlert, Loader2, Mic, Play, RefreshCw, Wifi } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { StatusBadge, Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -13,7 +13,7 @@ import { useLiveInterviewStore } from '@/lib/stores/live-interview.store'
 import type { Interview } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-type CheckKey = 'camera' | 'microphone' | 'screen' | 'connection'
+type CheckKey = 'camera' | 'microphone' | 'connection'
 type CheckState = 'checking' | 'ready' | 'needs-action' | 'skipped' | 'blocked' | 'failed' | 'unsupported'
 type CheckResult = { state: CheckState; detail?: string }
 type Checks = Record<CheckKey, CheckResult>
@@ -21,7 +21,6 @@ type Checks = Record<CheckKey, CheckResult>
 const CHECKS: { key: CheckKey; label: string; desc: string; icon: typeof Camera }[] = [
   { key: 'camera', label: 'Camera', desc: 'Your presence in the interview room', icon: Camera },
   { key: 'microphone', label: 'Microphone', desc: 'Voice input (text fallback available)', icon: Mic },
-  { key: 'screen', label: 'Screen sharing', desc: 'Confirmed here before every interview', icon: Monitor },
   { key: 'connection', label: 'Real-time connection', desc: 'Authenticated WebSocket link to the interviewer', icon: Wifi },
 ]
 
@@ -70,7 +69,6 @@ export function LobbyPage() {
   const [checks, setChecks] = useState<Partial<Checks>>({})
   const [permissionNotice, setPermissionNotice] = useState(false)
   const [mediaNoticeDismissed, setMediaNoticeDismissed] = useState(false)
-  const [screenNoticeDismissed, setScreenNoticeDismissed] = useState(false)
   const [running, setRunning] = useState(false)
   const [starting, setStarting] = useState(false)
   const enteredRef = useRef(false)
@@ -131,18 +129,12 @@ export function LobbyPage() {
     setRunning(true)
     setPermissionNotice(false)
     setMediaNoticeDismissed(false)
-    setScreenNoticeDismissed(false)
     clearMediaStream()
 
     setChecks({
       camera: { state: 'checking' },
       microphone: { state: 'checking' },
       connection: { state: 'checking' },
-      screen: typeof navigator.mediaDevices?.getDisplayMedia !== 'function'
-        ? { state: 'unsupported', detail: 'Screen sharing is not supported by this browser.' }
-        : requestScreenShareInLobby
-          ? { state: 'needs-action', detail: 'Not confirmed yet — grant access now so nothing interrupts the interview.' }
-          : { state: 'skipped', detail: 'Lobby prompt is off — you can share from inside the interview instead.' },
     })
 
     // Release anything left over from a previous run before asking again.
@@ -221,7 +213,9 @@ export function LobbyPage() {
       navigate(`/interviews/${interview.id}/live`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unable to start interview.')
-    } finally { setStarting(false) }
+    } finally {
+      setStarting(false)
+    }
   }
 
   if (notFound) return <AppShell title="Interview Lobby"><LobbyNotice title="Interview not found" body="This interview doesn't exist or was removed." /></AppShell>
@@ -231,7 +225,6 @@ export function LobbyPage() {
 
   const connectionReady = checks.connection?.state === 'ready'
   const mediaUnavailable = ['camera', 'microphone'].some((key) => ['blocked', 'failed'].includes(checks[key as 'camera' | 'microphone']?.state ?? 'checking'))
-  const screenNeedsAction = checks.screen?.state === 'needs-action' || checks.screen?.state === 'blocked'
   const resuming = interview.status === 'IN_PROGRESS'
   return <AppShell title="Interview Lobby"><div className="animate-slide-up mx-auto flex max-w-4xl flex-col gap-5">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Interview lobby</p><h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">{interview.roleTitle}</h1><p className="mt-1.5 text-sm text-muted-foreground">Check your environment, then enter the room.</p></div><StatusBadge status={interview.status} /></div>
@@ -243,29 +236,25 @@ export function LobbyPage() {
     ) : null}
     {resuming && <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3"><span className="font-mono text-[11px] text-primary">Resuming session — Round {interview.currentRound}/{interview.rounds} · Question {interview.currentQuestion} · {Math.round(interview.progress * 100)}% complete</span></div>}
     <div className="grid gap-5 lg:grid-cols-2"><section className="rounded-2xl border border-border bg-card p-5"><h2 className="text-sm font-semibold">Interview summary</h2><div className="mt-2"><SummaryRow label="Role">{interview.roleTitle}</SummaryRow><SummaryRow label="Domain">{interview.domain}</SummaryRow><SummaryRow label="Company">{interview.company || '—'}</SummaryRow><SummaryRow label="Type"><TypeBadge type={interview.type} /></SummaryRow><SummaryRow label="Difficulty"><DifficultyBadge difficulty={interview.difficulty} /></SummaryRow><SummaryRow label="Duration">{fmtMinutes(interview.durationMin)}</SummaryRow><SummaryRow label="Rounds">{interview.rounds}</SummaryRow><SummaryRow label="Topics">{interview.topics.join(', ') || 'AI will choose'}</SummaryRow></div></section>
-      <section className="rounded-2xl border border-border bg-card p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Environment check</h2><Button variant="ghost" size="sm" onClick={() => void runChecks()} disabled={running}><RefreshCw className={cn('size-3.5', running && 'animate-spin')} />Re-run</Button></div><div className="mt-3 flex flex-col gap-2.5">{CHECKS.map((check) => <CheckRow key={check.key} check={check} result={checks[check.key]} action={check.key === 'screen' && screenNeedsAction ? <Button variant="outline" size="sm" onClick={() => void requestScreenAccess()}><Monitor className="size-3.5" />Grant access</Button> : undefined} />)}</div></section></div>
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-4"><div className="max-w-md text-xs leading-relaxed text-muted-foreground"><p>Real-time connectivity is required to enter the interview.</p>{mediaUnavailable && !mediaNoticeDismissed ? (<p className="mt-1 flex items-center gap-1.5 text-signal-vague"><CircleAlert className="size-3.5" />Camera or microphone will be off; you can continue in text mode.<button type="button" onClick={() => setMediaNoticeDismissed(true)} className="ml-1 underline underline-offset-1">Dismiss</button></p>) : null}{screenNeedsAction && !screenNoticeDismissed ? (<p className="mt-1 flex flex-wrap items-center gap-1.5 text-signal-vague"><Monitor className="size-3.5" />Screen sharing isn&apos;t confirmed yet.<button type="button" onClick={() => void requestScreenAccess()} className="ml-1 underline underline-offset-1">Grant access</button><button type="button" onClick={() => setScreenNoticeDismissed(true)} className="underline underline-offset-1">Skip</button></p>) : null}</div><div className="flex items-center gap-2"><Link to="/dashboard" onClick={clearMediaStream} className={cn(buttonVariants({ variant: 'ghost' }))}>Cancel</Link><Button size="lg" className="h-11 px-5" disabled={!connectionReady || running || starting} onClick={() => void enterInterview()}>{starting ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}{starting ? 'Starting…' : resuming ? 'Resume Interview' : 'Start Interview'}</Button></div></div>
+      <section className="rounded-2xl border border-border bg-card p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Environment check</h2><Button variant="ghost" size="sm" onClick={() => void runChecks()} disabled={running}><RefreshCw className={cn('size-3.5', running && 'animate-spin')} />Re-run</Button></div><div className="mt-3 flex flex-col gap-2.5">{CHECKS.map((check) => <CheckRow key={check.key} check={check} result={checks[check.key]} />)}</div></section></div>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-4"><div className="max-w-md text-xs leading-relaxed text-muted-foreground"><p>Real-time connectivity is required to enter the interview.</p>{mediaUnavailable && !mediaNoticeDismissed ? (<p className="mt-1 flex items-center gap-1.5 text-signal-vague"><CircleAlert className="size-3.5" />Camera or microphone will be off; you can continue in text mode.<button type="button" onClick={() => setMediaNoticeDismissed(true)} className="ml-1 underline underline-offset-1">Dismiss</button></p>) : null}</div><div className="flex items-center gap-2"><Link to="/dashboard" onClick={clearMediaStream} className={cn(buttonVariants({ variant: 'ghost' }))}>Cancel</Link><Button size="lg" className="h-11 px-5" disabled={!connectionReady || running || starting} onClick={() => void enterInterview()}>{starting ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}{starting ? 'Starting…' : resuming ? 'Resume Interview' : 'Start Interview'}</Button></div></div>
   </div></AppShell>
 }
 
-function CheckRow({ check, result, action }: { check: (typeof CHECKS)[number]; result: CheckResult | undefined; action?: ReactNode }) {
+function CheckRow({ check, result }: { check: (typeof CHECKS)[number]; result: CheckResult | undefined }) {
   const Icon = check.icon
   const state = result?.state ?? 'checking'
   const ready = state === 'ready'
-  const needsAction = state === 'needs-action'
-  const skipped = state === 'skipped'
   const issue = state === 'blocked' || state === 'failed' || state === 'unsupported'
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-background/50 px-3.5 py-3">
-      <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg ring-1 transition-colors', ready ? 'bg-(--signal-strong)/10 text-signal-strong ring-(--signal-strong)/30' : issue || needsAction ? 'bg-(--signal-weak)/10 text-signal-weak ring-(--signal-weak)/30' : 'bg-secondary text-muted-foreground ring-border')}><Icon className="size-4" /></span>
+      <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg ring-1 transition-colors', ready ? 'bg-(--signal-strong)/10 text-signal-strong ring-(--signal-strong)/30' : issue ? 'bg-(--signal-weak)/10 text-signal-weak ring-(--signal-weak)/30' : 'bg-secondary text-muted-foreground ring-border')}><Icon className="size-4" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{check.label}</p>
         <p className="text-xs text-muted-foreground">{result?.detail ?? check.desc}</p>
       </div>
       {ready ? <Badge variant="strong" dot>Ready</Badge>
         : state === 'checking' ? <Loader2 className="size-4 animate-spin text-primary" />
-        : needsAction ? action ?? <span className="flex items-center gap-1 text-xs text-signal-vague"><CircleAlert className="size-3.5" />Action needed</span>
-        : skipped ? <Badge variant="neutral">Optional</Badge>
         : <span className="flex items-center gap-1 text-xs text-signal-weak"><CircleAlert className="size-3.5" />{state === 'blocked' ? 'Blocked' : 'Unavailable'}</span>}
     </div>
   )

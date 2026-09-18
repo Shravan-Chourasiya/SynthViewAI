@@ -11,6 +11,7 @@ import { useInterviewListStore } from '@/lib/stores/interview-list.store'
 import { timeAgo } from '@/lib/format'
 import type { Interview } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { notifySuccess } from '@/lib/notify'
 
 export function ResumablePage() {
   const interviews = useInterviewListStore((s) => s.interviews)
@@ -86,7 +87,11 @@ export function ResumablePage() {
         destructive
         onClose={() => setTarget(null)}
         onConfirm={() => {
-          if (target) void cancelInterview(target.id)
+          if (target) {
+            cancelInterview(target.id).then(() => {
+              notifySuccess('Interview cancelled successfully!');
+            });
+          }
         }}
       />
     </AppShell>

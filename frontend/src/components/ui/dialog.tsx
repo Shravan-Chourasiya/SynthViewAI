@@ -51,6 +51,91 @@ export function Dialog({
   )
 }
 
+// Export the sub-components that were missing
+export function DialogContent({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      {children}
+    </div>
+  )
+}
+
+export function DialogHeader({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("flex flex-col gap-1.5 text-center sm:text-left", className)}>
+      {children}
+    </div>
+  )
+}
+
+export function DialogTitle({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <h2 className={cn("text-lg font-semibold leading-none tracking-tight", className)}>
+      {children}
+    </h2>
+  )
+}
+
+export function DialogDescription({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <p className={cn("text-sm text-muted-foreground", className)}>
+      {children}
+    </p>
+  )
+}
+
+export function DialogFooter({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:gap-2", className)}>
+      {children}
+    </div>
+  )
+}
+
+export function DialogTrigger({
+  children,
+  onClick,
+}: {
+  children: ReactNode
+  onClick?: () => void
+}) {
+  return (
+    <div onClick={onClick}>
+      {children}
+    </div>
+  )
+}
+
 export function ConfirmDialog({
   open,
   title,

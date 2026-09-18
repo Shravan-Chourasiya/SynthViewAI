@@ -5,6 +5,7 @@
 import { ApiError } from "./http";
 import * as authSvc from "./services/auth.service";
 import * as interviewSvc from "./services/interview.service";
+import * as adminSvc from "./services/admin.service"; // Import admin service to potentially add analytics
 import { ENDPOINTS } from "./constants/endpoints";
 import { normalizeInterview } from "./normalizers/interview";
 import type {
@@ -292,6 +293,7 @@ export const api = {
     });
   },
 
+
   // ── Profile ────────────────────────────────────────────────────────────────
 
   async updateProfile(
@@ -324,5 +326,3 @@ export const api = {
 };
 
 // Re-export ENDPOINTS so callers that do `import { ENDPOINTS } from '@/lib/api'`
-// continue to work.
-export { ENDPOINTS };

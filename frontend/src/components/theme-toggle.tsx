@@ -14,7 +14,7 @@ export function ThemeToggle({ className }: { className?: string }) {
         toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
       }}
       className={cn(
-        'relative inline-flex size-9 items-center justify-center rounded-full border border-border bg-card/70 text-muted-foreground shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary hover:shadow-md',
+        'relative inline-flex size-9 items-center justify-center rounded-full border border-border bg-card/70 text-muted-foreground shadow-sm transition-all duration-300',
         className,
       )}
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Activity, Loader2 } from 'lucide-react'
+import { Activity, Loader2, Maximize2 } from 'lucide-react'
 import { QuestionPanel } from '@/components/interview-room/question-panel'
 import {
   AiStatusBar,
@@ -44,6 +44,8 @@ export function LiveRoomPage() {
   const [sharing, setSharing] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
+  const screenVideoRef = useRef<HTMLVideoElement>(null); // Ref for screen video element
   const [endOpen, setEndOpen] = useState(false)
   const { submitAnswer, endInterview } = useInterviewSocket(interview?.id)
 
@@ -75,9 +77,17 @@ export function LiveRoomPage() {
     setMicOn(Boolean(mediaStream?.getAudioTracks().some((track) => track.enabled)))
   }, [mediaStream])
 
+  // Effect to handle screen stream in video element
+  useEffect(() => {
+    if (screenVideoRef.current) {
+      screenVideoRef.current.srcObject = screenStream;
+    }
+  }, [screenStream]);
+
   useEffect(() => () => {
     screenStreamRef.current?.getTracks().forEach((track) => track.stop())
     screenStreamRef.current = null
+    setScreenStream(null) // Clear screen stream state on unmount
     clearMediaStream()
   }, [clearMediaStream])
 
@@ -111,6 +121,7 @@ export function LiveRoomPage() {
     if (sharing) {
       screenStreamRef.current?.getTracks().forEach((track) => track.stop())
       screenStreamRef.current = null
+      setScreenStream(null) // Clear screen stream state when stopping
       setSharing(false)
       return
     }
@@ -121,9 +132,11 @@ export function LiveRoomPage() {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
       screenStreamRef.current = stream
+      setScreenStream(stream) // Set screen stream in state
       setSharing(true)
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         screenStreamRef.current = null
+        setScreenStream(null) // Clear screen stream state when sharing ends
         setSharing(false)
       })
     } catch {
@@ -236,7 +249,34 @@ export function LiveRoomPage() {
 
         {/* side panel */}
         <aside className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
-          <VideoTile cameraOn={cameraOn} sharing={sharing} stream={mediaStream} name={user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username : 'Candidate'} />
+          {/* Camera tile */}
+          <VideoTile 
+            cameraOn={cameraOn} 
+            sharing={false} 
+            stream={mediaStream} 
+            name={user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username : 'Candidate'} 
+          />
+          
+          {/* Screen share tile - only show when actively sharing */}
+          {sharing && screenStream && (
+            <div className="relative flex aspect-video flex-col items-center justify-center overflow-hidden rounded-xl border border-border bg-secondary/40">
+              <video 
+                ref={screenVideoRef}
+                autoPlay 
+                muted 
+                playsInline 
+                className="absolute inset-0 size-full object-contain" 
+              />
+              <span className="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-md bg-background/80 px-2 py-1 font-mono text-[10px] text-signal-weak ring-1 ring-(--signal-weak)/30">
+                <span className="size-1.5 animate-pulse rounded-full bg-signal-weak" />
+                SCREEN SHARE
+              </span>
+              <span className="absolute bottom-2.5 left-2.5 rounded-md bg-background/80 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                Screen
+              </span>
+            </div>
+          )}
+          
           {mediaError ? <p className="text-xs text-signal-weak">{mediaError}</p> : null}
 
           <div className="rounded-xl border border-border bg-card p-4">
@@ -318,5 +358,4 @@ function RoomNotice({ title, body }: { title: string; body: string }) {
 
 function LiveTimer() {
   const seconds = useLiveInterviewStore((state) => state.remainingSeconds)
-  return <InterviewTimer seconds={seconds} />
-}
+  return <InterviewTimer seconds={seconds} />}

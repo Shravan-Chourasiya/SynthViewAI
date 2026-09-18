@@ -2,26 +2,26 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, Monitor, Smartphone } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import * as authSvc from '@/lib/services/auth.service'
 import type { SessionResponse } from '@/lib/types/api'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
 export function SessionsPage() {
   const [sessions, setSessions] = useState<SessionResponse[] | null>(null)
   const [target, setTarget] = useState<SessionResponse | null>(null)
   const [revokeAllOpen, setRevokeAllOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
-    setError(null)
-    authSvc.sessions().then(setSessions).catch((err: unknown) => {
-      setSessions([])
-      setError(err instanceof Error ? err.message : 'Unable to load active sessions.')
-    })
+    authSvc.sessions()
+      .then(setSessions)
+      .catch((err: unknown) => {
+        setSessions([]);
+        notifyError(err instanceof Error ? err.message : 'Unable to load active sessions.');
+      })
   }, [])
 
   useEffect(() => {
@@ -57,7 +57,6 @@ export function SessionsPage() {
           </div>
         ) : (
           <>
-            {error ? <Alert variant="destructive">{error}</Alert> : null}
             <div className="flex flex-col gap-3">
               {sessions.map((s) => {
                 const Icon = s.userAgent.toLowerCase().includes('iphone') || s.deviceType === 'mobile'

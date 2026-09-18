@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CheckCircle2, ChevronDown, Loader2, Monitor } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -12,6 +11,7 @@ import { useAuthStore } from '@/lib/stores/auth.store'
 import { usePreferencesStore } from '@/lib/stores/preferences.store'
 import type { Difficulty, EndingCriteria, ExperienceLevel, InterviewStyle, InterviewType } from '@/lib/types'
 import { PasswordChecklist, passwordIsValid } from '@/pages/auth/password-checklist'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
 const selectCls =
   'h-10 w-full appearance-none rounded-md border border-input bg-transparent pl-3 pr-9 text-base shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring'
@@ -41,9 +41,7 @@ export function SettingsPage() {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [pwError, setPwError] = useState<string | null>(null)
   const [pwLoading, setPwLoading] = useState(false)
-  const [pwSaved, setPwSaved] = useState(false)
 
   /* preferences
    * Draft state is seeded from the persisted store and committed on save, so the
@@ -91,19 +89,27 @@ export function SettingsPage() {
   const changePassword = async (e: React.FormEvent) => {
     e.preventDefault()
     if (pwLoading) return
-    setPwError(null)
-    setPwSaved(false)
-    if (!current) return setPwError('Enter your current password.')
-    if (!passwordIsValid(next)) return setPwError('New password does not meet the requirements.')
-    if (next !== confirm) return setPwError('Passwords do not match.')
+    if (!current) {
+      notifyError('Enter your current password.')
+      return
+    }
+    if (!passwordIsValid(next)) {
+      notifyError('New password does not meet the requirements.')
+      return
+    }
+    if (next !== confirm) {
+      notifyError('Passwords do not match.')
+      return
+    }
     setPwLoading(true)
     try {
       await api.changePassword(current, next)
       setCurrent('')
       setNext('')
       setConfirm('')
-      setPwSaved(true)
-      setTimeout(() => setPwSaved(false), 2500)
+      notifySuccess('Password updated successfully!')
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : 'Unable to update password. Please try again.');
     } finally {
       setPwLoading(false)
     }
@@ -130,7 +136,10 @@ export function SettingsPage() {
     })
     setPreferAdaptiveFollowUps(followUps)
     setPrefsSaved(true)
-    setTimeout(() => setPrefsSaved(false), 2500)
+    notifySuccess('Preferences saved successfully!')
+    
+    // Reset the prefsSaved flag after 3 seconds so the message disappears
+    setTimeout(() => setPrefsSaved(false), 3000)
   }
 
   return (
@@ -147,12 +156,6 @@ export function SettingsPage() {
         <section className="rounded-2xl border border-border bg-card p-6">
           <h2 className="text-sm font-semibold">Security</h2>
           <form className="mt-4 flex flex-col gap-4" onSubmit={changePassword} noValidate>
-            {pwError ? <Alert variant="destructive">{pwError}</Alert> : null}
-            {pwSaved ? (
-              <Alert variant="strong" icon={<CheckCircle2 className="size-4" />}>
-                Password updated.
-              </Alert>
-            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="current">Current password</Label>
               <Input id="current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
@@ -194,10 +197,9 @@ export function SettingsPage() {
         <section className="rounded-2xl border border-border bg-card p-6">
           <h2 className="text-sm font-semibold">Interview preferences</h2>
           {prefsSaved ? (
-            <div className="mt-3">
-              <Alert variant="strong" icon={<CheckCircle2 className="size-4" />}>
-                Preferences saved.
-              </Alert>
+            <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
+              <CheckCircle2 className="size-4" />
+              <span>Preferences saved successfully!</span>
             </div>
           ) : null}
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -417,7 +419,15 @@ export function SettingsPage() {
         destructive
         onClose={() => setDeleteOpen(false)}
         onConfirm={() => {
-          void api.deleteAccount().then(() => logout()).then(() => navigate('/'))
+          api.deleteAccount()
+            .then(() => {
+              notifySuccess('Account deleted successfully!');
+              logout();
+              navigate('/');
+            })
+            .catch(error => {
+              notifyError(error instanceof Error ? error.message : 'Unable to delete account. Please try again.');
+            });
         }}
       />
     </AppShell>

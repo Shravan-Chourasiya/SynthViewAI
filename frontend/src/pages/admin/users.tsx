@@ -8,10 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, ConfirmDialog } from '@/components/ui/dialog';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { UserSummary } from '@/lib/services/admin.service';
-import { RotateCcw, Search, Edit, Trash2, AlertTriangle } from 'lucide-react';
+import { RotateCcw, Search, AlertTriangle } from 'lucide-react';
 
 export function AdminUsersPage() {
   const { 
@@ -57,8 +57,10 @@ export function AdminUsersPage() {
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case 'active': return 'default';
-      case 'suspended': return 'destructive';
-      case 'pending': return 'secondary';
+      case 'suspended': return 'weak'; // Changed from 'destructive' to 'weak' which exists in badge variants
+      case 'disabled': return 'vague'; // Changed to existing variant
+      case 'deleted': return 'neutral'; // Changed to existing variant
+      case 'pending': return 'vague'; // Changed to existing variant
       default: return 'outline';
     }
   };
@@ -188,52 +190,13 @@ export function AdminUsersPage() {
                           {new Date(user.createdAt).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          <Dialog 
-                            open={showSuspendDialog.open && showSuspendDialog.user?.id === user.id} 
-                            onOpenChange={(open) => {
-                              if (!open) {
-                                setShowSuspendDialog({open: false, user: null});
-                              }
-                            }}
+                          <Button 
+                            variant={user.accountStatus === 'suspended' ? "outline" : "default"} 
+                            size="sm"
+                            onClick={() => setShowSuspendDialog({open: true, user})}
                           >
-                            <DialogTrigger asChild>
-                              <Button 
-                                variant={user.accountStatus === 'suspended' ? "outline" : "destructive"} 
-                                size="sm"
-                                onClick={() => setShowSuspendDialog({open: true, user})}
-                              >
-                                {user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>
-                                  {user.accountStatus === 'suspended' ? 'Reinstate User' : 'Suspend User'}
-                                </DialogTitle>
-                                <DialogDescription>
-                                  {user.accountStatus === 'suspended' 
-                                    ? `Are you sure you want to reinstate ${user.firstName} ${user.lastName}?` 
-                                    : `Are you sure you want to suspend ${user.firstName} ${user.lastName}?`}
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="flex items-start gap-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-                                <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-yellow-600" />
-                                <div className="text-sm text-yellow-700">
-                                  {user.accountStatus === 'suspended' 
-                                    ? 'The user will regain access to their account.' 
-                                    : 'The user will lose access to their account and all active sessions will be terminated.'}
-                                </div>
-                              </div>
-                              <DialogFooter>
-                                <Button 
-                                  variant={user.accountStatus === 'suspended' ? "default" : "destructive"} 
-                                  onClick={() => handleSuspendUser(user.id)}
-                                >
-                                  {user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
-                                </Button>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
+                            {user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -296,6 +259,25 @@ export function AdminUsersPage() {
           </Card>
         </div>
       </AdminGate>
+      
+      {/* Separate Dialog for Suspend/Reinstate Confirmation */}
+      <Dialog
+        open={showSuspendDialog.open}
+        onClose={() => setShowSuspendDialog({open: false, user: null})}
+      >
+        {showSuspendDialog.user && (
+          <ConfirmDialog
+            title={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate User' : 'Suspend User'}
+            description={showSuspendDialog.user.accountStatus === 'suspended' 
+              ? `Are you sure you want to reinstate ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?` 
+              : `Are you sure you want to suspend ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?`}
+            confirmLabel={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
+            destructive={showSuspendDialog.user.accountStatus !== 'suspended'}
+            onConfirm={() => handleSuspendUser(showSuspendDialog.user!.id)}
+            onClose={() => setShowSuspendDialog({open: false, user: null})}
+          />
+        )}
+      </Dialog>
     </AppShell>
   );
 }

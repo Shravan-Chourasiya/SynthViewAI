@@ -70,9 +70,11 @@ export function QuestionPanel({
       </div>
 
       {/* question */}
-      <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
-        {question.text}
-      </h2>
+      <div className="mt-5 flex items-start gap-2 max-w-3xl text-pretty">
+        <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
+          {question.text}
+        </h2>
+      </div>
 
       {/* answer form (FR-15) */}
       <div className="mt-5 flex flex-1 flex-col">
@@ -92,11 +94,13 @@ export function QuestionPanel({
           className="min-h-44 flex-1 resize-none rounded-xl bg-background/60 p-4 text-sm leading-relaxed"
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            {text.trim()
-              ? `${text.trim().split(/\s+/).length} words`
-              : 'Structured, specific answers score higher'}
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {text.trim()
+                ? `${text.trim().split(/\s+/).length} words`
+                : 'Structured, specific answers score higher'}
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"

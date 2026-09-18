@@ -1,4 +1,5 @@
-import { api } from '../api';
+import { httpGet } from '../http';
+import type { UserAnalytics } from './analytics.service'; // Import the type
 
 export interface UserAnalytics {
   overallStats: {
@@ -29,21 +30,24 @@ export interface UserAnalytics {
   }>;
 }
 
+// Define the response type for the API
+type AnalyticsResponse = {
+  data: UserAnalytics;
+};
+
 class AnalyticsService {
   /**
    * Get user analytics
    */
   async getUserAnalytics() {
-    const response = await api.get('/analytics/me');
-    return response.data as { data: UserAnalytics };
+    return await httpGet<AnalyticsResponse>('/analytics/me');
   }
 
   /**
    * Get user trend analytics
    */
   async getUserTrendAnalytics() {
-    const response = await api.get('/analytics/me/trend');
-    return response.data as { data: { trendData: any[]; overallStats: any } };
+    return await httpGet<{ data: { trendData: any[]; overallStats: any } }>('/analytics/me/trend');
   }
 }
 

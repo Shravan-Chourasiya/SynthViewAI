@@ -34,6 +34,7 @@ const isActive = (pathname: string, to: string) => {
 
 function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const { pathname } = useLocation()
+  const user = useAuthStore((s) => s.user)
   const resumable = 0
 
   const groups: { title: string; items: NavItem[] }[] = [
@@ -55,10 +56,17 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
       items: [
         { to: '/profile', label: 'Profile', icon: UserIcon },
         { to: '/settings', label: 'Settings', icon: Settings },
-        { to: '/admin', label: 'Admin', icon: Shield },
       ],
     },
   ]
+  
+  // Add admin menu only for admin users
+  if (user?.userrole === 'admin') {
+    groups.push({
+      title: 'Admin',
+      items: [{ to: '/admin', label: 'Admin Panel', icon: Shield }],
+    })
+  }
 
   return (
     <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">

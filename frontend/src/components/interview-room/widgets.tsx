@@ -11,6 +11,7 @@ import {
   VideoOff,
   Wifi,
   WifiOff,
+  Maximize2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -112,7 +113,7 @@ function TypingBars() {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="w-0.5 origin-bottom rounded-full bg-primary"
+          className="w-0.5 h-2.5 origin-bottom rounded-full bg-primary"
           style={{
             height: 10,
             animation: 'typing-bar 1s ease-in-out infinite',
@@ -162,8 +163,11 @@ export function VideoTile({
   const videoRef = React.useRef<HTMLVideoElement>(null)
 
   React.useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = stream ?? null
-  }, [stream])
+    if (videoRef.current) {
+      // Set the video source to the stream if available and camera is on
+      videoRef.current.srcObject = (cameraOn && stream) ? stream : null;
+    }
+  }, [stream, cameraOn])
 
   const ini = name
     .split(' ')
@@ -183,6 +187,7 @@ export function VideoTile({
           SHARING
         </span>
       ) : null}
+      
       {cameraOn ? (
         <>
           <span className="flex size-14 items-center justify-center rounded-full bg-primary/15 text-lg font-semibold text-primary ring-1 ring-primary/30">
@@ -339,4 +344,3 @@ export function EndInterviewDialog({
     </Dialog>
   )
 }
-

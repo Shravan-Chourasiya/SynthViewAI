@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,6 +10,7 @@ import { usePreferencesStore } from '@/lib/stores/preferences.store'
 import type { Difficulty, EndingCriteria, ExperienceLevel, InterviewStyle, InterviewType } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/http'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
 const STEPS = ['Role & Context', 'Interview Type', 'Interview Style', 'Difficulty & Experience', 'Topics & Skills', 'Duration & Ending', 'Review'] as const
 
@@ -82,7 +82,6 @@ export function NewInterviewPage() {
     endingCriteria: savedDefaults.endingCriteria,
     questionCount: savedDefaults.questionCount,
   }))
-  const [errors, setErrors] = useState<string[]>([])
   const [topicInput, setTopicInput] = useState('')
   const [creating, setCreating] = useState(false)
   const patch = (p: Partial<WizardState>) => setState((s) => ({ ...s, ...p }))
@@ -98,7 +97,14 @@ export function NewInterviewPage() {
     if (step === 5 && state.endingCriteria === 'QUESTION_COUNT' && (!Number.isInteger(state.questionCount) || state.questionCount < 1 || state.questionCount > 25)) errs.push('Question count must be a whole number from 1 to 25.')
     return errs
   }
-  const next = () => { const errs = validateStep(); setErrors(errs); if (!errs.length) setStep((s) => Math.min(s + 1, STEPS.length - 1)) }
+  const next = () => { 
+    const errs = validateStep(); 
+    if (errs.length > 0) {
+      errs.forEach(error => notifyError(error));
+      return;
+    }
+    setStep((s) => Math.min(s + 1, STEPS.length - 1)) 
+  }
   const back = () => { setErrors([]); setStep((s) => Math.max(s - 1, 0)) }
   const addTopic = (topic: string) => {
     const value = topic.trim()
@@ -134,7 +140,6 @@ export function NewInterviewPage() {
     <header><p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">New interview</p><h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">Configure your interview</h1><p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">The AI interviewer adapts to everything you set here. Review it all before entering the lobby.</p></header>
     <ol className="flex flex-wrap items-center gap-y-2">{STEPS.map((label, index) => { const done = index < step; const active = index === step; return <li key={label} className="flex items-center">{index > 0 && <span aria-hidden="true" className={cn('mx-1.5 h-px w-5 sm:mx-2 sm:w-8', index <= step ? 'bg-primary/50' : 'bg-border')} />}<button type="button" onClick={() => done && setStep(index)} disabled={!done} aria-current={active ? 'step' : undefined} className={cn('flex items-center gap-2 rounded-full py-1 pl-1 transition-colors', done ? 'cursor-pointer pr-2' : 'pr-1', active && 'pr-3')}><span className={cn('flex size-7 items-center justify-center rounded-full font-mono text-[11px] font-semibold ring-1 transition-colors', done && 'bg-[var(--signal-strong)]/15 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30', active && 'bg-primary text-primary-foreground ring-primary', !done && !active && 'bg-secondary text-muted-foreground ring-border')}>{done ? <Check className="size-3.5" strokeWidth={3} /> : index + 1}</span>{(active || done) && <span className={cn('hidden font-mono text-[10px] uppercase tracking-wider md:inline', active ? 'text-foreground' : 'text-muted-foreground')}>{label}</span>}</button></li> })}</ol>
     <div className="rounded-2xl border border-border bg-card p-6 sm:p-7">
-      {errors.length > 0 && <div className="mb-4"><Alert variant="destructive" icon={<AlertTriangle className="size-4" />}><ul className="list-inside list-disc">{errors.map((error) => <li key={error}>{error}</li>)}</ul></Alert></div>}
       {step === 0 && <RoleContext state={state} patch={patch} />}
       {step === 1 && <div className="flex flex-col gap-4"><OptionCards options={TYPE_OPTIONS} selected={state.type} onSelect={(type) => patch({ type })} /><div className="rounded-xl border border-dashed border-border bg-card/50 p-4"><p className="text-xs leading-relaxed text-muted-foreground">Coding rounds are not available yet — this build has no code execution environment, so every session is a writing-based behavioral, technical or mixed interview.</p></div></div>}
       {step === 2 && <OptionCards options={STYLE_OPTIONS} selected={state.interviewStyle} onSelect={(interviewStyle) => patch({ interviewStyle })} />}

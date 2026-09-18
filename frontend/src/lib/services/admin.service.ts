@@ -7,6 +7,7 @@ export interface UserSummary {
   lastName: string;
   userrole: string;
   isActive: boolean;
+  accountStatus: 'active' | 'suspended' | 'disabled' | 'deleted'; // Added accountStatus property
   createdAt: string;
   updatedAt: string;
   interviewCount: number;
