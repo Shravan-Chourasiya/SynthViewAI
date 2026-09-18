@@ -1,70 +1,80 @@
-import type { Response, NextFunction } from "express";
-import { StatusCodes } from "http-status-codes";
+import { type Request, type Response, type NextFunction } from "express";
+import { verifyToken } from "../utils/token.util.js";
+import { SessionService } from "../services/auth/session.service.js";
+import { COOKIE_NAMES } from "../constants/auth.constants.js";
 import { AppError } from "../utils/appError.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
-import { verifyToken, isTokenBlacklisted, COOKIE_NAMES } from "../utils/token.util.js";
+import { StatusCodes } from "http-status-codes";
 import type { AuthenticatedRequest } from "../types/request.js";
-import type { Request } from "express";
 
-export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+export const requireAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const token = (req as AuthenticatedRequest).cookies?.[COOKIE_NAMES.ACCESS] as
-      string | undefined;
+    const token = req.cookies?.[COOKIE_NAMES.ACCESS] as
+      | string
+      | undefined;
 
     if (!token) {
       throw new AppError(
-        "Authentication required",
+        "Access token is required",
         StatusCodes.UNAUTHORIZED,
         ErrorCodes.AUTH_UNAUTHORIZED,
-        { isOperational: true },
-      );
-    }
-
-    const blacklisted = await isTokenBlacklisted(token);
-    if (blacklisted) {
-      throw new AppError(
-        "Session has been revoked",
-        StatusCodes.UNAUTHORIZED,
-        ErrorCodes.AUTH_SESSION_EXPIRED,
-        { isOperational: true },
+        { isOperational: true }
       );
     }
 
     const payload = verifyToken(token);
 
-    if (payload.type !== "access") {
+    if (!payload) {
       throw new AppError(
-        "Invalid token type",
+        "Invalid or expired access token",
         StatusCodes.UNAUTHORIZED,
         ErrorCodes.AUTH_UNAUTHORIZED,
-        { isOperational: true },
+        { isOperational: true }
       );
     }
 
-    const authReq = req as AuthenticatedRequest;
-    authReq.auth = {
-      userId: payload.userId,
-      sessionId: payload.sessionId,
-      tokenFamily: payload.tokenFamily,
+    // Verify session is still valid
+    const session = await SessionService.validateSession(payload.sessionId, payload.tokenFamily);
+
+    if (!session) {
+      throw new AppError(
+        "Session not found or expired",
+        StatusCodes.UNAUTHORIZED,
+        ErrorCodes.AUTH_UNAUTHORIZED,
+        { isOperational: true }
+      );
+    }
+
+    // Extend session
+    await SessionService.extendSession(payload.sessionId);
+
+    // Attach user info to request
+    (req as AuthenticatedRequest).auth = {
+      userId: session.userId,
+      sessionId: session.id,
+      tokenFamily: session.tokenFamily,
       accessToken: token,
-      refreshToken: (authReq.cookies?.[COOKIE_NAMES.REFRESH] as string) ?? "",
+      refreshToken: req.cookies?.[COOKIE_NAMES.REFRESH] as string,
+      userRole: session.userRole, // Adding user role to the auth object
     };
-    authReq.userId = payload.userId;
 
     next();
   } catch (error) {
     if (error instanceof AppError) {
       next(error);
-      return;
+    } else {
+      next(
+        new AppError(
+          "Authentication failed",
+          StatusCodes.UNAUTHORIZED,
+          ErrorCodes.AUTH_UNAUTHORIZED,
+          { isOperational: true }
+        )
+      );
     }
-    // JWT errors (expired, malformed)
-    next(
-      new AppError(
-        "Invalid or expired session",
-        StatusCodes.UNAUTHORIZED,
-        ErrorCodes.AUTH_SESSION_EXPIRED,
-        { isOperational: true },
-      ),
-    );
   }
-}
+};

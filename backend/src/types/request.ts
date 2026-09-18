@@ -1,9 +1,11 @@
 import type { Request } from "express";
+import type { COOKIE_NAMES } from "../constants/auth.constants.js";
 
 export interface StandardRequest extends Request {
-  _id: string;
-  userId: string;
-  userRole: string;
+  _id?: string;  // For request ID
+  userId?: string;  // For user ID in standard requests
+  userRole?: string;  // For user role in standard requests
+  resource?: any;  // For ownership middleware
 }
 
 export interface AuthenticatedRequest extends StandardRequest {
@@ -13,6 +15,6 @@ export interface AuthenticatedRequest extends StandardRequest {
     tokenFamily: string;
     accessToken: string;
     refreshToken: string;
+    userRole: string; // Making userRole required for authenticated requests
   };
-  resource?: unknown;
 }
