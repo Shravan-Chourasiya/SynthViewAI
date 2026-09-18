@@ -19,6 +19,8 @@ import { redisClient } from "./config/redis.init.js";
 import { readinessCheck } from "./utils/ready.js";
 import { createInterviewRouter } from "./routes/interview.routes.js";
 import { startAbandonStaleInterviewsJob } from "./jobs/abandonStaleInterviews.job.js";
+import AdminRoutes from "./routes/admin.routes.js";
+import AnalyticsRoutes from "./routes/analytics.routes.js";
 config();
 const app = express();
 
@@ -40,6 +42,10 @@ const AuthRoutes: express.Router = createAuthRouter();
 app.use(`/${env.API_VERSION}/`, AuthRoutes);
 const InterviewRoutes: express.Router = createInterviewRouter();
 app.use(`/${env.API_VERSION}/`, InterviewRoutes);
+
+// Register admin and analytics routes
+app.use(`/${env.API_VERSION}/admin`, AdminRoutes);
+app.use(`/${env.API_VERSION}/analytics`, AnalyticsRoutes);
 
 startAbandonStaleInterviewsJob();
 
