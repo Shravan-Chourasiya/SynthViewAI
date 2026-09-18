@@ -18,24 +18,54 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import supertest from "supertest";
 import bcrypt from "bcrypt";
 import { eq } from "drizzle-orm";
-import { setup, teardown, resetDb, resetRedis, getContainers } from "./helpers/containers.js";
+import { resetDb, resetRedis, getContainers } from "./helpers/containers.js";
 import { usersTable } from "../src/modules/auth/schemas/user.schema.js";
 import { sessionsTable } from "../src/modules/auth/schemas/session.schema.js";
 import { randomUUID } from "crypto";
 
-// ── App bootstrap ─────────────────────────────────────────────────────────────
-// We import app AFTER containers are up so the singletons point at test infra.
-// vitest.config must have { isolate: false } or we use dynamic import here.
+// Skip individual container setup since global setup handles it
+// beforeAll(async () => {
+//   const containers = await setup();
+// 
+//   // Patch singletons before app loads
+//   const { vi } = await import("vitest");
+//   vi.doMock("../src/db/postgres.init.js", () => ({
+//     default: () => containers.db,
+//     getPgDb: () => containers.db,
+//     getPgPool: () => containers.pool,
+//   }));
+//   vi.doMock("../src/config/redis.init.js", () => ({
+//     redisClient: containers.redis,
+//   }));
+//   vi.doMock("../src/config/env.js", () => ({
+//     env: {
+//       NODE_ENV: "test",
+//       PORT: 4001,
+//       API_VERSION: "v1",
+//       JWT_SECRET: "a".repeat(64),
+//       CORS_ORIGIN: ["http://localhost:3000"],
+//       COOKIE_DOMAIN: undefined,
+//       LOG_LEVEL: "silent",
+//       APP_VERSION: "1.0.0",
+//     },
+//   }));
+// 
+//   const { default: app } = await import("../src/app.js");
+//   request = supertest(app);
+// }, 120_000);
+// 
+// afterAll(async () => {
+//   await teardown();
+// });
 
+// Re-initialize the app with test containers before each test run
 let request: ReturnType<typeof supertest>;
-const API = "/v1";
-const CSRF = "test-csrf-token-" + randomUUID();
 
 beforeAll(async () => {
-  const containers = await setup();
-
   // Patch singletons before app loads
   const { vi } = await import("vitest");
+  const containers = getContainers();
+  
   vi.doMock("../src/db/postgres.init.js", () => ({
     default: () => containers.db,
     getPgDb: () => containers.db,
@@ -61,9 +91,6 @@ beforeAll(async () => {
   request = supertest(app);
 }, 120_000);
 
-afterAll(async () => {
-  await teardown();
-});
 beforeEach(async () => {
   await resetDb();
   await resetRedis();
@@ -114,6 +141,10 @@ function extractCookie(cookies: string[] | undefined, name: string): string | un
     ?.split(";")[0]
     ?.split("=")[1];
 }
+
+// Global variables
+const API = "/v1";
+const CSRF = "test-csrf-token-" + randomUUID();
 
 // ── Part 3.1 — Registration ───────────────────────────────────────────────────
 

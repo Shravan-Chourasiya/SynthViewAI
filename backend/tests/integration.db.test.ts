@@ -1,4 +1,4 @@
-/**
+/*
  * integration.db.test.ts — Part 2
  * Database layer integration tests.
  * Requires: Docker running, @testcontainers/postgresql installed.
@@ -15,12 +15,15 @@ import { sessionsTable } from "../src/modules/auth/schemas/session.schema.js";
 import { interviewsTable } from "../src/modules/interview/schemas/interview.schema.js";
 import { randomUUID } from "crypto";
 
-beforeAll(async () => {
-  await setup();
-}, 120_000);
-afterAll(async () => {
-  await teardown();
-});
+// Skip container setup since global setup handles it
+// beforeAll(async () => {
+//   await setup();
+// }, 120_000);
+// afterAll(async () => {
+//   await teardown();
+// });
+
+// Reset DB between tests for isolation
 beforeEach(async () => {
   await resetDb();
 });
