@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi, type AddressInfo } from "vitest";
 import express, { type Express } from "express";
-import rateLimit, { MemoryStore } from "express-rate-limit";
+import rateLimit, { MemoryStore, ipKeyGenerator } from "express-rate-limit";
 import type { Server } from "http";
 import { StatusCodes } from "http-status-codes";
 
@@ -26,7 +26,16 @@ function buildApp(limit: number, windowMs: number, store: MemoryStore): Express 
     standardHeaders: "draft-8",
     legacyHeaders: false,
     store,
-    keyGenerator: (req) => (req.headers["x-client-id"] as string) ?? req.ip ?? "unknown",
+    keyGenerator: (req, _res) => {
+      // For requests with x-client-id header, use that as key
+      const clientId = req.headers["x-client-id"] as string;
+      if (clientId) {
+        return clientId;
+      }
+      
+      // Use ipKeyGenerator to safely handle IPv4/IPv6 addresses
+      return ipKeyGenerator(req.ip || "unknown");
+    },
     handler: (_req, res) => {
       res.status(StatusCodes.TOO_MANY_REQUESTS).json({ error: "rate_limit_exceeded" });
     },
