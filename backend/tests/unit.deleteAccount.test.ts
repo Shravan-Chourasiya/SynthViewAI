@@ -23,9 +23,6 @@ vi.mock("bcrypt", () => ({
   default: { compare: vi.fn(), hash: vi.fn() },
 }));
 
-vi.mock("../src/modules/auth/services/auth.service.js", () => ({
-  deleteAccountService: vi.fn(),
-}));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
 

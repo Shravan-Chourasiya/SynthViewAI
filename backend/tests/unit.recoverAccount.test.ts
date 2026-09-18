@@ -26,13 +26,12 @@ vi.mock("bcrypt", () => ({
   },
 }));
 
-vi.mock("../src/modules/auth/services/auth.service.js", () => ({
-  recoverAccountService: vi.fn(),
-}));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
 
 import { recoverAccountService } from "../src/modules/auth/services/auth.service.js";
+import { AppError } from "../src/utils/appError.js";
+import { verifyToken } from "../src/utils/token.util.js";
 import { getPgDb } from "../src/db/postgres.init.js";
 import bcrypt from "bcrypt";
 
