@@ -111,13 +111,15 @@ function DashboardContent({
             you left off, or start a fresh adaptive session.
           </p>
         </div>
-        <Link
-          to="/interviews/new"
-          className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}
-        >
-          <Plus className="size-4" />
-          Start New Interview
-        </Link>
+        {data.total > 0 ? (
+          <Link
+            to="/interviews/new"
+            className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}
+          >
+            <Plus className="size-4" />
+            Start New Interview
+          </Link>
+        ) : null}
       </div>
 
       {data.total === 0 ? (

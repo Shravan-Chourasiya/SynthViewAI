@@ -182,8 +182,12 @@ export function LiveRoomPage() {
     )
   }
 
+  // `totalQuestions` from the server is null until the interview plan is
+  // finalized. Only use the authoritative value once it's available; otherwise
+  // pass null so the UI shows "Q{index} of …" instead of a fabricated total
+  // that silently grows as the user answers.
   const qIndex = questionNumber || 1
-  const qTotal = Math.max(qIndex, totalQuestions ?? 0, answeredCount + 1)
+  const qTotal = totalQuestions ?? null
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
@@ -241,13 +245,17 @@ export function LiveRoomPage() {
                 Progress
               </p>
               <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                Q{qIndex}/{qTotal}
+                Q{qIndex}/{qTotal ?? '…'}
               </p>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
               <div
                 className="h-full rounded-full bg-primary transition-[width] duration-500"
-                style={{ width: `${((qIndex - 1) / Math.max(1, qTotal)) * 100}%` }}
+                style={{
+                  width: qTotal
+                    ? `${((qIndex - 1) / qTotal) * 100}%`
+                    : '0%',
+                }}
               />
             </div>
             <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-muted-foreground">

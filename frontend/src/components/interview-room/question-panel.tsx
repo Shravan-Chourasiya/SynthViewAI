@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ArrowRight, Eraser } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,15 +14,29 @@ export function QuestionPanel({
 }: {
   question: Question
   index: number
-  total: number
+  /** `null` when the total number of questions isn't known yet. */
+  total: number | null
   busy: boolean
   onSubmit: (text: string) => void
 }) {
   const [text, setText] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const submit = () => {
     if (!text.trim() || busy) return
     onSubmit(text)
+  }
+
+  // Keyboard shortcuts: Ctrl+Enter submits, Escape clears. (FR-15.3)
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      submit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setText('')
+      textareaRef.current?.focus()
+    }
   }
 
   return (
@@ -39,7 +53,7 @@ export function QuestionPanel({
           </Badge>
         )}
         <Badge variant="outline">
-          Q{index} of {total}
+          Q{index}{total !== null ? ` of ${total}` : ' of …'}
         </Badge>
         <Badge variant="outline">{question.topic}</Badge>
         <Badge
@@ -69,9 +83,11 @@ export function QuestionPanel({
           Your answer
         </label>
         <Textarea
+          ref={textareaRef}
           id="answer"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
           placeholder="Be specific — the interviewer adapts to what you say…"
           className="min-h-44 flex-1 resize-none rounded-xl bg-background/60 p-4 text-sm leading-relaxed"
         />

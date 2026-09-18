@@ -4,6 +4,7 @@ node_modules/
 .pnp.js
 backend/docs/temp/*
 .amazonq/*
+.utim*/*
 *txt
 # Testing
 coverage/
@@ -75,3 +76,6 @@ playwright-report/
 backend_test_suite_plan.md
 frontend_test_suite_plan.md
 output.json
+cb561ae8-184d-4953-8cc6-bca4707d7621.png
+.agents/skills/Ui design Guide/SKILL.md
+temp.md

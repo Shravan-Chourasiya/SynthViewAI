@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useInterviewListStore } from '@/lib/stores/interview-list.store'
+import { usePreferencesStore } from '@/lib/stores/preferences.store'
 import type { Difficulty, EndingCriteria, ExperienceLevel, InterviewStyle, InterviewType } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/http'
@@ -66,7 +67,21 @@ export function NewInterviewPage() {
   const navigate = useNavigate()
   const createInterview = useInterviewListStore((s) => s.createInterview)
   const [step, setStep] = useState(0)
-  const [state, setState] = useState<WizardState>(initialState)
+  // Seed the repeated configuration fields from the defaults saved in Settings
+  // so a returning candidate does not re-pick them for every interview. Role,
+  // domain and company stay empty on purpose — they differ per interview.
+  const savedDefaults = usePreferencesStore((s) => s.interviewDefaults)
+  const [state, setState] = useState<WizardState>(() => ({
+    ...initialState,
+    type: savedDefaults.type,
+    difficulty: savedDefaults.difficulty,
+    experienceLevel: savedDefaults.experienceLevel,
+    interviewStyle: savedDefaults.interviewStyle,
+    durationMin: savedDefaults.durationMin,
+    topics: savedDefaults.topics,
+    endingCriteria: savedDefaults.endingCriteria,
+    questionCount: savedDefaults.questionCount,
+  }))
   const [errors, setErrors] = useState<string[]>([])
   const [topicInput, setTopicInput] = useState('')
   const [creating, setCreating] = useState(false)

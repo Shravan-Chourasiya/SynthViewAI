@@ -82,10 +82,12 @@ export function InterviewsPage() {
               Every session you've configured, taken, or resumed.
             </p>
           </div>
-          <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
-            <Plus className="size-4" />
-            New Interview
-          </Link>
+          {all.length > 0 ? (
+            <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
+              <Plus className="size-4" />
+              New Interview
+            </Link>
+          ) : null}
         </div>
 
         {/* filters */}
