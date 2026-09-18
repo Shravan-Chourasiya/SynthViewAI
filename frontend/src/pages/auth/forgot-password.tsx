@@ -2,30 +2,32 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, MailCheck } from 'lucide-react'
 import { AuthLayout } from '@/components/auth-layout'
-import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (loading) return
     setError(null)
     if (!email.includes('@')) {
-      setError('Please enter a valid email address.')
+      notifyError('Please enter a valid email address.')
       return
     }
     setLoading(true)
     try {
       await api.requestPasswordReset(email)
+      notifySuccess('Password reset link sent successfully!')
       setSent(true)
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : 'Unable to send password reset link. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -58,7 +60,6 @@ export function ForgotPasswordPage() {
   return (
     <AuthLayout title="Reset your password" subtitle="We'll email you a secure reset link.">
       <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
-        {error ? <Alert variant="destructive">{error}</Alert> : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
           <Input

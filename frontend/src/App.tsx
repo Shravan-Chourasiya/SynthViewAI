@@ -1,10 +1,12 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Link, Navigate } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import { ErrorState } from '@/components/error-state'
-import { AuthBootstrap, RequireAuth } from '@/components/require-auth'
+import { AuthBootstrap, RequireAuth, RequireAdmin } from '@/components/require-auth'
 import { buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/lib/stores/auth.store'
+import { useTheme } from '@/components/theme-provider'
 import { cn } from '@/lib/utils'
 
 /* -------------------------------------------------------------------------- */
@@ -18,7 +20,7 @@ const ContactPage = lazy(() => import('@/pages/public-info').then((m) => ({ defa
 const PrivacyPage = lazy(() => import('@/pages/public-info').then((m) => ({ default: m.PrivacyPage })))
 const TermsPage = lazy(() => import('@/pages/public-info').then((m) => ({ default: m.TermsPage })))
 const AuthPage = lazy(() => import('@/pages/auth/auth').then((m) => ({ default: m.AuthPage })))
-const VerifyEmailPage = lazy(() => import('@/pages/auth/verify-email').then((m) => ({ default: m.VerifyEmailPage })))
+// Note: We no longer need the separate VerifyEmailPage since it's integrated into AuthPage
 const ForgotPasswordPage = lazy(() => import('@/pages/auth/forgot-password').then((m) => ({ default: m.ForgotPasswordPage })))
 const ResetPasswordPage = lazy(() => import('@/pages/auth/reset-password').then((m) => ({ default: m.ResetPasswordPage })))
 
@@ -81,9 +83,15 @@ function GuestOnly({ children }: { children: React.ReactNode }) {
 /*  Router                                                                    */
 /* -------------------------------------------------------------------------- */
 
+function ThemedToaster() {
+  const { theme } = useTheme();
+  return <Toaster position="top-right" duration={3000} theme={theme} />;
+}
+
 export default function App() {
   return (
     <AuthBootstrap>
+      <ThemedToaster />
       <Routes>
         {/* public */}
         <Route path="/" element={<Suspense fallback={<PublicFallback />}><LandingPage /></Suspense>} />
@@ -93,7 +101,7 @@ export default function App() {
         <Route path="/terms" element={<Suspense fallback={<PublicFallback />}><TermsPage /></Suspense>} />
         <Route path="/login" element={<GuestOnly><Suspense fallback={<PublicFallback />}><AuthPage /></Suspense></GuestOnly>} />
         <Route path="/register" element={<GuestOnly><Suspense fallback={<PublicFallback />}><AuthPage /></Suspense></GuestOnly>} />
-        <Route path="/verify-email" element={<Suspense fallback={<PublicFallback />}><VerifyEmailPage /></Suspense>} />
+        {/* Remove separate verify-email route - now integrated into AuthPage */}
         <Route path="/forgot-password" element={<Suspense fallback={<PublicFallback />}><ForgotPasswordPage /></Suspense>} />
         <Route path="/reset-password" element={<Suspense fallback={<PublicFallback />}><ResetPasswordPage /></Suspense>} />
 
@@ -115,9 +123,9 @@ export default function App() {
         <Route path="/settings/sessions" element={<RequireAuth><Suspense fallback={<PageFallback />}><SessionsPage /></Suspense></RequireAuth>} />
 
         {/* admin */}
-        <Route path="/admin" element={<RequireAuth><Suspense fallback={<PageFallback />}><AdminOverviewPage /></Suspense></RequireAuth>} />
-        <Route path="/admin/users" element={<RequireAuth><Suspense fallback={<PageFallback />}><AdminUsersPage /></Suspense></RequireAuth>} />
-        <Route path="/admin/interviews" element={<RequireAuth><Suspense fallback={<PageFallback />}><AdminInterviewsPage /></Suspense></RequireAuth>} />
+        <Route path="/admin" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminOverviewPage /></Suspense></RequireAdmin>} />
+        <Route path="/admin/users" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminUsersPage /></Suspense></RequireAdmin>} />
+        <Route path="/admin/interviews" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminInterviewsPage /></Suspense></RequireAdmin>} />
 
         <Route path="*" element={<NotFound />} />
       </Routes>

@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2 } from 'lucide-react'
-import { AuthLayout } from '@/components/auth-layout'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { ApiError } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { cn } from '@/lib/utils'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
-export function VerifyEmailPage() {
-  const navigate = useNavigate()
-  const location = useLocation()
+interface VerifyEmailFormProps {
+  onSuccess: () => void
+}
+
+export function VerifyEmailForm({ onSuccess }: VerifyEmailFormProps) {
   const verifyOtp = useAuthStore((s) => s.verifyOtp)
   const pendingEmail = useAuthStore((s) => s.pendingEmail)
-  const email = (location.state as { email?: string } | null)?.email ?? pendingEmail ?? ''
+  const email = pendingEmail || ''
   const refs = useRef<(HTMLInputElement | null)[]>([])
 
   const [digits, setDigits] = useState<string[]>(Array(6).fill(''))
-  const [state, setState] = useState<'idle' | 'loading' | 'expired' | 'success'>('idle')
-  const [notice, setNotice] = useState<string | null>(null)
+  const [state, setState] = useState<'idle' | 'loading' | 'success'>('idle')
   const [cooldown, setCooldown] = useState(0)
 
   const code = digits.join('')
@@ -41,58 +41,57 @@ export function VerifyEmailPage() {
     }
   }
 
-  const resend = async () => {
-    if (cooldown > 0) return
-    setNotice('Please request a new registration email from the sign-up form.')
-    setNotice('A new code has been sent.')
-    setState('idle')
-    setCooldown(15)
-  }
-
   const verify = async () => {
     if (state === 'loading') return
     if (code.length < 6) {
-      setNotice('Please enter the full 6-digit code.')
+      notifyError('Please enter the full 6-digit code.')
       return
     }
     setState('loading')
-    setNotice(null)
     try {
       if (!email) {
-        setNotice('Your registration email is missing. Please start registration again.')
+        notifyError('Your registration email is missing. Please start registration again.')
         setState('idle')
         return
       }
       await verifyOtp(email, code)
+      notifySuccess('Email verified successfully!')
       setState('success')
-      setTimeout(() => navigate('/login', { state: { verifiedEmail: email } }), 900)
+      setTimeout(() => onSuccess(), 900)
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'TOKEN_EXPIRED') {
-        setState('expired')
-      } else {
-        setNotice('Verification failed. Please try again.')
-        setState('idle')
-      }
+      notifyError('Verification failed. Please try again.')
+      setState('idle')
     }
   }
 
-  return (
-    <AuthLayout title="Verify your email" subtitle="Enter the 6-digit code we sent you.">
-      <div className="flex flex-col gap-4">
-        {state === 'expired' ? (
-          <Alert variant="warning" icon={<AlertTriangle className="size-4" />}>
-            This code has expired.{' '}
-            <button onClick={resend} className="font-medium underline underline-offset-2">
-              Request a new one
-            </button>
-            .
-          </Alert>
-        ) : null}
-        {notice ? <Alert variant="default">{notice}</Alert> : null}
-        {state === 'success' ? (
-          <Alert variant="strong">Email verified — taking you to your dashboard…</Alert>
-        ) : null}
+  if (state === 'success') {
+    return (
+      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 text-center">
+        <span className="flex size-12 items-center justify-center rounded-full bg-(--signal-strong)/15 ring-1 ring-(--signal-strong)/30">
+          <svg className="size-5 text-signal-strong" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22,4 12,14.01 9,11.01" />
+          </svg>
+        </span>
+        <h2 className="text-2xl font-semibold tracking-tight">Email verified!</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Your account has been successfully verified.
+        </p>
+        <Button className="h-10 w-full" onClick={onSuccess}>
+          Continue to login
+        </Button>
+      </div>
+    )
+  }
 
+  return (
+    <div className="mx-auto w-full max-w-md">
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold tracking-tight">Verify your email</h2>
+        <p className="mt-1.5 text-sm text-muted-foreground">Enter the 6-digit code sent to <span className="text-foreground font-medium">{email}</span></p>
+      </div>
+
+      <div className="flex flex-col gap-4">
         <div className="flex justify-center gap-2">
           {digits.map((d, i) => (
             <input
@@ -115,27 +114,17 @@ export function VerifyEmailPage() {
           ))}
         </div>
 
-        <Button className="h-10 w-full" onClick={verify} disabled={state === 'loading' || state === 'success'}>
+        <Button className="h-10 w-full" onClick={verify} disabled={state === 'loading'}>
           {state === 'loading' ? (
             <>
               <Loader2 className="size-4 animate-spin" />
               Verifying…
             </>
           ) : (
-            'Verify'
+            'Verify Email'
           )}
         </Button>
-
-        <button
-          type="button"
-          onClick={resend}
-          disabled={cooldown > 0}
-          className="text-center font-mono text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-        >
-          {cooldown > 0 ? `Resend available in ${cooldown}s` : 'Resend code'}
-        </button>
-
       </div>
-    </AuthLayout>
+    </div>
   )
 }

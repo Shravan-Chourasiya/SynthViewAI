@@ -4,13 +4,14 @@ import { BrandMark } from '@/components/brand-mark'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { cn } from '@/lib/utils'
 
-export type AuthMode = 'login' | 'register'
+export type AuthMode = 'login' | 'register' | 'verify'
 
 type AnimatedAuthCardProps = {
   mode: AuthMode
   onModeChange: (mode: AuthMode) => void
   loginSlot: ReactNode
   registerSlot: ReactNode
+  verifySlot?: ReactNode
   showModeSwitcher?: boolean
 }
 
@@ -45,9 +46,12 @@ export function AnimatedAuthCard({
   onModeChange,
   loginSlot,
   registerSlot,
+  verifySlot,
   showModeSwitcher = true,
 }: AnimatedAuthCardProps) {
   const loginActive = mode === 'login'
+  const registerActive = mode === 'register'
+  const verifyActive = mode === 'verify'
   const [switching, setSwitching] = useState(false)
   const switchTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null)
 
@@ -88,22 +92,31 @@ export function AnimatedAuthCard({
           <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-primary/5" />
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/25" />
 
-          <div className={cn('relative transition-[height,transform,opacity,filter] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]', loginActive ? 'h-[33rem]' : 'h-[40rem]', switching && 'scale-90 opacity-0 blur-sm')} style={{ transformStyle: 'preserve-3d' }}>
+          <div className={cn('relative transition-[height,transform,opacity,filter] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]', 
+            loginActive ? 'h-[33rem]' : 
+            registerActive ? 'h-[40rem]' : 
+            'h-[22rem]',
+            switching && 'scale-90 opacity-0 blur-sm')} style={{ transformStyle: 'preserve-3d' }}>
             <AuthPanel active={loginActive} label="Sign in form">{loginSlot}</AuthPanel>
-            <AuthPanel active={!loginActive} label="Create account form">{registerSlot}</AuthPanel>
+            <AuthPanel active={registerActive} label="Create account form">{registerSlot}</AuthPanel>
+            {verifySlot && <AuthPanel active={verifyActive} label="Verify email form">{verifySlot}</AuthPanel>}
           </div>
 
           <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-all duration-300', switching ? 'scale-100 opacity-100' : 'scale-50 opacity-0')}>
             <span className="relative flex size-20 items-center justify-center rounded-3xl bg-primary/15 ring-1 ring-primary/30 shadow-[0_0_45px_-10px_var(--primary)]"><BrandMark className="size-11" /></span>
           </div>
 
-          {showModeSwitcher ? (
+          {showModeSwitcher && !verifyActive ? (
             <div className="relative z-10 border-t border-border/60 px-6 py-5 text-center text-sm text-muted-foreground sm:px-10">
               {loginActive ? (
                 <>Don&apos;t have an account? <button type="button" onClick={() => switchMode('register')} className="font-semibold text-primary transition-colors hover:text-primary/75 hover:underline">Sign up</button></>
               ) : (
                 <>Already have an account? <button type="button" onClick={() => switchMode('login')} className="font-semibold text-primary transition-colors hover:text-primary/75 hover:underline">Sign in</button></>
               )}
+            </div>
+          ) : verifyActive && verifySlot ? (
+            <div className="relative z-10 border-t border-border/60 px-6 py-5 text-center text-sm text-muted-foreground sm:px-10">
+              Need to go back? <button type="button" onClick={() => switchMode('register')} className="font-semibold text-primary transition-colors hover:text-primary/75 hover:underline">Back to registration</button>
             </div>
           ) : null}
         </section>

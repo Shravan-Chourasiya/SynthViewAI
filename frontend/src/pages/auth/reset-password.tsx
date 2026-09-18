@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, api } from '@/lib/api'
 import { PasswordChecklist, passwordIsValid } from './password-checklist'
+import { notifyError, notifySuccess } from '@/lib/notify'
 
 export function ResetPasswordPage() {
   const navigate = useNavigate()
@@ -18,24 +19,38 @@ export function ResetPasswordPage() {
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [expired, setExpired] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (loading || expired) return
-    setError(null)
-    if (!passwordIsValid(password))
-      return setError('Password does not meet the requirements below.')
-    if (password !== confirm) return setError('Passwords do not match.')
+    if (!passwordIsValid(password)) {
+      notifyError('Password does not meet the requirements below.')
+      return
+    }
+    if (password !== confirm) {
+      notifyError('Passwords do not match.')
+      return
+    }
     setLoading(true)
     try {
-      if (!email) return setError('Your reset email is missing. Please request a new reset.')
-      if (!/^\d{6}$/.test(otp)) return setError('Enter the 6-digit verification code.')
+      if (!email) {
+        notifyError('Your reset email is missing. Please request a new reset.')
+        return
+      }
+      if (!/^\d{6}$/.test(otp)) {
+        notifyError('Enter the 6-digit verification code.')
+        return
+      }
       await api.resetPassword(email, otp, password)
+      notifySuccess('Password reset successfully!');
       navigate('/login')
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'AUTH_INVALID_CREDENTIALS') setExpired(true)
-      else setError(err instanceof Error ? err.message : 'Unable to reset password.')
+      if (err instanceof ApiError && err.code === 'AUTH_INVALID_CREDENTIALS') {
+        setExpired(true)
+        notifyError('This reset link has expired. Please request a new one.');
+      } else {
+        notifyError(err instanceof Error ? err.message : 'Unable to reset password.');
+      }
     } finally {
       setLoading(false)
     }
@@ -53,7 +68,6 @@ export function ResetPasswordPage() {
             .
           </Alert>
         ) : null}
-        {error ? <Alert variant="destructive">{error}</Alert> : null}
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="otp">Verification code</Label>
@@ -62,23 +76,29 @@ export function ResetPasswordPage() {
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="password">New password</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <div>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
           <PasswordChecklist value={password} />
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="confirm">Confirm new password</Label>
-          <Input
-            id="confirm"
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-          />
+          <div>
+            <Input
+              id="confirm"
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </div>
         </div>
 
         <Button type="submit" className="h-10 w-full" disabled={loading || expired}>

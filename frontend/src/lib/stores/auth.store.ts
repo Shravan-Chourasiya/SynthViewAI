@@ -31,6 +31,7 @@ interface AuthActions {
   verifyOtp: (email: string, otp: string) => Promise<void>;
   logout: () => Promise<void>;
   _clear: () => void;
+  setPendingEmail: (email: string | null) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -133,6 +134,12 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
         status: "unauthenticated",
         error: null,
       });
+    },
+
+    // ── setPendingEmail ───────────────────────────────────────────────────────
+    // Public method to set pending email for verification
+    setPendingEmail(email: string | null) {
+      set({ pendingEmail: email });
     },
   };
 });
