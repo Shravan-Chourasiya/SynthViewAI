@@ -46,12 +46,18 @@ export async function registerUserService(input: RegisterInput): Promise<void> {
   const db = getPgDb();
 
   const existing = await db
-    .select({ id: usersTable.id })
+    .select({ id: usersTable.id, isVerified: usersTable.isVerified })
     .from(usersTable)
     .where(eq(usersTable.email, input.email))
     .limit(1);
 
-  if (existing.length > 0) {
+  const existingUser = existing[0];
+  if (existingUser) {
+    if (!existingUser.isVerified) {
+      await sendRegistrationOtp(input.email, existingUser.id);
+      return;
+    }
+
     throw new AppError(
       "An account with this email already exists",
       StatusCodes.CONFLICT,
@@ -60,11 +66,8 @@ export async function registerUserService(input: RegisterInput): Promise<void> {
     );
   }
 
-  const otp = getRandomOtp(6);
-  await otpService.storeOTP(
+  await sendRegistrationOtp(
     input.email,
-    otp,
-    OTP_PURPOSE.REGISTER,
     undefined,
     JSON.stringify({
       username: input.username,
@@ -73,7 +76,12 @@ export async function registerUserService(input: RegisterInput): Promise<void> {
       lastName: input.lastName,
     }),
   );
-  await sendOtpMail(input.email, otp);
+}
+
+async function sendRegistrationOtp(email: string, userId?: string, newValue?: string): Promise<void> {
+  const otp = getRandomOtp(6);
+  await otpService.storeOTP(email, otp, OTP_PURPOSE.REGISTER, userId, newValue);
+  await sendOtpMail(email, otp);
 }
 
 export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
@@ -91,6 +99,26 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
     );
   }
 
+  const db = getPgDb();
+
+  if (result.userId) {
+    const updated = await db
+      .update(usersTable)
+      .set({ isVerified: true })
+      .where(and(eq(usersTable.id, result.userId), eq(usersTable.isVerified, false)))
+      .returning({ id: usersTable.id });
+
+    if (updated.length === 0) {
+      throw new AppError(
+        "This account is already verified or no longer exists",
+        StatusCodes.CONFLICT,
+        ErrorCodes.RESOURCE_ALREADY_EXISTS,
+        { isOperational: true },
+      );
+    }
+    return;
+  }
+
   if (!result.newValue) {
     throw new AppError(
       "Registration data missing, please register again",
@@ -106,7 +134,6 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
     firstName?: string;
     lastName?: string;
   };
-  const db = getPgDb();
   const hashedPassword = await bcrypt.hash(data.password, SALT_ROUNDS);
 
   await db.insert(usersTable).values({
@@ -144,15 +171,6 @@ export async function loginService(
     );
   }
 
-  if (!user.isVerified) {
-    throw new AppError(
-      "Please verify your email before logging in",
-      StatusCodes.FORBIDDEN,
-      ErrorCodes.AUTH_FORBIDDEN,
-      { isOperational: true },
-    );
-  }
-
   if (user.accountStatus === "disabled") {
     throw new AppError(
       "This account has been disabled. Use account recovery to restore it.",
@@ -177,6 +195,16 @@ export async function loginService(
       "Invalid email or password",
       StatusCodes.UNAUTHORIZED,
       ErrorCodes.AUTH_INVALID_CREDENTIALS,
+      { isOperational: true },
+    );
+  }
+
+  if (!user.isVerified) {
+    await sendRegistrationOtp(user.email, user.id);
+    throw new AppError(
+      "Please verify your email before logging in. A new verification code has been sent.",
+      StatusCodes.FORBIDDEN,
+      ErrorCodes.AUTH_FORBIDDEN,
       { isOperational: true },
     );
   }
