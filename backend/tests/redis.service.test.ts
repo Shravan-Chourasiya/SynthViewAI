@@ -33,7 +33,7 @@ function makePendingOTP(
   }> = {},
 ) {
   return JSON.stringify({
-    otpHash: "$2b$12$hashedotp",
+    otpHash: overrides.otpHash ?? "$2b$12$hashedotp",
     email: "user@example.com",
     userId: overrides.userId,
     purpose: "registration",
