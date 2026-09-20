@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireRole } from "../middlewares/requireRole.middleware.js";
+import { requireAuth } from "../middlewares/auth.middleware.js";
 import { 
   listUsersController, 
   getUserController, 
@@ -21,10 +22,17 @@ import {
 
 const router = Router();
 
+// Every admin route must authenticate first (`requireAuth` attaches `req.auth`
+// from the session), then pass the hierarchy-aware role check. Ordering matters:
+// `requireRole` refuses to run without an authenticated request.
+const adminArea = [requireAuth, requireRole("moderator")];
+// Changing roles is reserved for the admin tier and above (admin, owner).
+const roleManagement = [requireAuth, requireRole("admin")];
+
 // Admin Overview Routes
 router.get(
   "/overview", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   validateQuery(adminOverviewQuerySchema),
   getOverviewController
 );
@@ -32,46 +40,46 @@ router.get(
 // User Management Routes
 router.get(
   "/users", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   validateQuery(userListQuerySchema),
   listUsersController
 );
 
 router.get(
   "/users/:id", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   getUserController
 );
 
 router.patch(
   "/users/:id/role", 
-  requireRole("admin", "owner"), 
+  ...roleManagement, 
   updateUserRoleController
 );
 
 router.post(
   "/users/:id/suspend", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   suspendUserController
 );
 
 router.post(
   "/users/:id/reinstate", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   reinstateUserController
 );
 
 // Interview Management Routes
 router.get(
   "/interviews", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   validateQuery(interviewListQuerySchema),
   listInterviewsController
 );
 
 router.get(
   "/interviews/:id", 
-  requireRole("admin", "moderator", "owner"), 
+  ...adminArea, 
   getInterviewDetailController
 );
 

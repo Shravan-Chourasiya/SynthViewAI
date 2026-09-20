@@ -1,10 +1,17 @@
-import { and, eq, ilike, or, desc, asc, gt, gte, lt, lte, count, sql } from "drizzle-orm";
+import { and, eq, ilike, or, desc, asc, gt, gte, lt, lte, count, sql, type SQL } from "drizzle-orm";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
 import { interviewsTable, interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
 import { interviewResultsTable } from "../../interview/schemas/result.schema.js";
 import { AppError } from "../../../utils/appError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
+import {
+  ROLE_MANAGEMENT_MIN_ROLE,
+  ROLE_RANK,
+  USER_ROLES,
+  getRoleRank,
+  isUserRole,
+} from "../../../constants/roles.constants.js";
 import { StatusCodes } from "http-status-codes";
 import { randomUUID } from "crypto";
 
@@ -21,6 +28,7 @@ interface UserListFilter {
 }
 
 interface InterviewListFilter {
+  search?: string;
   status?: string;
   userId?: string;
   sortBy?: string;
@@ -34,6 +42,7 @@ interface UserSummary {
   lastName: string;
   userrole: string;
   isActive: boolean;
+  accountStatus: string;
   createdAt: Date;
   updatedAt: Date;
   interviewCount: number;
@@ -73,6 +82,7 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
       lastName: usersTable.lastName,
       userrole: usersTable.userrole,
       isActive: usersTable.isVerified,
+      accountStatus: usersTable.accountStatus,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
       interviewCount: sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as('interviewCount'),
@@ -80,19 +90,26 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
     })
     .from(usersTable) as any; // Type assertion to bypass complex type checking
 
-  // Apply filters
+  // Apply filters. Drizzle's `.where()` *replaces* the previous predicate rather
+  // than ANDing with it, so chaining `.where()` twice silently dropped the search
+  // whenever a role filter was also active. Build one combined predicate instead.
+  const userConditions: SQL[] = [];
   if (search) {
-    query = query.where(
+    // `username` is what the admin table renders, so it has to be searchable too.
+    userConditions.push(
       or(
         ilike(usersTable.email, `%${search}%`),
+        ilike(usersTable.username, `%${search}%`),
         ilike(usersTable.firstName, `%${search}%`),
         ilike(usersTable.lastName, `%${search}%`)
-      )
-    ) as any; // Type assertion to bypass complex type checking
+      ) as SQL
+    );
   }
-
   if (role) {
-    query = query.where(eq(usersTable.userrole, role as any)) as any; // Type assertion for enum
+    userConditions.push(eq(usersTable.userrole, role as any) as SQL);
+  }
+  if (userConditions.length > 0) {
+    query = query.where(and(...userConditions)) as any; // Type assertion to bypass complex type checking
   }
 
   // Apply sorting
@@ -117,19 +134,11 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
   const sortDirection = sortOrder === 'asc' ? asc(sortCol) : desc(sortCol);
   query = query.orderBy(sortDirection) as any; // Type assertion to bypass complex type checking
 
-  // Calculate total count with same filters
+  // Calculate total count with the exact same predicate as the page query —
+  // otherwise the filters and the pagination count disagree.
   let countQuery = db.select({ count: count() }).from(usersTable);
-  if (search) {
-    countQuery = countQuery.where(
-      or(
-        ilike(usersTable.email, `%${search}%`),
-        ilike(usersTable.firstName, `%${search}%`),
-        ilike(usersTable.lastName, `%${search}%`)
-      )
-    ) as any;
-  }
-  if (role) {
-    countQuery = countQuery.where(eq(usersTable.userrole, role as any)) as any;
+  if (userConditions.length > 0) {
+    countQuery = countQuery.where(and(...userConditions)) as any;
   }
   const totalResult = await countQuery;
   const total = Number(totalResult[0]?.count ?? 0);
@@ -151,6 +160,7 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
         firstName: '',
         lastName: '',
         userrole: '',
+        accountStatus: 'active' as const,
         isActive: false,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -191,6 +201,7 @@ export async function getUserById(userId: string): Promise<UserSummary> {
       lastName: usersTable.lastName,
       userrole: usersTable.userrole,
       isActive: usersTable.isVerified,
+      accountStatus: usersTable.accountStatus,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
       interviewCount: sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as('interviewCount'),
@@ -250,31 +261,55 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
   const targetUser = currentUser[0]!;
   const actorUser = actor[0]!;
 
-  // Only owners can modify owner roles
-  // Only owners can promote/demote admins
-  if (targetUser.userrole === 'owner') {
-    if (actorUser.userrole !== 'owner') {
-      throw new AppError(
-        "Only owners can modify owner roles",
-        StatusCodes.FORBIDDEN,
-        ErrorCodes.AUTH_FORBIDDEN,
-        { isOperational: true }
-      );
-    }
-  } else if (targetUser.userrole === 'admin' || newRole === 'admin') {
-    if (actorUser.userrole !== 'owner') {
-      throw new AppError(
-        "Only owners can manage admin roles",
-        StatusCodes.FORBIDDEN,
-        ErrorCodes.AUTH_FORBIDDEN,
-        { isOperational: true }
-      );
-    }
+  if (!isUserRole(newRole)) {
+    throw new AppError(
+      `Invalid role "${newRole}". Expected one of: ${USER_ROLES.join(", ")}`,
+      StatusCodes.BAD_REQUEST,
+      ErrorCodes.VALIDATION_FAILED,
+      { isOperational: true }
+    );
+  }
+
+  const actorRank = getRoleRank(actorUser.userrole);
+  const targetRank = getRoleRank(targetUser.userrole);
+  const requestedRank = ROLE_RANK[newRole];
+  // The owner is the apex: it is the only role allowed to act on a peer,
+  // which is what lets owners manage other owners.
+  const actorIsOwner = actorUser.userrole === "owner";
+
+  // Only the admin tier and above may change roles at all.
+  if (actorRank < ROLE_RANK[ROLE_MANAGEMENT_MIN_ROLE]) {
+    throw new AppError(
+      `Access denied. Changing roles requires the "${ROLE_MANAGEMENT_MIN_ROLE}" role or above`,
+      StatusCodes.FORBIDDEN,
+      ErrorCodes.AUTH_FORBIDDEN,
+      { isOperational: true }
+    );
+  }
+
+  // You cannot act on a peer or a superior — only the owner may touch owners.
+  if (targetRank >= actorRank && !actorIsOwner) {
+    throw new AppError(
+      `Cannot modify a user ranked at or above your own role (${targetUser.userrole})`,
+      StatusCodes.FORBIDDEN,
+      ErrorCodes.AUTH_FORBIDDEN,
+      { isOperational: true }
+    );
+  }
+
+  // You cannot grant a role at or above your own — only the owner may grant owner.
+  if (requestedRank >= actorRank && !actorIsOwner) {
+    throw new AppError(
+      `Cannot assign a role ranked at or above your own role (${newRole})`,
+      StatusCodes.FORBIDDEN,
+      ErrorCodes.AUTH_FORBIDDEN,
+      { isOperational: true }
+    );
   }
 
   // Perform the role update
   await db.update(usersTable)
-    .set({ userrole: newRole as any }) // Type assertion for enum
+    .set({ userrole: newRole }) // narrowed by isUserRole above
     .where(eq(usersTable.id, userId));
 }
 
@@ -339,7 +374,7 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
   totalPages: number;
 }> {
   const db = getPgDb();
-  const { page, limit, status, userId, sortBy, sortOrder } = options;
+  const { page, limit, search, status, userId, sortBy, sortOrder } = options;
 
   // Build query with joins
   let query = db
@@ -356,13 +391,29 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
     .from(interviewsTable)
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id)) as any; // Type assertion to bypass complex type checking
 
-  // Apply filters
-  if (status) {
-    query = query.where(eq(interviewsTable.interviewStatus, status as any)) as any; // Type assertion for enum
+  // Apply filters through one combined predicate: Drizzle's `.where()` replaces
+  // the previous predicate, so separate calls silently dropped the status filter
+  // as soon as a userId was supplied (and vice versa).
+  const interviewConditions: SQL[] = [];
+  if (search) {
+    // Free-text search covers the title and the owning user (name + email),
+    // matching what the admin table renders.
+    interviewConditions.push(
+      or(
+        ilike(interviewsTable.interviewTitle, `%${search}%`),
+        ilike(usersTable.email, `%${search}%`),
+        sql`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '') ILIKE ${`%${search}%`}`
+      ) as SQL
+    );
   }
-
+  if (status) {
+    interviewConditions.push(eq(interviewsTable.interviewStatus, status as any) as SQL); // Type assertion for enum
+  }
   if (userId) {
-    query = query.where(eq(interviewsTable.userId, userId)) as any;
+    interviewConditions.push(eq(interviewsTable.userId, userId) as SQL);
+  }
+  if (interviewConditions.length > 0) {
+    query = query.where(and(...interviewConditions)) as any; // Type assertion to bypass complex type checking
   }
 
   // Apply sorting
@@ -384,18 +435,15 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
   const sortDirection = sortOrder === 'asc' ? asc(sortCol) : desc(sortCol);
   query = query.orderBy(sortDirection) as any; // Type assertion to bypass complex type checking
 
-  // Calculate total count with same filters
+  // Calculate total count with the exact same predicate as the page query —
+  // otherwise the filters and the pagination count disagree.
   let countQuery = db
     .select({ count: count() })
     .from(interviewsTable)
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id));
 
-  if (status) {
-    countQuery = countQuery.where(eq(interviewsTable.interviewStatus, status as any)) as any;
-  }
-
-  if (userId) {
-    countQuery = countQuery.where(eq(interviewsTable.userId, userId)) as any;
+  if (interviewConditions.length > 0) {
+    countQuery = countQuery.where(and(...interviewConditions)) as any;
   }
 
   const totalResult = await countQuery;

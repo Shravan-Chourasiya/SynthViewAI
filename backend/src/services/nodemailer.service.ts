@@ -8,13 +8,18 @@ let transporter: Transporter | null = null;
 function getTransporter(): Transporter {
   transporter ??= nodemailer.createTransport({
     service: "gmail",
-    auth: {
-      type: "OAuth2",
-      user: env.GMAIL_USER_EMAIL,
-      clientId: env.GMAIL_CLIENT_ID,
-      clientSecret: env.GMAIL_CLIENT_SECRET,
-      refreshToken: env.GMAIL_REFRESH_TOKEN,
-    },
+    auth: env.GMAIL_APP_PASSWORD
+      ? {
+          user: env.GMAIL_USER_EMAIL,
+          pass: env.GMAIL_APP_PASSWORD.replaceAll(" ", ""),
+        }
+      : {
+          type: "OAuth2",
+          user: env.GMAIL_USER_EMAIL,
+          clientId: env.GMAIL_CLIENT_ID,
+          clientSecret: env.GMAIL_CLIENT_SECRET,
+          refreshToken: env.GMAIL_REFRESH_TOKEN,
+        },
   });
   return transporter;
 }

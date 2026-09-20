@@ -36,6 +36,8 @@ export const interviewListQuerySchema = z.object({
     const num = Number(val);
     return isNaN(num) || num < 1 || num > 100 ? 10 : Math.min(Math.max(num, 1), 100);
   }),
+  // Free-text search over the interview title and the owning user (name/email).
+  search: z.string().optional().default('').transform((val) => val.trim()),
   status: z.enum(['DRAFT', 'READY', 'SCHEDULED', 'INPROGRESS', 'COMPLETED', 'CANCELLED', 'ABANDONED', 'EXPIRED', 'TIMED_OUT']).optional(),
   userId: z.string().optional(),
   sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'title']).optional().default('createdAt'),
