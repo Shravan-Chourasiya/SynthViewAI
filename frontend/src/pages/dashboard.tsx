@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Award,
@@ -37,21 +37,24 @@ export function DashboardPage() {
   const interviews = useInterviewListStore((s) => s.interviews)
   const interviewStatus = useInterviewListStore((s) => s.status)
   const fetchInterviews = useInterviewListStore((s) => s.fetchInterviews)
-  const [data, setData] = useState<DashData | null>(null)
 
-  useEffect(() => {
-    let alive = true
-    void fetchInterviews()
-    if (!alive) return
+  // Derived in render (no stale-state race): the effect only triggers fetches,
+  // and every store update re-renders with fresh numbers automatically.
+  const data: DashData | null = useMemo(() => {
+    if (interviewStatus === 'idle' || interviewStatus === 'loading') return null
     const completed = interviews.filter((interview) => interview.status === 'COMPLETED')
     const scores = completed.map((interview) => interview.score).filter((score): score is number => score !== null)
     const average = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0
-    const categories = ['Behavioral', 'Technical', 'Coding', 'Mixed'].map((label) => {
-      const matching = completed.filter((interview) => interview.type === label)
-      const values = matching.map((interview) => interview.score).filter((score): score is number => score !== null)
-      return { label, value: values.length ? Math.round(values.reduce((sum, score) => sum + score, 0) / values.length) : 0 }
-    }).filter((category) => category.value > 0)
-    setData({
+    const categories = ['Behavioral', 'Technical', 'Coding', 'Mixed']
+      .map((label) => {
+        const values = completed
+          .filter((interview) => interview.type === label)
+          .map((interview) => interview.score)
+          .filter((score): score is number => score !== null)
+        return { label, value: values.length ? Math.round(values.reduce((sum, score) => sum + score, 0) / values.length) : 0 }
+      })
+      .filter((category) => category.value > 0)
+    return {
       average,
       best: scores.length ? Math.max(...scores) : 0,
       total: interviews.length,
@@ -60,11 +63,13 @@ export function DashboardPage() {
       categories,
       recent: interviews.slice(0, 4),
       resumable: interviews.find((i) => i.status === 'IN_PROGRESS') ?? null,
-    })
-    return () => {
-      alive = false
     }
-  }, [fetchInterviews, interviews])
+  }, [interviews, interviewStatus])
+
+  useEffect(() => {
+    // The store surfaces failures through `status`/`error`.
+    void fetchInterviews().catch(() => undefined)
+  }, [fetchInterviews])
 
   const firstName = (user?.firstName ?? user?.username ?? 'there').split(' ')[0]
   const hour = new Date().getHours()

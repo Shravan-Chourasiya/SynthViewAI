@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, ConfirmDialog } from '@/components/ui/dialog';
 import { useAdminStore } from '@/lib/stores/admin.store';
+import { useAuthStore } from '@/lib/stores/auth.store';
+import { ROLE_LABELS, ROLE_RANK, USER_ROLES, canManageRoles, getRoleRank, outranks } from '@/lib/roles';
 import { UserSummary } from '@/lib/services/admin.service';
 import { RotateCcw, Search, AlertTriangle } from 'lucide-react';
 
@@ -26,16 +28,26 @@ export function AdminUsersPage() {
   } = useAdminStore();
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('');
+  // Radix Select forbids empty-string item values, so "ALL" is the sentinel.
+  const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [showSuspendDialog, setShowSuspendDialog] = useState<{open: boolean, user: UserSummary | null}>({open: false, user: null});
+
+  // Role management mirrors the backend hierarchy (user < moderator < admin < owner):
+  // an actor may only assign roles strictly below its own, except the owner — the
+  // apex — which may assign any role, including owner.
+  const actorRole = useAuthStore((s) => s.user?.userrole);
+  const isOwner = getRoleRank(actorRole) >= ROLE_RANK.owner;
+  const canManage = canManageRoles(actorRole);
+  const canEditRow = (targetRole: string) => isOwner || outranks(actorRole, targetRole);
+  const assignableRoles = USER_ROLES.filter((role) => isOwner || outranks(actorRole, role));
 
   useEffect(() => {
     loadUsers({
       page: currentPage,
       limit: 10,
       search: searchTerm,
-      role: roleFilter
+      role: roleFilter === 'ALL' ? undefined : roleFilter
     });
   }, [currentPage, searchTerm, roleFilter]);
 
@@ -86,11 +98,13 @@ export function AdminUsersPage() {
               <CardTitle>User Filters</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div className="relative">
+              {/* The search field takes all the leftover width; the role select
+                  stays content-sized from md upwards. */}
+              <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                <div className="relative w-full md:min-w-64 md:flex-1">
                   <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search users..."
+                    placeholder="Search by name, username or email..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
@@ -99,26 +113,30 @@ export function AdminUsersPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={roleFilter} onValueChange={(value) => {
-                  setRoleFilter(value);
-                  setCurrentPage(1);
-                }}>
+                <div className="md:w-48">
+                  <Select value={roleFilter} onValueChange={(value) => {
+                    setRoleFilter(value);
+                    setCurrentPage(1);
+                  }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Filter by role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Roles</SelectItem>
+                    <SelectItem value="ALL">All Roles</SelectItem>
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="moderator">Moderator</SelectItem>
                     <SelectItem value="owner">Owner</SelectItem>
                   </SelectContent>
-                </Select>
+                  </Select>
+                </div>
                 <Button 
                   variant="outline" 
+                  className="w-full md:w-auto"
                   onClick={() => {
                     setSearchTerm('');
-                    setRoleFilter('');
+                    // 'ALL' is the sentinel the Select needs; '' would blank the trigger.
+                    setRoleFilter('ALL');
                     setCurrentPage(1);
                   }}
                 >
@@ -168,15 +186,17 @@ export function AdminUsersPage() {
                           <Select 
                             value={user.userrole} 
                             onValueChange={(value) => handleRoleChange(user.id, value)}
+                            disabled={!canManage || !canEditRow(user.userrole)}
                           >
                             <SelectTrigger className="w-24">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="user">User</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
-                              <SelectItem value="moderator">Moderator</SelectItem>
-                              <SelectItem value="owner">Owner</SelectItem>
+                              {assignableRoles.map((role) => (
+                                <SelectItem key={role} value={role}>
+                                  {ROLE_LABELS[role]}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </TableCell>
@@ -281,3 +301,5 @@ export function AdminUsersPage() {
     </AppShell>
   );
 }
+
+export default AdminUsersPage;

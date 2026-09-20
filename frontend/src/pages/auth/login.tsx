@@ -12,6 +12,15 @@ export function LoginPage() {
     const from = (location.state as { from?: string } | null)?.from ?? '/dashboard'
     const [showVerifyForm, setShowVerifyForm] = useState(false);
     const pendingEmail = useAuthStore.getState().pendingEmail;
+    const user = useAuthStore.getState().user;
+    const status = useAuthStore.getState().status;
+
+    // Check if user is already authenticated and redirect
+    useEffect(() => {
+        if (status === 'authenticated' && user) {
+            navigate(from, { replace: true });
+        }
+    }, [status, user, navigate, from]);
 
     useEffect(() => {
         if (pendingEmail) {
@@ -20,8 +29,10 @@ export function LoginPage() {
     }, [pendingEmail]);
 
     const handleVerifySuccess = () => {
+        // After successful verification, clear pending email and redirect to login
+        useAuthStore.getState().setPendingEmail(null);
         setShowVerifyForm(false);
-        navigate(from, { replace: true });
+        navigate('/login');
     };
 
     return (
@@ -39,9 +50,7 @@ export function LoginPage() {
             loginSlot={<LoginForm onSuccess={() => navigate(from, { replace: true })} onUnverified={(email) => {
                 setShowVerifyForm(true);
             }} showModeLink={false} />}
-            registerSlot={<RegisterForm onSuccess={(email) => navigate('/verify-email', { state: { email } })} onAlreadyExists={(email) => {
-                setShowVerifyForm(true);
-            }} showModeLink={false} />}
+            registerSlot={<RegisterForm onSuccess={() => setShowVerifyForm(true)} showModeLink={false} />}
             verifySlot={<VerifyEmailForm onSuccess={handleVerifySuccess} />}
         />
     )

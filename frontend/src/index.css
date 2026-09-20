@@ -236,6 +236,36 @@
   .scrollbar-none::-webkit-scrollbar {
     display: none;
   }
+
+  /* Slim, arrowless scrollbars everywhere (replaces the bulky classic
+   * Windows scrollbar with its arrow buttons). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted-foreground, #a1a1aa) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground, #a1a1aa);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground, #71717a);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* Hide the classic arrow buttons at the top/bottom of scrollbars */
+  ::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
+    width: 0;
+  }
   .bg-grid {
     background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
       linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);

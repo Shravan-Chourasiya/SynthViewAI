@@ -25,7 +25,9 @@ export interface User {
   name: string;
   email: string;
   joinedAt: string;
-  role: "candidate" | "admin";
+  /** Mirrors the backend role hierarchy (user < moderator < admin < owner);
+   * "candidate" stands in for the plain `user` role. */
+  role: "candidate" | "moderator" | "admin" | "owner";
 }
 
 export interface InterviewConfig {

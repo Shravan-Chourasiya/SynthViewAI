@@ -7,6 +7,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { useTheme } from '@/components/theme-provider'
+import { AuthPage } from '@/pages/auth/auth'
 import { cn } from '@/lib/utils'
 
 /* -------------------------------------------------------------------------- */
@@ -19,7 +20,6 @@ const AboutPage = lazy(() => import('@/pages/public-info').then((m) => ({ defaul
 const ContactPage = lazy(() => import('@/pages/public-info').then((m) => ({ default: m.ContactPage })))
 const PrivacyPage = lazy(() => import('@/pages/public-info').then((m) => ({ default: m.PrivacyPage })))
 const TermsPage = lazy(() => import('@/pages/public-info').then((m) => ({ default: m.TermsPage })))
-const AuthPage = lazy(() => import('@/pages/auth/auth').then((m) => ({ default: m.AuthPage })))
 // Note: We no longer need the separate VerifyEmailPage since it's integrated into AuthPage
 const ForgotPasswordPage = lazy(() => import('@/pages/auth/forgot-password').then((m) => ({ default: m.ForgotPasswordPage })))
 const ResetPasswordPage = lazy(() => import('@/pages/auth/reset-password').then((m) => ({ default: m.ResetPasswordPage })))
@@ -72,9 +72,6 @@ function PublicFallback() {
 
 function GuestOnly({ children }: { children: React.ReactNode }) {
   const status = useAuthStore((s) => s.status)
-  if (status === 'idle' || status === 'loading') {
-    return <PageFallback />
-  }
   if (status === 'authenticated') return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
@@ -99,8 +96,8 @@ export default function App() {
         <Route path="/contact" element={<Suspense fallback={<PublicFallback />}><ContactPage /></Suspense>} />
         <Route path="/privacy" element={<Suspense fallback={<PublicFallback />}><PrivacyPage /></Suspense>} />
         <Route path="/terms" element={<Suspense fallback={<PublicFallback />}><TermsPage /></Suspense>} />
-        <Route path="/login" element={<GuestOnly><Suspense fallback={<PublicFallback />}><AuthPage /></Suspense></GuestOnly>} />
-        <Route path="/register" element={<GuestOnly><Suspense fallback={<PublicFallback />}><AuthPage /></Suspense></GuestOnly>} />
+        <Route path="/login" element={<GuestOnly><AuthPage /></GuestOnly>} />
+        <Route path="/register" element={<GuestOnly><AuthPage /></GuestOnly>} />
         {/* Remove separate verify-email route - now integrated into AuthPage */}
         <Route path="/forgot-password" element={<Suspense fallback={<PublicFallback />}><ForgotPasswordPage /></Suspense>} />
         <Route path="/reset-password" element={<Suspense fallback={<PublicFallback />}><ResetPasswordPage /></Suspense>} />

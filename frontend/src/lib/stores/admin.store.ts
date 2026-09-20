@@ -105,9 +105,10 @@ export const useAdminStore = create<AdminState>()(
     loadUserById: async (id: string) => {
       set({ usersLoading: true, usersError: null });
       try {
-        const response = await adminService.getUserById(id);
+        // Service already unwraps the `{ success, data }` envelope
+        const user = await adminService.getUserById(id);
         set({ 
-          selectedUser: response.data,
+          selectedUser: user,
           usersLoading: false 
         });
       } catch (error: any) {
@@ -159,7 +160,7 @@ export const useAdminStore = create<AdminState>()(
         });
         
         set({
-          interviews: response.users as unknown as InterviewSummary[], // Correcting the type cast
+          interviews: response.interviews,
           interviewPagination: {
             total: response.total,
             page: response.page,
@@ -179,9 +180,10 @@ export const useAdminStore = create<AdminState>()(
     loadInterviewById: async (id: string) => {
       set({ interviewsLoading: true, interviewsError: null });
       try {
-        const response = await adminService.getInterviewById(id);
+        // Service already unwraps the `{ success, data }` envelope
+        const interview = await adminService.getInterviewById(id);
         set({ 
-          selectedInterview: response.data,
+          selectedInterview: interview,
           interviewsLoading: false 
         });
       } catch (error: any) {
@@ -195,9 +197,10 @@ export const useAdminStore = create<AdminState>()(
     loadOverviewStats: async (period = '30d') => {
       set({ overviewLoading: true, overviewError: null });
       try {
-        const response = await adminService.getOverviewStats(period);
+        // Service already unwraps the `{ success, data }` envelope
+        const stats = await adminService.getOverviewStats(period);
         set({ 
-          overviewStats: response.data,
+          overviewStats: stats,
           overviewLoading: false 
         });
       } catch (error: any) {

@@ -24,7 +24,9 @@ export function InterviewsPage() {
   const [page, setPage] = useState(1)
 
   useEffect(() => {
-    void fetchInterviews()
+    // The store records the failure in `status`/`error`, so swallow the
+    // re-thrown rejection here to avoid an unhandled promise rejection.
+    void fetchInterviews().catch(() => undefined)
   }, [fetchInterviews])
 
   useEffect(() => {
@@ -92,7 +94,8 @@ export function InterviewsPage() {
 
         {/* filters */}
         <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-border bg-card p-3.5">
-          <div className="relative min-w-52 flex-1">
+          {/* Full width on phones, then grows to absorb the leftover row space. */}
+          <div className="relative basis-full sm:basis-auto sm:min-w-72 sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}

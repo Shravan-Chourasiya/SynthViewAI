@@ -3,12 +3,13 @@ import { Link, useLocation } from 'react-router-dom'
 import { Shield } from 'lucide-react'
 import { ErrorState } from '@/components/error-state'
 import { useAuthStore } from '@/lib/stores/auth.store'
+import { canAccessAdmin } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 export function AdminGate({ children }: { children: ReactNode }) {
   const user = useAuthStore((s) => s.user)
   if (!user) return null
-  if (user.userrole !== 'admin') {
+  if (!canAccessAdmin(user.userrole)) {
     return (
       <ErrorState
         code="403"
@@ -53,7 +54,10 @@ export function AdminHeader({ title, description }: { title: string; description
           {description}
         </p>
       </div>
-      <nav aria-label="Admin sections" className="flex gap-1 overflow-x-auto border-b border-border">
+      <nav
+        aria-label="Admin sections"
+        className="scrollbar-none flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border"
+      >
         {ADMIN_LINKS.map((l) => {
           const active = l.exact ? pathname === l.to : pathname.startsWith(l.to)
           return (

@@ -25,9 +25,11 @@ export const useAnalyticsStore = create<AnalyticsState>()(
     loadUserAnalytics: async () => {
       set({ loading: true, error: null });
       try {
-        const response = await analyticsService.getUserAnalytics();
+        // The service already unwraps the `{ success, data }` envelope,
+        // so the resolved value IS the UserAnalytics payload.
+        const analytics = await analyticsService.getUserAnalytics();
         set({ 
-          userAnalytics: response.data,
+          userAnalytics: analytics,
           loading: false 
         });
       } catch (error: any) {
@@ -41,10 +43,10 @@ export const useAnalyticsStore = create<AnalyticsState>()(
     loadTrendData: async () => {
       set({ loading: true, error: null });
       try {
-        const response = await analyticsService.getUserTrendAnalytics();
+        const trend = await analyticsService.getUserTrendAnalytics();
         set({ 
-          trendData: response.data.trendData,
-          overallStats: response.data.overallStats,
+          trendData: trend.trendData,
+          overallStats: trend.overallStats,
           loading: false 
         });
       } catch (error: any) {

@@ -1,4 +1,4 @@
-import { api } from '../api';
+import { httpGet, httpPatch, httpPost } from '../http';
 
 export interface UserSummary {
   id: string;
@@ -53,6 +53,7 @@ export interface UserListFilter {
 export interface InterviewListFilter {
   page?: number;
   limit?: number;
+  search?: string;
   status?: string;
   userId?: string;
   sortBy?: string;
@@ -72,40 +73,37 @@ class AdminService {
     if (filter.sortBy) params.append('sortBy', filter.sortBy);
     if (filter.sortOrder) params.append('sortOrder', filter.sortOrder);
 
-    const response = await api.get(`/admin/users?${params.toString()}`);
-    return response.data as PaginatedResponse<UserSummary>;
+    // httpGet unwraps the `{ success, data }` envelope, so this resolves
+    // directly to the paginated payload: { users, total, page, limit, totalPages }
+    return httpGet<PaginatedResponse<UserSummary>>(`/admin/users?${params.toString()}`);
   }
 
   /**
    * Get user by ID
    */
   async getUserById(id: string) {
-    const response = await api.get(`/admin/users/${id}`);
-    return response.data as { data: UserSummary };
+    return httpGet<UserSummary>(`/admin/users/${id}`);
   }
 
   /**
    * Update user role
    */
   async updateUserRole(userId: string, newRole: string) {
-    const response = await api.patch(`/admin/users/${userId}/role`, { newRole });
-    return response.data;
+    return httpPatch<void>(`/admin/users/${userId}/role`, { newRole });
   }
 
   /**
    * Suspend a user
    */
   async suspendUser(userId: string, reason?: string) {
-    const response = await api.post(`/admin/users/${userId}/suspend`, { reason });
-    return response.data;
+    return httpPost<void>(`/admin/users/${userId}/suspend`, { reason });
   }
 
   /**
    * Reinstate a user
    */
   async reinstateUser(userId: string) {
-    const response = await api.post(`/admin/users/${userId}/reinstate`);
-    return response.data;
+    return httpPost<void>(`/admin/users/${userId}/reinstate`);
   }
 
   /**
@@ -115,30 +113,28 @@ class AdminService {
     const params = new URLSearchParams();
     if (filter.page !== undefined) params.append('page', filter.page.toString());
     if (filter.limit !== undefined) params.append('limit', filter.limit.toString());
+    if (filter.search) params.append('search', filter.search);
     if (filter.status) params.append('status', filter.status);
     if (filter.userId) params.append('userId', filter.userId);
     if (filter.sortBy) params.append('sortBy', filter.sortBy);
     if (filter.sortOrder) params.append('sortOrder', filter.sortOrder);
 
-    const response = await api.get(`/admin/interviews?${params.toString()}`);
-    return response.data as PaginatedResponse<InterviewSummary>;
+    // Resolves to: { interviews, total, page, limit, totalPages }
+    return httpGet<PaginatedResponse<InterviewSummary>>(`/admin/interviews?${params.toString()}`);
   }
 
   /**
    * Get interview by ID
    */
   async getInterviewById(id: string) {
-    const response = await api.get(`/admin/interviews/${id}`);
-    return response.data;
+    return httpGet<Record<string, unknown>>(`/admin/interviews/${id}`);
   }
 
   /**
    * Get admin overview statistics
    */
   async getOverviewStats(period: string = '30d') {
-    const params = new URLSearchParams({ period });
-    const response = await api.get(`/admin/overview?${params.toString()}`);
-    return response.data as { data: AdminOverviewStats };
+    return httpGet<AdminOverviewStats>(`/admin/overview?period=${encodeURIComponent(period)}`);
   }
 }
 

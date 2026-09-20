@@ -15,6 +15,15 @@ export function AuthPage() {
     // Check if we have a pending email in the auth store to determine if we should show verify form
     const [showVerifyForm, setShowVerifyForm] = useState(false);
     const pendingEmail = useAuthStore.getState().pendingEmail;
+    const user = useAuthStore.getState().user;
+    const status = useAuthStore.getState().status;
+
+    // Check if user is already authenticated and redirect
+    useEffect(() => {
+        if (status === 'authenticated' && user) {
+            navigate(from, { replace: true });
+        }
+    }, [status, user, navigate, from]);
 
     useEffect(() => {
         if (pendingEmail) {
@@ -23,6 +32,8 @@ export function AuthPage() {
     }, [pendingEmail]);
 
     const handleVerifySuccess = () => {
+        // After successful verification, clear pending email and redirect to login
+        useAuthStore.getState().setPendingEmail(null);
         setShowVerifyForm(false);
         navigate('/login');
     };
@@ -40,7 +51,7 @@ export function AuthPage() {
             }}
             showModeSwitcher={!showVerifyForm}
             loginSlot={<LoginForm onSuccess={() => navigate(from, { replace: true })} onUnverified={(email) => setShowVerifyForm(true)} showModeLink={false} />}
-            registerSlot={<RegisterForm onSuccess={(email) => setShowVerifyForm(true)} onAlreadyExists={(email) => setShowVerifyForm(true)} showModeLink={false} />}
+            registerSlot={<RegisterForm onSuccess={() => setShowVerifyForm(true)} showModeLink={false} />}
             verifySlot={<VerifyEmailForm onSuccess={handleVerifySuccess} />}
         />
     )

@@ -79,7 +79,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
       try {
         await authSvc.login({ email, password, deviceType });
         const user = await authSvc.me();
-        set({ user, status: "authenticated", error: null });
+        set({ user, status: "authenticated", error: null, pendingEmail: null }); // Clear pending email after successful login
       } catch (error) {
         set({
           status: "unauthenticated",
@@ -110,6 +110,8 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
     async verifyOtp(email, otp) {
       set({ error: null });
       await authSvc.verifyOtp({ email, otp });
+      // Clear the pending email after successful verification
+      set({ pendingEmail: null });
       // No auto-login — route to /login after this resolves
     },
 

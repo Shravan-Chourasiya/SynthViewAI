@@ -1,244 +1,377 @@
-import { useEffect } from 'react';
-import { AppShell } from '@/components/app-shell';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { useAnalyticsStore } from '@/lib/stores/analytics.store';
-import { TrendingUp, Target, BarChart3, Activity } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import {
+  Activity,
+  BarChart3,
+  CheckCircle2,
+  MessageSquare,
+  Sparkles,
+  Target,
+} from 'lucide-react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import { AppShell } from '@/components/app-shell'
+import { buttonVariants } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useAnalyticsStore } from '@/lib/stores/analytics.store'
+import { cn } from '@/lib/utils'
+
+/* Chart styling is pulled from the theme tokens in index.css (--chart-1..5,
+ * --border, --muted-foreground) so the charts follow the app's light/dark theme
+ * instead of the hard-coded palette these used to ship with. */
+const CHART = {
+  overall: 'var(--chart-1)',
+  technical: 'var(--chart-2)',
+  communication: 'var(--chart-3)',
+  category: 'var(--chart-1)',
+} as const
+
+const AXIS_TICK = { fontSize: 11, fill: 'var(--muted-foreground)' }
+const TOOLTIP_STYLE = {
+  background: 'var(--popover)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--popover-foreground)',
+  fontSize: 12,
+}
+
+/** Shared frame for every panel so spacing and radius stay consistent. */
+function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <Card className="rounded-2xl border-border">
+      <CardHeader>
+        <CardTitle className="text-base font-semibold">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  )
+}
+
+/** An empty chart reads as a broken chart, so say so explicitly. */
+function ChartEmpty({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/30 px-4 text-center">
+      <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+}: {
+  label: string
+  value: ReactNode
+  hint: string
+  icon: typeof BarChart3
+}) {
+  return (
+    <div className="flex flex-col rounded-2xl border border-border bg-card p-5 shadow-sm transition-colors hover:border-primary/30">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+          <Icon className="size-3.5" />
+        </span>
+      </div>
+      <p className="mt-3 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
+      <p className="mt-1 font-mono text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  )
+}
 
 export function AnalyticsPage() {
-  const { 
-    userAnalytics, 
-    loading, 
-    error, 
-    loadUserAnalytics 
-  } = useAnalyticsStore();
+  const userAnalytics = useAnalyticsStore((s) => s.userAnalytics)
+  const loading = useAnalyticsStore((s) => s.loading)
+  const error = useAnalyticsStore((s) => s.error)
+  const loadUserAnalytics = useAnalyticsStore((s) => s.loadUserAnalytics)
 
   useEffect(() => {
-    loadUserAnalytics();
-  }, []);
+    void loadUserAnalytics()
+  }, [loadUserAnalytics])
 
-  // Prepare data for charts
-  const performanceByCategory = userAnalytics?.performanceByCategory || [];
-  const trendData = userAnalytics?.trendData || [];
+  const stats = userAnalytics?.overallStats
+  const trendData = userAnalytics?.trendData ?? []
+  const performanceByCategory = userAnalytics?.performanceByCategory ?? []
+  const strengths = Object.entries(userAnalytics?.categoryBreakdown.strengths ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+  const weaknesses = Object.entries(userAnalytics?.categoryBreakdown.weaknesses ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
 
-  // Top strengths and weaknesses
-  const strengths = Object.entries(userAnalytics?.categoryBreakdown.strengths || {})
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5);
-  
-  const weaknesses = Object.entries(userAnalytics?.categoryBreakdown.weaknesses || {})
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5);
+  const hasData = stats !== undefined && stats.totalInterviews > 0
 
   return (
     <AppShell title="Analytics">
-      <div className="mx-auto max-w-7xl p-4 md:p-6">
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Performance Analytics</h1>
-          <p className="mt-2 text-muted-foreground">
-            Track your interview performance and identify areas for improvement
-          </p>
+      <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-6">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-primary ring-1 ring-primary/25">
+              <Activity className="size-3" />
+              Insights
+            </span>
+            <h1 className="mt-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">
+              Performance analytics
+            </h1>
+            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              How your sessions are trending, and which areas to work on next.
+            </p>
+          </div>
+          <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
+            <Sparkles className="size-4" />
+            Start new interview
+          </Link>
         </header>
 
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 mb-6">
-            Error loading analytics: {error}
+        {loading && !userAnalytics ? (
+          <div className="flex flex-col gap-6" aria-busy="true">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-28 rounded-2xl" />
+              ))}
+            </div>
+            <Skeleton className="h-96 rounded-2xl" />
           </div>
-        )}
-
-        {/* Empty state */}
-        {!loading && (!userAnalytics || userAnalytics.overallStats.totalInterviews === 0) && (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-            <Activity className="h-12 w-12 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-semibold">No interview data yet</h3>
-            <p className="mt-2 text-sm text-muted-foreground max-w-md">
-              Complete your first interview to start seeing performance analytics.
+        ) : error ? (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-6 py-14 text-center">
+            <h2 className="text-lg font-semibold tracking-tight text-destructive">
+              Analytics unavailable
+            </h2>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-destructive/80">
+              {error}
             </p>
-            <a 
-              href="/interviews/new" 
-              className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              Start New Interview
-            </a>
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void loadUserAnalytics()}
+                className="h-10 rounded-lg border border-destructive/40 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+              >
+                Try again
+              </button>
+            </div>
           </div>
-        )}
-
-        {/* Stats Cards */}
-        {userAnalytics && userAnalytics.overallStats.totalInterviews > 0 && (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Total Interviews Card */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Total Interviews</CardTitle>
-                <BarChart3 className="h-5 w-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{userAnalytics.overallStats.totalInterviews}</div>
-                <p className="text-xs text-muted-foreground">Completed sessions</p>
-              </CardContent>
-            </Card>
-
-            {/* Avg Overall Score Card */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Avg Score</CardTitle>
-                <Target className="h-5 w-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {userAnalytics.overallStats.avgOverallScore !== null 
-                    ? userAnalytics.overallStats.avgOverallScore 
-                    : 0}%
-                </div>
-                <p className="text-xs text-muted-foreground">Overall performance</p>
-              </CardContent>
-            </Card>
-
-            {/* Completion Rate Card */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Completion</CardTitle>
-                <TrendingUp className="h-5 w-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {userAnalytics.overallStats.completionRate}%
-                </div>
-                <p className="text-xs text-muted-foreground">Questions answered</p>
-              </CardContent>
-            </Card>
-
-            {/* Questions Answered Card */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Qs Answered</CardTitle>
-                <Activity className="h-5 w-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{userAnalytics.overallStats.totalQuestionsAnswered}</div>
-                <p className="text-xs text-muted-foreground">Across all interviews</p>
-              </CardContent>
-            </Card>
+        ) : !hasData || !stats ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
+            <span className="mx-auto flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/25">
+              <Activity className="size-5" />
+            </span>
+            <h2 className="mt-4 text-lg font-semibold tracking-tight">No interview data yet</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+              Finish your first interview and your scores, trends and focus areas will show up here.
+            </p>
+            <div className="mt-6 flex justify-center">
+              <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
+                Start new interview
+              </Link>
+            </div>
           </div>
-        )}
+        ) : (
+          <>
+            {/* headline numbers */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                label="Interviews"
+                value={stats.totalInterviews}
+                hint="sessions on record"
+                icon={BarChart3}
+              />
+              <StatCard
+                label="Avg score"
+                value={`${stats.avgOverallScore ?? 0}%`}
+                hint="overall performance"
+                icon={Target}
+              />
+              <StatCard
+                label="Completion"
+                value={`${stats.completionRate}%`}
+                hint="questions answered"
+                icon={CheckCircle2}
+              />
+              <StatCard
+                label="Answers"
+                value={stats.totalQuestionsAnswered}
+                hint={`${stats.totalQuestionsSkipped} skipped`}
+                icon={MessageSquare}
+              />
+            </div>
 
-        {/* Performance Charts */}
-        {userAnalytics && userAnalytics.overallStats.totalInterviews > 0 && (
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Score Trend Over Time */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Score Trend</CardTitle>
-                <CardDescription>Your performance over time</CardDescription>
-              </CardHeader>
-              <CardContent>
+            {/* score components */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <ScoreBar label="Technical" value={stats.avgTechnicalScore} />
+              <ScoreBar label="Communication" value={stats.avgCommunicationScore} />
+              <ScoreBar label="Problem solving" value={stats.avgProblemSolvingScore} />
+            </div>
+
+            {/* charts */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Panel
+                title="Score trend"
+                description="Overall, technical and communication scores over time"
+              >
                 <div className="h-80">
-                  {loading ? (
-                    <Skeleton className="h-full w-full" />
+                  {trendData.length === 0 ? (
+                    <ChartEmpty label="No trend data yet" />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={[0, 100]} />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="overallScore" stroke="#8884d8" name="Overall" strokeWidth={2} />
-                        <Line type="monotone" dataKey="technicalScore" stroke="#82ca9d" name="Technical" strokeWidth={2} />
-                        <Line type="monotone" dataKey="communicationScore" stroke="#ffc658" name="Communication" strokeWidth={2} />
+                      <LineChart data={trendData} margin={{ top: 5, right: 12, left: -18, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          tick={AXIS_TICK}
+                          tickLine={false}
+                          axisLine={{ stroke: 'var(--border)' }}
+                        />
+                        <YAxis domain={[0, 100]} tick={AXIS_TICK} tickLine={false} axisLine={false} />
+                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line
+                          type="monotone"
+                          dataKey="overallScore"
+                          name="Overall"
+                          stroke={CHART.overall}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="technicalScore"
+                          name="Technical"
+                          stroke={CHART.technical}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="communicationScore"
+                          name="Communication"
+                          stroke={CHART.communication}
+                          strokeWidth={2}
+                          dot={false}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
                 </div>
-              </CardContent>
-            </Card>
+              </Panel>
 
-            {/* Performance by Category */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Performance by Category</CardTitle>
-                <CardDescription>Your strengths and weaknesses</CardDescription>
-              </CardHeader>
-              <CardContent>
+              <Panel
+                title="Performance by category"
+                description="Average score for every topic that came up"
+              >
                 <div className="h-80">
-                  {loading ? (
-                    <Skeleton className="h-full w-full" />
+                  {performanceByCategory.length === 0 ? (
+                    <ChartEmpty label="No category data yet" />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={performanceByCategory}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="category" />
-                        <YAxis domain={[0, 100]} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="avgScore" name="Average Score">
-                          {performanceByCategory.map((entry, index) => (
-                            <svg key={index}>
-                              <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
-                              <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
-                            </svg>
-                          ))}
-                        </Bar>
+                      <BarChart
+                        data={performanceByCategory}
+                        margin={{ top: 5, right: 12, left: -18, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                        <XAxis
+                          dataKey="category"
+                          tick={AXIS_TICK}
+                          tickLine={false}
+                          axisLine={{ stroke: 'var(--border)' }}
+                        />
+                        <YAxis domain={[0, 100]} tick={AXIS_TICK} tickLine={false} axisLine={false} />
+                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Bar
+                          dataKey="avgScore"
+                          name="Average score"
+                          fill={CHART.category}
+                          radius={[6, 6, 0, 0]}
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+              </Panel>
+            </div>
 
-        {/* Strengths and Weaknesses */}
-        {userAnalytics && userAnalytics.overallStats.totalInterviews > 0 && (
-          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-            {/* Strengths */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Top Strengths</CardTitle>
-                <CardDescription>Areas where you excel</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {strengths.length > 0 ? (
-                    strengths.map(([strength, count]) => (
-                      <div key={strength} className="flex items-center justify-between">
-                        <span>{strength}</span>
-                        <Badge variant="secondary">{count} mentions</Badge>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">No strengths data available</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Weaknesses */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Areas for Improvement</CardTitle>
-                <CardDescription>Focus on these areas</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {weaknesses.length > 0 ? (
-                    weaknesses.map(([weakness, count]) => (
-                      <div key={weakness} className="flex items-center justify-between">
-                        <span>{weakness}</span>
-                        <Badge variant="destructive">{count} mentions</Badge>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">No weaknesses data available</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+            {/* strengths & weaknesses */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Panel title="Top strengths" description="Where you consistently perform well">
+                <TagList items={strengths} variant="strong" empty="No strengths captured yet" />
+              </Panel>
+              <Panel title="Focus areas" description="Themes worth another pass">
+                <TagList items={weaknesses} variant="weak" empty="No focus areas captured yet" />
+              </Panel>
+            </div>
+          </>
         )}
       </div>
     </AppShell>
-  );
+  )
 }
+
+function ScoreBar({ label, value }: { label: string; value: number | null }) {
+  const pct = Math.max(0, Math.min(100, value ?? 0))
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className="text-sm font-semibold tabular-nums">{value === null ? '—' : `${value}%`}</p>
+      </div>
+      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function TagList({
+  items,
+  variant,
+  empty,
+}: {
+  items: [string, number][]
+  variant: 'strong' | 'weak'
+  empty: string
+}) {
+  if (items.length === 0) {
+    return (
+      <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{empty}</p>
+    )
+  }
+  return (
+    <ul className="flex flex-wrap gap-2">
+      {items.map(([tag, count]) => (
+        <li key={tag}>
+          <Badge variant={variant}>
+            {tag}
+            <span className="text-muted-foreground">· {count}</span>
+          </Badge>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export default AnalyticsPage

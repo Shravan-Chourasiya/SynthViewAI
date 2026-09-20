@@ -51,14 +51,14 @@ export function LoginForm({ onSuccess, onUnverified, showModeLink = true }: { on
             if (err instanceof ApiError) {
                 if (err.code === 'RATE_LIMITED') {
                     startLock()
-                } else if (err.status === 403 && err.message.toLowerCase().includes('verify your email')) {
+                } else if (err.status === 403 && (err.message.toLowerCase().includes('verify your email') || err.message.toLowerCase().includes('email not verified'))) {
                     // Handle unverified account case - only set pending email and trigger verification flow
                     useAuthStore.getState().setPendingEmail(email)
                     notifyError('Your account needs to be verified. Please check your email or verify again.')
                     if (onUnverified) {
                         onUnverified(email)
                     }
-                } else if (err.status === 401) {
+                } else if (err.status === 401 || err.code === 'INVALID_CREDENTIALS') {
                     // Handle invalid credentials case - don't trigger email verification
                     fails.current += 1
                     if (fails.current >= 3) startLock()

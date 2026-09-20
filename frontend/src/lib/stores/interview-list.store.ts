@@ -17,6 +17,9 @@ type InterviewListState = {
 };
 
 let inFlight: Promise<Interview[]> | null = null;
+/** Bumped by `reset()` so a request that started before the reset cannot write
+ * its (now stale) result into the fresh state. */
+let generation = 0;
 
 export const useInterviewListStore = create<InterviewListState>((set, get) => ({
   interviews: [],
@@ -34,13 +37,18 @@ export const useInterviewListStore = create<InterviewListState>((set, get) => ({
     ) {
       return current.interviews;
     }
+    // Share one request between concurrent mounts.
     if (inFlight) return inFlight;
 
+    const requestGeneration = generation;
     set({ status: "loading", error: null });
-    inFlight = interviewService
+
+    const request = interviewService
       .listInterviews()
       .then((response) => response.map(normalizeInterview))
       .then((interviews) => {
+        // Ignore a result that belongs to a state we already reset away from.
+        if (requestGeneration !== generation) return interviews;
         set({
           interviews,
           status: "ready",
@@ -49,10 +57,26 @@ export const useInterviewListStore = create<InterviewListState>((set, get) => ({
         });
         return interviews;
       })
+      .catch((error: unknown) => {
+        // Without this the store stayed in `loading` forever, so a failed fetch
+        // rendered the skeleton permanently instead of the error message.
+        if (requestGeneration === generation) {
+          set({
+            status: "error",
+            error: error instanceof Error ? error.message : "Failed to load interviews",
+            fetchedAt: null,
+          });
+        }
+        throw error;
+      })
       .finally(() => {
-        inFlight = null;
+        // Only clear our own request: a request that never settles must not pin
+        // `inFlight` forever, or every later fetch would await a dead promise.
+        if (inFlight === request) inFlight = null;
       });
-    return inFlight;
+
+    inFlight = request;
+    return request;
   },
 
   async createInterview(config) {
@@ -78,6 +102,9 @@ export const useInterviewListStore = create<InterviewListState>((set, get) => ({
   },
 
   reset() {
+    // Invalidate anything already in flight so it can't repopulate fresh state.
+    generation += 1;
+    inFlight = null;
     set({ interviews: [], status: "idle", error: null, fetchedAt: null });
   },
 }));

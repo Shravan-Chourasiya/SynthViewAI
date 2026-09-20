@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Info, Loader2 } from 'lucide-react'
+import { Info, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,7 +9,7 @@ import { passwordIsValid } from '@/pages/auth/password-checklist'
 import { ApiError } from '@/lib/http'
 import { notifyError, notifySuccess } from '@/lib/notify'
 
-export function RegisterForm({ onSuccess, onAlreadyExists, showModeLink = true }: { onSuccess: (email: string) => void; onAlreadyExists?: (email: string) => void; showModeLink?: boolean }) {
+export function RegisterForm({ onSuccess, showModeLink = true }: { onSuccess: (email: string) => void; showModeLink?: boolean }) {
     const register = useAuthStore((s) => s.register)
     const [name, setName] = useState('')
     const [username, setUsername] = useState('')
@@ -18,7 +18,6 @@ export function RegisterForm({ onSuccess, onAlreadyExists, showModeLink = true }
     const [password, setPassword] = useState('')
     const [confirm, setConfirm] = useState('')
     const [loading, setLoading] = useState(false)
-    const [done, setDone] = useState(false)
 
     const onSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -48,7 +47,7 @@ export function RegisterForm({ onSuccess, onAlreadyExists, showModeLink = true }
         try {
             await register(name.trim(), username.trim(), email.trim().toLowerCase(), password)
             notifySuccess('Account created successfully!')
-            setDone(true)
+            onSuccess(email.trim().toLowerCase())
         } catch (err) {
             if (err instanceof ApiError && err.code === 'VALIDATION_FAILED') {
                 const fields = (err.details as { fields?: { field?: string; message?: string }[] } | undefined)?.fields
@@ -57,13 +56,7 @@ export function RegisterForm({ onSuccess, onAlreadyExists, showModeLink = true }
                     : err.message
                 notifyError(errorMessage)
             } else if (err instanceof ApiError && err.message.toLowerCase().includes('already exists')) {
-                // Handle existing account case - check if it's unverified
-                notifyError('An account with this email already exists. Please verify your email or try logging in.')
-                // Set the pending email and trigger the verification flow
-                useAuthStore.getState().setPendingEmail(email.trim().toLowerCase())
-                if (onAlreadyExists) {
-                    onAlreadyExists(email.trim().toLowerCase())
-                }
+                notifyError('An account with this email already exists. Please sign in instead.')
             } else {
                 notifyError(err instanceof Error ? err.message : 'Unable to create your account. Please try again.')
             }
@@ -71,27 +64,6 @@ export function RegisterForm({ onSuccess, onAlreadyExists, showModeLink = true }
             setLoading(false)
         }
     }
-
-    if (done) return (
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6 text-center">
-        <div className="flex size-16 items-center justify-center rounded-full bg-signal-strong/10">
-          <CheckCircle2 className="size-8 text-signal-strong" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Account created</h2>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            We sent a 6-digit verification code to{' '}
-            <span className="text-foreground font-medium">{email}</span>
-          </p>
-        </div>
-        <Button 
-          className="h-11 w-full text-base" 
-          onClick={() => onSuccess(email)}
-        >
-          Continue to verification
-        </Button>
-      </div>
-    )
 
     return (
       <div className="mx-auto w-full max-w-md">

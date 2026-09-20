@@ -21,7 +21,8 @@ export function ResumablePage() {
   const [target, setTarget] = useState<Interview | null>(null)
 
   useEffect(() => {
-    void fetchInterviews()
+    // The store surfaces failures through `status`/`error`.
+    void fetchInterviews().catch(() => undefined)
   }, [fetchInterviews])
 
   const list = interviews.filter((i) => i.status === 'IN_PROGRESS' || i.status === 'CREATED' || i.status === 'READY')

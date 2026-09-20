@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { InterviewSummary } from '@/lib/services/admin.service';
-import { RotateCcw, Search, Eye, Calendar, Clock } from 'lucide-react';
+import { RotateCcw, Search, Calendar, Clock } from 'lucide-react';
 
 export function AdminInterviewsPage() {
   const { 
@@ -22,7 +22,8 @@ export function AdminInterviewsPage() {
   } = useAdminStore();
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  // Radix Select forbids empty-string item values, so "ALL" is the sentinel.
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [userIdFilter, setUserIdFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -30,10 +31,13 @@ export function AdminInterviewsPage() {
     loadInterviews({
       page: currentPage,
       limit: 10,
-      status: statusFilter,
-      userId: userIdFilter
+      // The search box filters server-side (title + owning user), and must be
+      // part of the dependency list or typing would never re-query.
+      search: searchTerm.trim() || undefined,
+      status: statusFilter === 'ALL' ? undefined : statusFilter,
+      userId: userIdFilter.trim() || undefined
     });
-  }, [currentPage, statusFilter, userIdFilter]);
+  }, [currentPage, searchTerm, statusFilter, userIdFilter]);
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -70,11 +74,13 @@ export function AdminInterviewsPage() {
               <CardTitle>Interview Filters</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                <div className="relative">
+              {/* The search field takes all the leftover width; the status and
+                  user-ID controls stay content-sized from md upwards. */}
+              <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                <div className="relative w-full md:min-w-64 md:flex-1">
                   <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by title..."
+                    placeholder="Search by title, user or email..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
@@ -83,15 +89,16 @@ export function AdminInterviewsPage() {
                     className="pl-8"
                   />
                 </div>
-                <Select value={statusFilter} onValueChange={(value) => {
-                  setStatusFilter(value);
-                  setCurrentPage(1);
-                }}>
+                <div className="md:w-44">
+                  <Select value={statusFilter} onValueChange={(value) => {
+                    setStatusFilter(value);
+                    setCurrentPage(1);
+                  }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Statuses</SelectItem>
+                    <SelectItem value="ALL">All Statuses</SelectItem>
                     <SelectItem value="DRAFT">Draft</SelectItem>
                     <SelectItem value="READY">Ready</SelectItem>
                     <SelectItem value="SCHEDULED">Scheduled</SelectItem>
@@ -103,6 +110,7 @@ export function AdminInterviewsPage() {
                     <SelectItem value="TIMED_OUT">Timed Out</SelectItem>
                   </SelectContent>
                 </Select>
+                </div>
                 <Input
                   placeholder="Filter by user ID..."
                   value={userIdFilter}
@@ -110,12 +118,15 @@ export function AdminInterviewsPage() {
                     setUserIdFilter(e.target.value);
                     setCurrentPage(1);
                   }}
+                  className="md:w-56"
                 />
                 <Button 
                   variant="outline" 
+                  className="w-full md:w-auto"
                   onClick={() => {
                     setSearchTerm('');
-                    setStatusFilter('');
+                    // 'ALL' is the sentinel the Select needs; '' would blank the trigger.
+                    setStatusFilter('ALL');
                     setUserIdFilter('');
                     setCurrentPage(1);
                   }}
@@ -197,12 +208,11 @@ export function AdminInterviewsPage() {
                         </TableCell>
                         <TableCell>
                           <Button 
-                            variant="outline" 
+                            variant="default" 
                             size="sm"
                             asChild
                           >
                             <a href={`/interviews/${interview.id}`} target="_blank" rel="noopener noreferrer">
-                              <Eye className="mr-2 h-4 w-4" />
                               View
                             </a>
                           </Button>
@@ -271,3 +281,5 @@ export function AdminInterviewsPage() {
     </AppShell>
   );
 }
+
+export default AdminInterviewsPage;

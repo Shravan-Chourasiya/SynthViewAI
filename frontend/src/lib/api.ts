@@ -3,10 +3,9 @@
 // work without changes; new code should import from the service modules directly.
 
 import { ApiError } from "./http";
+import { canAccessAdmin } from "./roles";
 import * as authSvc from "./services/auth.service";
 import * as interviewSvc from "./services/interview.service";
-import * as adminSvc from "./services/admin.service"; // Import admin service to potentially add analytics
-import { ENDPOINTS } from "./constants/endpoints";
 import { normalizeInterview } from "./normalizers/interview";
 import type {
   MeResponse,
@@ -37,7 +36,7 @@ function normalizeUser(u: MeResponse): User {
     name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username,
     email: u.email,
     joinedAt: u.createdAt ?? new Date().toISOString(),
-    role: u.userrole === "admin" ? "admin" : "candidate",
+    role: canAccessAdmin(u.userrole) ? "admin" : "candidate",
   };
 }
 

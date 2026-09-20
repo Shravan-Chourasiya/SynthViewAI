@@ -77,9 +77,9 @@ export function VerifyEmailForm({ onSuccess }: VerifyEmailFormProps) {
         <p className="text-sm leading-relaxed text-muted-foreground">
           Your account has been successfully verified.
         </p>
-        <Button className="h-10 w-full" onClick={onSuccess}>
-          Continue to login
-        </Button>
+        <div className="pt-2">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
       </div>
     )
   }

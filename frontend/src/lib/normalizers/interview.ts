@@ -8,6 +8,11 @@ type BackendInterview = InterviewResponse & {
   interviewCompanyStyle?: string;
   interviewDuration?: number;
   interviewMetaData?: { jobRole?: string; domain?: string; experience?: string; jobSkills?: string[]; targetedCompany?: string; targetedCompanyOther?: string; endingCriteria?: "QUESTION_COUNT" | "DURATION"; questionCount?: number; isAdaptive?: boolean };
+  /** The backend stores the score inside the interviewOutcome jsonb, not as a
+   * flat column — the dashboard reads `score` off every row. */
+  interviewOutcome?: { finalScore?: number } | null;
+  interviewQuestionsGeneratedCount?: number | null;
+  interviewQuestionsAnsweredCount?: number | null;
 };
 
 function normalizeStatus(status: InterviewResponse["status"]): InterviewStatus {
@@ -41,6 +46,9 @@ function normalizeStyle(value: string | undefined): InterviewStyle {
 
 export function normalizeInterview(value: InterviewResponse): Interview {
   const raw = value as BackendInterview & Partial<Interview>;
+  const finalScore = raw.interviewOutcome?.finalScore;
+  const generated = raw.interviewQuestionsGeneratedCount ?? 0;
+  const answered = raw.interviewQuestionsAnsweredCount ?? 0;
   return {
     ...(raw as Interview),
     id: raw.id,
@@ -62,8 +70,10 @@ export function normalizeInterview(value: InterviewResponse): Interview {
     durationMin: raw.interviewDuration ?? 0,
     createdAt: raw.createdAt,
     lastActivityAt: raw.lastActivityAt ?? raw.createdAt,
-    progress: raw.progress ?? 0,
-    score: raw.score ?? null,
+    // Score lives in interviewOutcome.finalScore; progress derives from the
+    // answered/generated question counters (0..1).
+    progress: raw.progress ?? (generated > 0 ? Math.min(1, answered / generated) : 0),
+    score: raw.score ?? (typeof finalScore === "number" ? finalScore : null),
     currentRound: raw.currentRound ?? 1,
     currentQuestion: raw.currentQuestion ?? 0,
   };

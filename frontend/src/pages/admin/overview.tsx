@@ -127,3 +127,5 @@ export function AdminOverviewPage() {
     </AppShell>
   );
 }
+
+export default AdminOverviewPage;
