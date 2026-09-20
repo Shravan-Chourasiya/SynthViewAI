@@ -3,7 +3,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AppShell } from '@/components/app-shell';
-import { Toaster } from '@/components/ui/toast';
 import { useAuthStore } from '@/lib/stores/auth.store';
 
 // Mock the auth store
@@ -20,17 +19,27 @@ Object.defineProperty(window, 'scrollTo', {
 describe('AppShell Component', () => {
   const mockUser = {
     id: 'user123',
+    firstName: 'Test',
+    lastName: 'User',
+    username: 'testuser',
     email: 'user@example.com',
-    name: 'Test User',
-    role: 'USER',
-    emailVerified: true,
+    userrole: 'user' as const,
+    accountStatus: 'active',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
+  // Components consume the store via selectors, so the mock must honor them.
+  const mockAuthStore = (state: Record<string, unknown>) => {
+    (useAuthStore as unknown as vi.Mock).mockImplementation((selector?: (s: unknown) => unknown) =>
+      selector ? selector(state) : state,
+    );
+  };
+
   beforeEach(() => {
-    (useAuthStore as unknown as vi.Mock).mockReturnValue({
+    mockAuthStore({
       user: mockUser,
+      status: 'authenticated',
       isAuthenticated: true,
       isLoading: false,
     });
@@ -40,7 +49,7 @@ describe('AppShell Component', () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <AppShell>
+          <AppShell title="Test">
             <div>Test Children</div>
           </AppShell>
         </MemoryRouter>
@@ -59,7 +68,7 @@ describe('AppShell Component', () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <AppShell>
+          <AppShell title="Test">
             <div>Test Children</div>
           </AppShell>
         </MemoryRouter>
@@ -70,13 +79,11 @@ describe('AppShell Component', () => {
     expect(screen.getByText('Test User')).toBeInTheDocument();
   });
 
-  it('displays fallback avatar initials when no name is provided', () => {
-    // Mock user without a name
-    (useAuthStore as unknown as vi.Mock).mockReturnValue({
-      user: {
-        ...mockUser,
-        name: '', // Empty name to trigger fallback
-      },
+  it('displays fallback username when no name is provided', () => {
+    // Mock user without first/last name — falls back to username
+    mockAuthStore({
+      user: { ...mockUser, firstName: null, lastName: null },
+      status: 'authenticated',
       isAuthenticated: true,
       isLoading: false,
     });
@@ -84,44 +91,24 @@ describe('AppShell Component', () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <AppShell>
+          <AppShell title="Test">
             <div>Test Children</div>
           </AppShell>
         </MemoryRouter>
       </ThemeProvider>
     );
 
-    // Check that the email is used as fallback for the tooltip
-    expect(screen.getByText('user@example.com')).toBeInTheDocument();
-  });
-
-  it('displays toast container', () => {
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AppShell>
-            <div>Test Children</div>
-            <Toaster />
-          </AppShell>
-        </MemoryRouter>
-      </ThemeProvider>
-    );
-
-    // Check that the toast container is present
-    expect(document.querySelector('[data-sonner-toast]')).toBeInTheDocument();
+    // Check that the username is used as the display fallback
+    expect(screen.getByText('testuser')).toBeInTheDocument();
   });
 
   it('handles loading state', () => {
-    (useAuthStore as unknown as vi.Mock).mockReturnValue({
-      user: null,
-      isAuthenticated: false,
-      isLoading: true,
-    });
+    mockAuthStore({ user: null, status: 'loading', isAuthenticated: false, isLoading: true });
 
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <AppShell>
+          <AppShell title="Test">
             <div>Test Children</div>
           </AppShell>
         </MemoryRouter>

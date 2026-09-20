@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/lib/stores/auth.store";
+import { canAccessAdmin } from "@/lib/roles";
 
 // ── AuthBootstrap ─────────────────────────────────────────────────────────────
 // Mount once above the router. Calls bootstrap() exactly once per page load.
@@ -67,7 +68,7 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
     );
   }
 
-  if (user?.userrole !== "admin") {
+  if (!canAccessAdmin(user?.userrole)) {
     return (
       <Navigate to="/dashboard" replace />
     );

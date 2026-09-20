@@ -98,20 +98,38 @@ describe('interview-list.store', () => {
       expect(interviewService.listInterviews).toHaveBeenCalled();
     });
 
-    it('should handle fetch errors', async () => {
+    it('records a failed fetch instead of staying in the loading state', async () => {
       const errorMessage = 'Failed to fetch interviews';
       vi.spyOn(interviewService, 'listInterviews').mockRejectedValue(new Error(errorMessage));
 
       const { fetchInterviews } = useInterviewListStore.getState();
       await expect(fetchInterviews()).rejects.toThrow(errorMessage);
 
-      // Note: Based on the implementation, errors don't update the store state
-      // The fetchInterviews method doesn't catch errors to update the state
+      // The rejection still reaches the caller, but the store must also leave the
+      // loading state — otherwise the history page renders its skeleton forever
+      // instead of the "Unable to load interview history" message.
       const state = useInterviewListStore.getState();
-      // The state remains as loading since the error isn't caught in the store
-      // The error is only propagated to the caller
-      expect(state.status).toBe('loading'); // During the request
-      expect(state.error).toBeNull(); // Error is not stored in the state
+      expect(state.status).toBe('error');
+      expect(state.error).toBe(errorMessage);
+      expect(state.fetchedAt).toBeNull();
+    });
+
+    it('does not let a hanging request block later fetches', async () => {
+      // A request that never settles (stalled connection) must not pin `inFlight`.
+      vi.spyOn(interviewService, 'listInterviews').mockReturnValue(new Promise(() => {}) as never);
+      const { fetchInterviews } = useInterviewListStore.getState();
+      void fetchInterviews().catch(() => undefined);
+
+      // reset() invalidates the in-flight request so the next fetch really runs.
+      useInterviewListStore.getState().reset();
+
+      const recovered = [{ id: '1', title: 'Recovered', status: 'SCHEDULED' }];
+      vi.mocked(interviewService.listInterviews).mockResolvedValue(recovered as never);
+      vi.mocked(normalizeInterview).mockImplementation((interview) => interview as never);
+
+      const result = await fetchInterviews();
+      expect(result).toEqual(recovered);
+      expect(useInterviewListStore.getState().status).toBe('ready');
     });
   });
 

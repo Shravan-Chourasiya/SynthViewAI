@@ -16,6 +16,7 @@ import {
 import { ThemeToggle } from '@/components/theme-toggle'
 import { BrandMark } from '@/components/brand-mark'
 import { useAuthStore } from '@/lib/stores/auth.store'
+import { canAccessAdmin } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -60,8 +61,9 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
     },
   ]
   
-  // Add admin menu only for admin users
-  if (user?.userrole === 'admin') {
+  // Add the admin menu for every role that can reach the admin area
+  // (moderator < admin < owner — see @/lib/roles).
+  if (canAccessAdmin(user?.userrole)) {
     groups.push({
       title: 'Admin',
       items: [{ to: '/admin', label: 'Admin Panel', icon: Shield }],

@@ -121,6 +121,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
+export default ThemeProvider;
+
 export function useTheme() {
   const ctx = useContext(ThemeContext)
   if (!ctx) {

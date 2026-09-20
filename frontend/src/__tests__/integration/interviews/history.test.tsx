@@ -1,27 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { HistoryPage } from '@/pages/interviews/history';
+import { InterviewsPage } from '@/pages/interviews/history';
 import { useInterviewListStore } from '@/lib/stores/interview-list.store';
 import * as interviewService from '@/lib/services/interview.service';
-import { Interview } from '@/lib/types';
-
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
-
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
 
 vi.mock('@/lib/services/interview.service');
 
-// Create wrapper components that include both ThemeProvider and Router
 const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/interviews']) => {
   return render(
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
@@ -32,163 +19,157 @@ const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = 
   );
 };
 
-describe('Interview History Component', () => {
-  const mockInterviews: Interview[] = [
-    {
-      id: 'int-1',
-      title: 'Frontend Developer Interview',
-      status: 'COMPLETED',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      scheduledAt: new Date().toISOString(),
-      duration: 30,
-      type: 'TECHNICAL',
-      difficulty: 'MEDIUM',
-      style: 'REGULAR',
-      experienceLevel: 'MID',
-      targetCompany: 'Google',
-      industry: 'Technology',
-      role: 'Frontend Engineer',
-      skills: ['React', 'TypeScript'],
-      questions: [],
-      metadata: {},
-      report: null,
-      userId: 'user-123'
+// Raw backend-shaped rows — the store maps them through normalizeInterview,
+// so `interviewMetaData.jobRole` becomes the visible `roleTitle`.
+const rawInterviews = [
+  {
+    id: 'int-1',
+    userId: 'user-123',
+    status: 'COMPLETED',
+    interviewStatus: 'COMPLETED',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    rounds: 1,
+    interviewDifficulty: 'MEDIUM',
+    interviewType: 'TECHNICAL',
+    interviewCompanyStyle: 'REGULAR',
+    interviewDuration: 30,
+    interviewMetaData: {
+      jobRole: 'Frontend Developer Interview',
+      domain: 'Frontend Engineering',
+      experience: 'mid-level',
+      jobSkills: ['React', 'TypeScript'],
+      targetedCompany: 'Google',
     },
-    {
-      id: 'int-2',
-      title: 'Backend Developer Interview',
-      status: 'SCHEDULED',
-      createdAt: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-      updatedAt: new Date(Date.now() - 86400000).toISOString(),
-      scheduledAt: new Date(Date.now() + 86400000).toISOString(), // 1 day in future
-      duration: 45,
-      type: 'BEHAVIORAL',
-      difficulty: 'EASY',
-      style: 'REGULAR',
-      experienceLevel: 'JUNIOR',
-      targetCompany: 'Amazon',
-      industry: 'Technology',
-      role: 'Backend Engineer',
-      skills: ['Node.js', 'Express'],
-      questions: [],
-      metadata: {},
-      report: null,
-      userId: 'user-123'
-    }
-  ];
+    interviewOutcome: { finalScore: 85 },
+    interviewQuestionsGeneratedCount: 10,
+    interviewQuestionsAnsweredCount: 10,
+  },
+  {
+    id: 'int-2',
+    userId: 'user-123',
+    status: 'SCHEDULED',
+    interviewStatus: 'SCHEDULED',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000).toISOString(),
+    rounds: 1,
+    interviewDifficulty: 'EASY',
+    interviewType: 'BEHAVIORAL',
+    interviewCompanyStyle: 'REGULAR',
+    interviewDuration: 45,
+    interviewMetaData: {
+      jobRole: 'Backend Developer Interview',
+      domain: 'Backend Engineering',
+      experience: 'junior',
+      jobSkills: ['Node.js', 'Express'],
+      targetedCompany: 'Amazon',
+    },
+  },
+] as any;
 
+describe('Interview History Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
-    
-    // Reset the interview list store
     useInterviewListStore.getState().reset();
   });
 
   it('renders interview list from mocked API data', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue(mockInterviews);
+    vi.mocked(interviewService.listInterviews).mockResolvedValue(rawInterviews as any);
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Wait for the data to load
     await waitFor(() => {
       expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
       expect(screen.getByText('Backend Developer Interview')).toBeInTheDocument();
     });
   });
 
+  it('links each row to its interview detail route', async () => {
+    vi.mocked(interviewService.listInterviews).mockResolvedValue(rawInterviews as any);
+
+    renderWithProviders(<InterviewsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
+    });
+
+    const link = screen.getByText('Frontend Developer Interview').closest('a');
+    expect(link).toHaveAttribute('href', '/interviews/int-1');
+  });
+
   it('shows empty state when no interviews exist', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue([]);
+    vi.mocked(interviewService.listInterviews).mockResolvedValue([] as any);
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Wait for the data to load
     await waitFor(() => {
-      expect(screen.getByText(/no interviews found/i)).toBeInTheDocument();
+      expect(screen.getByText(/no interviews yet/i)).toBeInTheDocument();
     });
   });
 
-  it('shows loading state while fetching interviews', () => {
-    const loadingPromise = new Promise(() => {}); // Never resolves, simulates loading
-    vi.spyOn(interviewService, 'list').mockReturnValue(loadingPromise as any);
+  it('shows loading skeleton while fetching interviews', () => {
+    vi.mocked(interviewService.listInterviews).mockReturnValue(new Promise(() => {}) as any);
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Should show loading indicators
-    expect(screen.getByRole('status')).toBeInTheDocument(); // Loading skeleton
+    // The loading branch renders an aria-busy skeleton container
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
   });
 
-  it('shows error state when API call fails', async () => {
-    const errorMessage = 'Failed to fetch interviews';
-    vi.spyOn(interviewService, 'list').mockRejectedValue(new Error(errorMessage));
+  it('shows error state when the API call fails', async () => {
+    vi.mocked(interviewService.listInterviews).mockRejectedValue(new Error('Failed to fetch interviews'));
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Wait for the error to be displayed
     await waitFor(() => {
-      expect(screen.getByText(/failed to load interviews/i)).toBeInTheDocument();
+      expect(screen.getByText(/unable to load interview history/i)).toBeInTheDocument();
     });
   });
 
-  it('navigates to interview detail when clicking on an interview item', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue(mockInterviews);
+  it('renders the filter controls', async () => {
+    vi.mocked(interviewService.listInterviews).mockResolvedValue(rawInterviews as any);
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Wait for the data to load
     await waitFor(() => {
       expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
     });
 
-    // Find and click on the first interview item
-    const interviewItem = screen.getByText('Frontend Developer Interview').closest('a');
-    if (interviewItem) {
-      interviewItem.click();
-    }
-
-    // Wait for navigation to occur
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/interviews/int-1');
-    });
+    expect(screen.getByLabelText('Filter by type')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by status')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by difficulty')).toBeInTheDocument();
   });
 
-  it('displays correct interview status badges', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue(mockInterviews);
+  it('renders duration cells for each row', async () => {
+    vi.mocked(interviewService.listInterviews).mockResolvedValue(rawInterviews as any);
 
-    renderWithProviders(<HistoryPage />);
+    renderWithProviders(<InterviewsPage />);
 
-    // Wait for the data to load
-    await waitFor(() => {
-      expect(screen.getByText('COMPLETED')).toBeInTheDocument();
-      expect(screen.getByText('SCHEDULED')).toBeInTheDocument();
-    });
-  });
-
-  it('formats interview dates correctly', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue(mockInterviews);
-
-    renderWithProviders(<HistoryPage />);
-
-    // Wait for the data to load
-    await waitFor(() => {
-      // Check that dates are formatted in a readable way
-      expect(screen.getByText(/ago/i)).toBeInTheDocument(); // Should show relative time
-    });
-  });
-
-  it('allows filtering and sorting if those features exist', async () => {
-    vi.spyOn(interviewService, 'list').mockResolvedValue(mockInterviews);
-
-    renderWithProviders(<HistoryPage />);
-
-    // Wait for the data to load
     await waitFor(() => {
       expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
     });
 
-    // Test that filter/sort controls exist if implemented
-    const filterControls = screen.queryAllByRole('combobox'); // Dropdowns for filtering
-    expect(filterControls.length).toBeGreaterThanOrEqual(0); // May or may not exist depending on implementation
+    expect(screen.getByText('30m')).toBeInTheDocument();
+    expect(screen.getByText('45m')).toBeInTheDocument();
+  });
+
+  it('filters the visible rows via the search input', async () => {
+    vi.mocked(interviewService.listInterviews).mockResolvedValue(rawInterviews as any);
+    const user = userEvent.setup();
+
+    renderWithProviders(<InterviewsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
+      expect(screen.getByText('Backend Developer Interview')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText('Search interviews'), 'Frontend');
+
+    await waitFor(() => {
+      expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
+      expect(screen.queryByText('Backend Developer Interview')).not.toBeInTheDocument();
+    });
   });
 });
+

@@ -31,14 +31,39 @@ describe('Admin Shared Components', () => {
     createdAt: '2023-01-01T00:00:00Z',
   };
 
+  // Components consume the store via selectors, e.g. useAuthStore((s) => s.user),
+  // so the mock must honor the selector instead of returning the whole state.
+  const mockAuthStore = (state: Record<string, unknown>) => {
+    (useAuthStore as any).mockImplementation((selector?: (s: unknown) => unknown) =>
+      selector ? selector(state) : state,
+    );
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe('AdminGate', () => {
     it('renders children for admin users', () => {
-      (useAuthStore as any).mockReturnValue({
-        user: mockAdminUser,
+      mockAuthStore({ user: mockAdminUser, isAuthenticated: true, isLoading: false });
+
+      render(
+        <ThemeProvider>
+          <MemoryRouter>
+            <AdminGate>
+              <div>Protected Content</div>
+            </AdminGate>
+          </MemoryRouter>
+        </ThemeProvider>
+      );
+
+      expect(screen.getByText('Protected Content')).toBeInTheDocument();
+    });
+
+    // Hierarchy: owner is the apex role and moderator inherits admin-area access.
+    it.each(['owner', 'moderator'])('renders children for %s users', (role) => {
+      mockAuthStore({
+        user: { ...mockAdminUser, userrole: role },
         isAuthenticated: true,
         isLoading: false,
       });
@@ -57,11 +82,7 @@ describe('Admin Shared Components', () => {
     });
 
     it('renders nothing for unauthenticated users', () => {
-      (useAuthStore as any).mockReturnValue({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
+      mockAuthStore({ user: null, isAuthenticated: false, isLoading: false });
 
       render(
         <ThemeProvider>
@@ -77,11 +98,7 @@ describe('Admin Shared Components', () => {
     });
 
     it('shows access denied for non-admin users', () => {
-      (useAuthStore as any).mockReturnValue({
-        user: mockRegularUser,
-        isAuthenticated: true,
-        isLoading: false,
-      });
+      mockAuthStore({ user: mockRegularUser, isAuthenticated: true, isLoading: false });
 
       render(
         <ThemeProvider>
@@ -110,8 +127,11 @@ describe('Admin Shared Components', () => {
       );
 
       expect(screen.getByText('Admin data is not available yet')).toBeInTheDocument();
-      expect(screen.getByText('Admin access required')).toBeInTheDocument();
-      expect(screen.getByText('The current backend contract does not expose administrative user or interview endpoints.')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'The current backend contract does not expose administrative user or interview endpoints. This screen will remain unavailable until those routes are implemented.',
+        ),
+      ).toBeInTheDocument();
     });
   });
 
