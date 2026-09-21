@@ -324,6 +324,15 @@
   .print-document-title { display: block; }
   .print-document-title h1 { font-size: 18pt; font-weight: 700; }
   .print-document-title p { margin-top: 2mm; color: #525252 !important; font-size: 9pt; }
+
+  /* The per-question score strip is interactive on screen; on paper it is just
+     the score trend, so drop the "click a chip" hint but keep the band colours. */
+  .report-print-root .print-hint { display: none !important; }
+  .report-print-root .print-score-chip {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    forced-color-adjust: none;
+  }
 }
 
 .print-document-title { display: none; }

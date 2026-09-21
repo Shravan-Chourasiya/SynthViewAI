@@ -87,7 +87,7 @@ export function AdminUsersPage() {
           />
 
           {usersError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 mb-4">
+            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive">
               Error loading users: {usersError}
             </div>
           )}
@@ -232,7 +232,7 @@ export function AdminUsersPage() {
               
               {/* Pagination */}
               {!usersLoading && (
-                <div className="flex flex-col items-center justify-between gap-4 border-t bg-white px-6 py-4 sm:flex-row">
+                <div className="flex flex-col items-center justify-between gap-4 border-t bg-card px-6 py-4 sm:flex-row">
                   <div className="text-sm text-muted-foreground">
                     Showing <span className="font-medium">{Math.min((currentPage - 1) * 10 + 1, userPagination.total)}</span> to{' '}
                     <span className="font-medium">
@@ -287,6 +287,7 @@ export function AdminUsersPage() {
       >
         {showSuspendDialog.user && (
           <ConfirmDialog
+            open={showSuspendDialog.open}
             title={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate User' : 'Suspend User'}
             description={showSuspendDialog.user.accountStatus === 'suspended' 
               ? `Are you sure you want to reinstate ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?` 

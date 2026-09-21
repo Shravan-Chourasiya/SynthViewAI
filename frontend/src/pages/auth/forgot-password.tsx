@@ -16,7 +16,6 @@ export function ForgotPasswordPage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (loading) return
-    setError(null)
     if (!email.includes('@')) {
       notifyError('Please enter a valid email address.')
       return

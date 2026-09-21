@@ -39,7 +39,10 @@ export function Badge({ className, variant, dot = false, children, ...props }: B
 }
 
 export function StatusBadge({ status }: { status: InterviewStatus }) {
-  const meta = STATUS_META[status]
+  // Unknown / future statuses (or a raw backend value that slipped through the
+  // normalizer) must render a neutral badge — never crash the whole page by
+  // reading `.variant` off `undefined`.
+  const meta = STATUS_META[status] ?? { label: String(status ?? 'Unknown'), variant: 'neutral' as const }
   return (
     <Badge variant={meta.variant} dot>
       {meta.label}

@@ -8,8 +8,9 @@ type BackendInterview = InterviewResponse & {
   interviewCompanyStyle?: string;
   interviewDuration?: number;
   interviewMetaData?: { jobRole?: string; domain?: string; experience?: string; jobSkills?: string[]; targetedCompany?: string; targetedCompanyOther?: string; endingCriteria?: "QUESTION_COUNT" | "DURATION"; questionCount?: number; isAdaptive?: boolean };
-  /** The backend stores the score inside the interviewOutcome jsonb, not as a
-   * flat column — the dashboard reads `score` off every row. */
+  /** { finalScore } is the score as the report pipeline stores it. The list
+   * endpoint also returns a flat `score` (joined from the generated report
+   * row), which is what the dashboard reads off every row. */
   interviewOutcome?: { finalScore?: number } | null;
   interviewQuestionsGeneratedCount?: number | null;
   interviewQuestionsAnsweredCount?: number | null;

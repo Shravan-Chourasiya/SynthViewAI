@@ -34,7 +34,8 @@ export interface AdminOverviewStats {
 }
 
 export interface PaginatedResponse<T> {
-  users: T[];
+  users?: T[];
+  interviews?: T[];
   total: number;
   page: number;
   limit: number;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { AdminGate, AdminHeader } from './shared';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,13 +42,13 @@ export function AdminInterviewsPage() {
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case 'COMPLETED': return 'default';
-      case 'INPROGRESS': return 'secondary';
+      case 'INPROGRESS': return 'neutral';
       case 'SCHEDULED': return 'outline';
-      case 'DRAFT': return 'secondary';
-      case 'CANCELLED': return 'destructive';
-      case 'ABANDONED': return 'destructive';
-      case 'EXPIRED': return 'destructive';
-      case 'TIMED_OUT': return 'destructive';
+      case 'DRAFT': return 'neutral';
+      case 'CANCELLED': return 'weak';
+      case 'ABANDONED': return 'weak';
+      case 'EXPIRED': return 'weak';
+      case 'TIMED_OUT': return 'weak';
       default: return 'outline';
     }
   };
@@ -63,7 +63,7 @@ export function AdminInterviewsPage() {
           />
 
           {interviewsError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 mb-4">
+            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive">
               Error loading interviews: {interviewsError}
             </div>
           )}
@@ -207,15 +207,14 @@ export function AdminInterviewsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button 
-                            variant="default" 
-                            size="sm"
-                            asChild
+                          <a
+                            className={buttonVariants({ variant: 'default', size: 'sm' })}
+                            href={`/interviews/${interview.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
                           >
-                            <a href={`/interviews/${interview.id}`} target="_blank" rel="noopener noreferrer">
-                              View
-                            </a>
-                          </Button>
+                            View
+                          </a>
                         </TableCell>
                       </TableRow>
                     ))
@@ -231,7 +230,7 @@ export function AdminInterviewsPage() {
               
               {/* Pagination */}
               {!interviewsLoading && (
-                <div className="flex flex-col items-center justify-between gap-4 border-t bg-white px-6 py-4 sm:flex-row">
+                <div className="flex flex-col items-center justify-between gap-4 border-t bg-card px-6 py-4 sm:flex-row">
                   <div className="text-sm text-muted-foreground">
                     Showing <span className="font-medium">{Math.min((currentPage - 1) * 10 + 1, interviewPagination.total)}</span> to{' '}
                     <span className="font-medium">

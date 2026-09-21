@@ -121,7 +121,7 @@ export function SessionsPage() {
         onConfirm={() => {
           if (target) {
             authSvc.revokeSession(target.id).then(load).catch((err: unknown) => {
-              setError(err instanceof Error ? err.message : 'Unable to revoke session.')
+              notifyError(err instanceof Error ? err.message : 'Unable to revoke session.')
             })
           }
         }}
@@ -136,7 +136,7 @@ export function SessionsPage() {
         onClose={() => setRevokeAllOpen(false)}
         onConfirm={() => {
           authSvc.revokeAllSessions().then(load).catch((err: unknown) => {
-            setError(err instanceof Error ? err.message : 'Unable to revoke sessions.')
+            notifyError(err instanceof Error ? err.message : 'Unable to revoke sessions.')
           })
         }}
       />

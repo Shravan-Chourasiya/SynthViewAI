@@ -11,7 +11,9 @@ import {
 import { cn } from '@/lib/utils'
 
 export function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
-  return <Badge variant={DIFFICULTY_META[difficulty].variant}>{difficulty}</Badge>
+  // Same guard as StatusBadge: an unknown difficulty must not unmount the page.
+  const meta = DIFFICULTY_META[difficulty] ?? { variant: 'neutral' as const }
+  return <Badge variant={meta.variant}>{difficulty ?? 'Unknown'}</Badge>
 }
 
 const TYPE_VARIANT: Record<InterviewType, BadgeProps['variant']> = {
@@ -23,9 +25,11 @@ const TYPE_VARIANT: Record<InterviewType, BadgeProps['variant']> = {
 }
 
 export function TypeBadge({ type }: { type: InterviewType }) {
+  // Unknown types fall back to a neutral badge instead of crashing the page.
+  const variant = (type && TYPE_VARIANT[type]) ?? 'neutral'
   return (
-    <Badge variant={TYPE_VARIANT[type]} dot>
-      {type}
+    <Badge variant={variant} dot>
+      {type ?? 'Unknown'}
     </Badge>
   )
 }

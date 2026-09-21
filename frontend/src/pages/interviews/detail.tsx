@@ -56,8 +56,11 @@ export function InterviewDetailPage() {
     )
   }
 
-  const alert = STATUS_ALERT[interview.status]
-  const pct = interview.status === 'COMPLETED' ? 100 : Math.round(interview.progress * 100)
+  const alert = STATUS_ALERT[interview.status] ?? {
+    variant: 'default' as const,
+    message: `Interview status: ${interview.status}.`,
+  }
+  const pct = interview.status === 'COMPLETED' ? 100 : Math.round((interview.progress ?? 0) * 100)
 
   return (
     <AppShell title="Interview Detail">

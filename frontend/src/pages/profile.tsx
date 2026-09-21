@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Alert } from '@/components/ui/alert'
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { fmtDate } from '@/lib/format'
@@ -18,14 +19,37 @@ export function ProfilePage() {
   const user = useAuthStore((s) => s.user)
   const bootstrap = useAuthStore((s) => s.bootstrap)
 
-  const name = user ? displayName(user) : ''
-  const [nameVal, setNameVal] = useState(name)
+  const [nameVal, setNameVal] = useState('')
+  const [seeded, setSeeded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (!user) return null
+  // Seed the editable name only after the user is known. The previous code
+  // seeded `useState(name)` unconditionally and then returned `null` before
+  // the hooks below — an early return before hooks breaks the Rules of Hooks
+  // and blanks the whole page when bootstrap is still resolving.
+  useEffect(() => {
+    if (user && !seeded) {
+      setNameVal(displayName(user))
+      setSeeded(true)
+    }
+  }, [user, seeded])
 
+  // While bootstrap resolves there is no user yet — render a skeleton instead
+  // of `null` so the route never flashes a blank page.
+  if (!user) {
+    return (
+      <AppShell title="Profile">
+        <div className="mx-auto flex max-w-2xl flex-col gap-4" aria-busy="true">
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-56 rounded-2xl" />
+        </div>
+      </AppShell>
+    )
+  }
+
+  const name = displayName(user)
   const initials = name
     .split(' ')
     .map((s) => s[0])

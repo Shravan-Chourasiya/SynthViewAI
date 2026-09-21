@@ -85,7 +85,7 @@ export const useAdminStore = create<AdminState>()(
         });
         
         set({
-          users: response.users,
+          users: response.users ?? [],
           userPagination: {
             total: response.total,
             page: response.page,
@@ -160,7 +160,7 @@ export const useAdminStore = create<AdminState>()(
         });
         
         set({
-          interviews: response.interviews,
+          interviews: response.interviews ?? [],
           interviewPagination: {
             total: response.total,
             page: response.page,
