@@ -5,6 +5,7 @@ node_modules/
 backend/docs/temp/*
 .amazonq/*
 .utim*/*
+.freebuff*/*
 *txt
 # Testing
 coverage/
@@ -13,7 +14,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.log
-
+*png
 # IDEs
 .vscode/
 .idea/

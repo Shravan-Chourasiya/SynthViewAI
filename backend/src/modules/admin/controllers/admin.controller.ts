@@ -1,24 +1,28 @@
 import type { Request, Response, NextFunction } from "express";
-import { z } from "zod";
-import type { 
-  userListQuerySchema, 
-  updateUserRoleSchema, 
-  suspendUserSchema, 
-  interviewListQuerySchema,
-  adminOverviewQuerySchema
-} from "../zodschemas/admin.zschema.js";
-import { 
-  listUsers, 
-  getUserById, 
-  updateUserRole, 
-  suspendUser, 
-  reinstateUser, 
-  listInterviews, 
+import type { z } from "zod";
+import type { updateUserRoleSchema, suspendUserSchema } from "../zodschemas/admin.zschema.js";
+import {
+  listUsers,
+  getUserById,
+  updateUserRole,
+  suspendUser,
+  reinstateUser,
+  listInterviews,
   getInterviewDetail,
-  getOverviewStats
+  getOverviewStats,
 } from "../services/admin.service.js";
 import type { SuccessResponse } from "../../../types/response.js";
 import type { AuthenticatedRequest } from "../../../types/request.js";
+
+/**
+ * `validateQuery` attaches the parsed query to `req.validatedQuery`. Express's
+ * own `Request` type doesn't declare it, so read it through this narrow shape
+ * instead of casting the request to `any` in every handler.
+ */
+function getValidatedQuery(req: Request): Record<string, unknown> {
+  const validated = (req as Request & { validatedQuery?: Record<string, unknown> }).validatedQuery;
+  return validated ?? req.query;
+}
 
 /**
  * GET /admin/users
@@ -27,27 +31,28 @@ import type { AuthenticatedRequest } from "../../../types/request.js";
 export const listUsersController = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     // Use validated query data if available, otherwise fall back to original query
-    const queryData = (req as any).validatedQuery || req.query;
-    const { page, limit, search, role, sortBy, sortOrder } = queryData;
+    const { page, limit, search, role, sortBy, sortOrder } = getValidatedQuery(req);
 
     const result = await listUsers({
       page: page ? parseInt(page as string, 10) : 1,
       limit: limit ? parseInt(limit as string, 10) : 10,
-      search: search as string | undefined,
-      role: role as string | undefined,
-      sortBy: sortBy as string | undefined,
-      sortOrder: sortOrder as 'asc' | 'desc' | undefined
-    } as any); // Using 'any' to bypass strict typing for optional properties
+      // Optional fields are spread conditionally: `exactOptionalPropertyTypes`
+      // rejects an explicit `undefined` for a `prop?: string` target.
+      ...(search ? { search: search as string } : {}),
+      ...(role ? { role: role as string } : {}),
+      ...(sortBy ? { sortBy: sortBy as string } : {}),
+      ...(sortOrder ? { sortOrder: sortOrder as "asc" | "desc" } : {}),
+    });
 
     const response: SuccessResponse = {
       success: true,
       statusCode: 200,
       message: "Users retrieved successfully",
-      data: result
+      data: result,
     };
 
     res.status(200).json(response);
@@ -63,7 +68,7 @@ export const listUsersController = async (
 export const getUserController = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
@@ -74,7 +79,7 @@ export const getUserController = async (
       success: true,
       statusCode: 200,
       message: "User retrieved successfully",
-      data: user
+      data: user,
     };
 
     res.status(200).json(response);
@@ -88,17 +93,18 @@ export const getUserController = async (
  * Update user role
  */
 export const updateUserRoleController = async (
-  req: Request<{ id: string }, {}, z.infer<typeof updateUserRoleSchema>>,
+  req: Request<{ id: string }, unknown, z.infer<typeof updateUserRoleSchema>>,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
     const { newRole } = req.body;
-    
-    // Cast to AuthenticatedRequest to access auth property
-    const authReq = req as unknown as AuthenticatedRequest;
-    const actorId = authReq.auth!.userId;
+
+    // `requireAuth` has already attached `auth`; intersect it with the typed
+    // request so the actor id is read without an `any` cast.
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    const actorId = auth.userId;
 
     await updateUserRole(userId, newRole, actorId);
 
@@ -106,7 +112,7 @@ export const updateUserRoleController = async (
       success: true,
       statusCode: 200,
       message: "User role updated successfully",
-      data: null
+      data: null,
     };
 
     res.status(200).json(response);
@@ -120,9 +126,9 @@ export const updateUserRoleController = async (
  * Suspend a user
  */
 export const suspendUserController = async (
-  req: Request<{ id: string }, {}, z.infer<typeof suspendUserSchema>>,
+  req: Request<{ id: string }, unknown, z.infer<typeof suspendUserSchema>>,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
@@ -134,7 +140,7 @@ export const suspendUserController = async (
       success: true,
       statusCode: 200,
       message: "User suspended successfully",
-      data: null
+      data: null,
     };
 
     res.status(200).json(response);
@@ -150,7 +156,7 @@ export const suspendUserController = async (
 export const reinstateUserController = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
@@ -161,7 +167,7 @@ export const reinstateUserController = async (
       success: true,
       statusCode: 200,
       message: "User reinstated successfully",
-      data: null
+      data: null,
     };
 
     res.status(200).json(response);
@@ -177,27 +183,30 @@ export const reinstateUserController = async (
 export const listInterviewsController = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     // Use validated query data if available, otherwise fall back to original query
-    const queryData = (req as any).validatedQuery || req.query;
-    const { page, limit, status, userId, sortBy, sortOrder } = queryData;
+    const { page, limit, search, status, userId, sortBy, sortOrder } = getValidatedQuery(req);
 
     const result = await listInterviews({
       page: page ? parseInt(page as string, 10) : 1,
       limit: limit ? parseInt(limit as string, 10) : 10,
-      status: status as string | undefined,
-      userId: userId as string | undefined,
-      sortBy: sortBy as string | undefined,
-      sortOrder: sortOrder as 'asc' | 'desc' | undefined
-    } as any); // Using 'any' to bypass strict typing for optional properties
+      // `search` must be forwarded here or the free-text filter is silently
+      // dropped before the service ever sees it (the users controller already
+      // does this — interviews was the odd one out).
+      ...(search ? { search: search as string } : {}),
+      ...(status ? { status: status as string } : {}),
+      ...(userId ? { userId: userId as string } : {}),
+      ...(sortBy ? { sortBy: sortBy as string } : {}),
+      ...(sortOrder ? { sortOrder: sortOrder as "asc" | "desc" } : {}),
+    });
 
     const response: SuccessResponse = {
       success: true,
       statusCode: 200,
       message: "Interviews retrieved successfully",
-      data: result
+      data: result,
     };
 
     res.status(200).json(response);
@@ -213,18 +222,20 @@ export const listInterviewsController = async (
 export const getInterviewDetailController = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const { id: interviewId } = req.params;
 
-    const interview = await getInterviewDetail(interviewId);
+    // The service returns an untyped row; annotate it as `unknown` so the
+    // pass-through response stays out of the unsafe-assignment rule.
+    const interview: unknown = await getInterviewDetail(interviewId);
 
     const response: SuccessResponse = {
       success: true,
       statusCode: 200,
       message: "Interview retrieved successfully",
-      data: interview
+      data: interview,
     };
 
     res.status(200).json(response);
@@ -240,20 +251,19 @@ export const getInterviewDetailController = async (
 export const getOverviewController = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     // Use validated query data if available, otherwise fall back to original query
-    const queryData = (req as any).validatedQuery || req.query;
-    const { period } = queryData;
+    const { period } = getValidatedQuery(req);
 
-    const stats = await getOverviewStats(period as string || '30d');
+    const stats = await getOverviewStats((period as string) ?? "30d");
 
     const response: SuccessResponse = {
       success: true,
       statusCode: 200,
       message: "Overview statistics retrieved successfully",
-      data: stats
+      data: stats,
     };
 
     res.status(200).json(response);

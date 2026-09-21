@@ -5,7 +5,14 @@ import bcrypt from "bcrypt";
 import { AppError } from "../../../utils/appError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import { getRandomOtp } from "../../../utils/email.js";
-import { sendOtpMail } from "../../../services/nodemailer.service.js";
+import {
+  sendAccountDeletedMail,
+  sendCredentialUpdatedMail,
+  sendInBackground,
+  sendNewLoginAlertMail,
+  sendOtpMail,
+  sendWelcomeMail,
+} from "../../../services/nodemailer.service.js";
 import { otpService } from "../../../services/redis.service.js";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable } from "../schemas/user.schema.js";
@@ -78,7 +85,11 @@ export async function registerUserService(input: RegisterInput): Promise<void> {
   );
 }
 
-async function sendRegistrationOtp(email: string, userId?: string, newValue?: string): Promise<void> {
+async function sendRegistrationOtp(
+  email: string,
+  userId?: string,
+  newValue?: string,
+): Promise<void> {
   const otp = getRandomOtp(6);
   await otpService.storeOTP(email, otp, OTP_PURPOSE.REGISTER, userId, newValue);
   await sendOtpMail(email, otp);
@@ -116,6 +127,10 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
         { isOperational: true },
       );
     }
+
+    // One-time welcome mail. Only the REGISTER purpose provisions an account,
+    // so this fires exactly once, on the successful verification of it.
+    sendInBackground(() => sendWelcomeMail(input.email));
     return;
   }
 
@@ -144,6 +159,9 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
     lastName: data.lastName,
     isVerified: true,
   });
+
+  // First-run account → the single welcome email.
+  sendInBackground(() => sendWelcomeMail(input.email, data.firstName));
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
@@ -228,6 +246,16 @@ export async function loginService(
   const tokenFamily = randomUUID();
   const expiryDate = new Date(Date.now() + SESSION_EXPIRY_MS);
 
+  // Alert only the first time this device is seen for this user — not on every
+  // login from their regular laptop. Checked before the session row is inserted
+  // so the row we're about to create can't count as its own "prior" session.
+  const priorDeviceSessions = await db
+    .select({ id: sessionsTable.id })
+    .from(sessionsTable)
+    .where(and(eq(sessionsTable.userId, user.id), eq(sessionsTable.deviceId, deviceId)))
+    .limit(1);
+  const isNewDevice = priorDeviceSessions.length === 0;
+
   const accessToken = signAccessToken({ userId: user.id, sessionId: "", tokenFamily });
   const refreshToken = signRefreshToken({ userId: user.id, sessionId: "", tokenFamily });
   const csrfToken = generateCsrfToken();
@@ -283,6 +311,17 @@ export async function loginService(
     .update(usersTable)
     .set({ sessionCount: activeSessions.length + 1 })
     .where(eq(usersTable.id, user.id));
+
+  if (isNewDevice) {
+    sendInBackground(() =>
+      sendNewLoginAlertMail(user.email, {
+        deviceType: input.deviceType,
+        ipAddress,
+        userAgent,
+        signedInAt: new Date(),
+      }),
+    );
+  }
 
   return {
     accessToken: finalAccessToken,
@@ -435,7 +474,11 @@ export async function deleteAccountService(
   const db = getPgDb();
 
   const [user] = await db
-    .select({ id: usersTable.id, accountStatus: usersTable.accountStatus })
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      accountStatus: usersTable.accountStatus,
+    })
     .from(usersTable)
     .where(eq(usersTable.id, userId))
     .limit(1);
@@ -461,6 +504,15 @@ export async function deleteAccountService(
     blacklistToken(accessToken),
     blacklistToken(refreshToken),
   ]);
+
+  // Deletion is soft (the address stays on record during the recovery window),
+  // so this is sent while the email is still known and valid.
+  sendInBackground(() =>
+    sendAccountDeletedMail(user.email, {
+      deletedAt: now,
+      recoveryWindowDays: Math.round(ACCOUNT_RECOVERY_WINDOW_MS / (24 * 60 * 60 * 1000)),
+    }),
+  );
 }
 
 // ── Recover Account — Send OTP ────────────────────────────────────────────────
@@ -474,7 +526,7 @@ export async function recoverAccountService(email: string): Promise<void> {
     .where(eq(usersTable.email, email))
     .limit(1);
 
-  if (!user || user.accountStatus !== "disabled") {
+  if (user?.accountStatus !== "disabled") {
     // Intentionally vague — don't reveal whether email exists
     return;
   }
@@ -520,7 +572,7 @@ export async function forgotPasswordService(input: ForgotPasswordInput): Promise
     .limit(1);
 
   // Intentionally vague — don't reveal whether email exists
-  if (!user || user.accountStatus !== "active") return;
+  if (user?.accountStatus !== "active") return;
 
   const otp = getRandomOtp(6);
   await otpService.storeOTP(input.email, otp, OTP_PURPOSE.FORGOT_PASSWORD, user.id);
@@ -585,7 +637,7 @@ export async function updatePasswordService(input: UpdatePasswordInput): Promise
 
   const isPasswordMatch = user ? await bcrypt.compare(input.currentPassword, user.password) : false;
 
-  if (!user || user.accountStatus !== "active" || !isPasswordMatch) {
+  if (user?.accountStatus !== "active" || !isPasswordMatch) {
     throw new AppError(
       "Invalid email or current password",
       StatusCodes.UNAUTHORIZED,
@@ -623,6 +675,11 @@ export async function updatePasswordService(input: UpdatePasswordInput): Promise
     ...sessions.flatMap((s) => [blacklistToken(s.accessToken), blacklistToken(s.refreshToken)]),
   ]);
 
+  // Security-relevant, user-initiated change → confirm it in writing.
+  sendInBackground(() =>
+    sendCredentialUpdatedMail(input.email, { field: "password", changedAt: new Date() }),
+  );
+
   return;
 }
 
@@ -638,7 +695,7 @@ export async function updateEmailService(input: UpdateEmailInput): Promise<void>
     .limit(1);
 
   // Intentionally vague — don't reveal whether email exists
-  if (!user || user.accountStatus !== "active") return;
+  if (user?.accountStatus !== "active") return;
 
   const otp = getRandomOtp(6);
   await otpService.storeOTP(input.email, otp, OTP_PURPOSE.UPDATE_EMAIL, user.id);
@@ -677,6 +734,17 @@ export async function emailUpdateOtpVerifyService(input: EmailUpdateOtpVerifyInp
       .where(eq(sessionsTable.userId, result.userId!)),
     ...sessions.flatMap((s) => [blacklistToken(s.accessToken), blacklistToken(s.refreshToken)]),
   ]);
+
+  // The address only actually changes in this step (the earlier step merely
+  // sends the OTP), so this is where a truthful "email updated" confirmation
+  // goes — to the new address.
+  sendInBackground(() =>
+    sendCredentialUpdatedMail(result.newValue!, {
+      field: "email",
+      newEmail: result.newValue!,
+      changedAt: new Date(),
+    }),
+  );
 }
 
 // ── Get Current User Info ─────────────────────────────────────────────────────
@@ -708,10 +776,7 @@ export async function getMeService(userId: string) {
   return user;
 }
 
-export async function updateProfileService(
-  userId: string,
-  input: UpdateProfileInput,
-) {
+export async function updateProfileService(userId: string, input: UpdateProfileInput) {
   const db = getPgDb();
   const [user] = await db
     .update(usersTable)

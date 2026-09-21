@@ -1,7 +1,8 @@
 import { and, eq, ilike, or, desc, asc, gt, gte, lt, lte, count, sql, type SQL } from "drizzle-orm";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
-import { interviewsTable, interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
+import type { interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
+import { interviewsTable } from "../../interview/schemas/interview.schema.js";
 import { interviewResultsTable } from "../../interview/schemas/result.schema.js";
 import { AppError } from "../../../utils/appError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
@@ -14,6 +15,18 @@ import {
 } from "../../../constants/roles.constants.js";
 import { StatusCodes } from "http-status-codes";
 import { randomUUID } from "crypto";
+import {
+  sendAccountSuspendedMail,
+  sendInBackground,
+} from "../../../services/nodemailer.service.js";
+
+/**
+ * Escapes `%`, `_` and `\` so a user's search text is matched literally
+ * inside an ILIKE pattern instead of acting as wildcards.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
 
 interface PaginationOptions {
   page: number;
@@ -24,7 +37,7 @@ interface UserListFilter {
   search?: string;
   role?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 interface InterviewListFilter {
@@ -32,7 +45,7 @@ interface InterviewListFilter {
   status?: string;
   userId?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 interface UserSummary {
@@ -85,61 +98,71 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
       accountStatus: usersTable.accountStatus,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
-      interviewCount: sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as('interviewCount'),
-      lastInterviewAt: sql<Date | null>`(SELECT MAX(created_at) FROM interviews WHERE interviews.user_id = users.id)`.as('lastInterviewAt')
+      interviewCount:
+        sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as(
+          "interviewCount",
+        ),
+      lastInterviewAt:
+        sql<Date | null>`(SELECT MAX(created_at) FROM interviews WHERE interviews.user_id = users.id)`.as(
+          "lastInterviewAt",
+        ),
     })
     .from(usersTable) as any; // Type assertion to bypass complex type checking
 
   // Apply filters. Drizzle's `.where()` *replaces* the previous predicate rather
   // than ANDing with it, so chaining `.where()` twice silently dropped the search
   // whenever a role filter was also active. Build one combined predicate instead.
-  const userConditions: SQL[] = [];
+  const userConditions: SQL<unknown>[] = [];
   if (search) {
     // `username` is what the admin table renders, so it has to be searchable too.
+    const escaped = escapeLikePattern(search);
     userConditions.push(
       or(
-        ilike(usersTable.email, `%${search}%`),
-        ilike(usersTable.username, `%${search}%`),
-        ilike(usersTable.firstName, `%${search}%`),
-        ilike(usersTable.lastName, `%${search}%`)
-      ) as SQL
+        ilike(usersTable.email, `%${escaped}%`),
+        ilike(usersTable.username, `%${escaped}%`),
+        ilike(usersTable.firstName, `%${escaped}%`),
+        ilike(usersTable.lastName, `%${escaped}%`),
+      )!,
     );
   }
   if (role) {
-    userConditions.push(eq(usersTable.userrole, role as any) as SQL);
+    userConditions.push(
+      eq(usersTable.userrole, role as (typeof USER_ROLES)[number]),
+    );
   }
   if (userConditions.length > 0) {
-    query = query.where(and(...userConditions)) as any; // Type assertion to bypass complex type checking
+    query = query.where(and(...userConditions)); // Type assertion to bypass complex type checking
   }
 
   // Apply sorting
   let sortCol;
   switch (sortBy) {
-    case 'userrole':
+    case "userrole":
       sortCol = usersTable.userrole;
       break;
-    case 'email':
+    case "email":
       sortCol = usersTable.email;
       break;
-    case 'firstName':
+    case "firstName":
       sortCol = usersTable.firstName;
       break;
-    case 'lastName':
+    case "lastName":
       sortCol = usersTable.lastName;
       break;
     default:
       sortCol = usersTable.createdAt;
   }
-  
-  const sortDirection = sortOrder === 'asc' ? asc(sortCol) : desc(sortCol);
-  query = query.orderBy(sortDirection) as any; // Type assertion to bypass complex type checking
+
+  const sortDirection = sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
+  query = query.orderBy(sortDirection); // Type assertion to bypass complex type checking
 
   // Calculate total count with the exact same predicate as the page query —
   // otherwise the filters and the pagination count disagree.
-  let countQuery = db.select({ count: count() }).from(usersTable);
-  if (userConditions.length > 0) {
-    countQuery = countQuery.where(and(...userConditions)) as any;
-  }
+  const countQueryBase = db.select({ count: count() }).from(usersTable);
+  const countQuery =
+    userConditions.length > 0
+      ? (countQueryBase.where(and(...userConditions)) as typeof countQueryBase)
+      : countQueryBase;
   const totalResult = await countQuery;
   const total = Number(totalResult[0]?.count ?? 0);
 
@@ -155,24 +178,24 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
     // Explicitly check if user is defined and provide defaults
     if (!user) {
       return {
-        id: '',
-        email: '',
-        firstName: '',
-        lastName: '',
-        userrole: '',
-        accountStatus: 'active' as const,
+        id: "",
+        email: "",
+        firstName: "",
+        lastName: "",
+        userrole: "",
+        accountStatus: "active" as const,
         isActive: false,
         createdAt: new Date(),
         updatedAt: new Date(),
         interviewCount: 0,
-        lastInterviewAt: undefined
+        lastInterviewAt: undefined,
       };
     }
-    
+
     return {
       ...user,
-      firstName: user.firstName || '',
-      lastName: user.lastName || ''
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
     };
   });
 
@@ -183,7 +206,7 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
     total,
     page,
     limit,
-    totalPages
+    totalPages,
   };
 }
 
@@ -204,58 +227,59 @@ export async function getUserById(userId: string): Promise<UserSummary> {
       accountStatus: usersTable.accountStatus,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
-      interviewCount: sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as('interviewCount'),
-      lastInterviewAt: sql<Date | null>`(SELECT MAX(created_at) FROM interviews WHERE interviews.user_id = users.id)`.as('lastInterviewAt')
+      interviewCount:
+        sql<number>`COALESCE((SELECT COUNT(*) FROM interviews WHERE interviews.user_id = users.id), 0)`.as(
+          "interviewCount",
+        ),
+      lastInterviewAt:
+        sql<Date | null>`(SELECT MAX(created_at) FROM interviews WHERE interviews.user_id = users.id)`.as(
+          "lastInterviewAt",
+        ),
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId))
     .limit(1);
 
   if (!result.length) {
-    throw new AppError(
-      "User not found",
-      StatusCodes.NOT_FOUND,
-      ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
-    );
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
   }
 
   const user = result[0]!;
   return {
     ...user,
-    firstName: user.firstName || '',
-    lastName: user.lastName || ''
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
   } as UserSummary;
 }
 
 /**
  * Update user role
  */
-export async function updateUserRole(userId: string, newRole: string, actorId: string): Promise<void> {
+export async function updateUserRole(
+  userId: string,
+  newRole: string,
+  actorId: string,
+): Promise<void> {
   const db = getPgDb();
 
   // Get current user and actor to check permissions
   const [currentUser, actor] = await Promise.all([
     db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1),
-    db.select().from(usersTable).where(eq(usersTable.id, actorId)).limit(1)
+    db.select().from(usersTable).where(eq(usersTable.id, actorId)).limit(1),
   ]);
 
   if (!currentUser.length) {
-    throw new AppError(
-      "User not found",
-      StatusCodes.NOT_FOUND,
-      ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
-    );
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
   }
 
   if (!actor.length) {
-    throw new AppError(
-      "Actor not found",
-      StatusCodes.NOT_FOUND,
-      ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
-    );
+    throw new AppError("Actor not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
   }
 
   const targetUser = currentUser[0]!;
@@ -266,7 +290,7 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
       `Invalid role "${newRole}". Expected one of: ${USER_ROLES.join(", ")}`,
       StatusCodes.BAD_REQUEST,
       ErrorCodes.VALIDATION_FAILED,
-      { isOperational: true }
+      { isOperational: true },
     );
   }
 
@@ -283,7 +307,7 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
       `Access denied. Changing roles requires the "${ROLE_MANAGEMENT_MIN_ROLE}" role or above`,
       StatusCodes.FORBIDDEN,
       ErrorCodes.AUTH_FORBIDDEN,
-      { isOperational: true }
+      { isOperational: true },
     );
   }
 
@@ -293,7 +317,7 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
       `Cannot modify a user ranked at or above your own role (${targetUser.userrole})`,
       StatusCodes.FORBIDDEN,
       ErrorCodes.AUTH_FORBIDDEN,
-      { isOperational: true }
+      { isOperational: true },
     );
   }
 
@@ -303,12 +327,13 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
       `Cannot assign a role ranked at or above your own role (${newRole})`,
       StatusCodes.FORBIDDEN,
       ErrorCodes.AUTH_FORBIDDEN,
-      { isOperational: true }
+      { isOperational: true },
     );
   }
 
   // Perform the role update
-  await db.update(usersTable)
+  await db
+    .update(usersTable)
     .set({ userrole: newRole }) // narrowed by isUserRole above
     .where(eq(usersTable.id, userId));
 }
@@ -316,26 +341,39 @@ export async function updateUserRole(userId: string, newRole: string, actorId: s
 /**
  * Suspend a user
  */
-export async function suspendUser(userId: string, reason: string = "Administrative action"): Promise<void> {
+export async function suspendUser(
+  userId: string,
+  reason = "Administrative action",
+): Promise<void> {
   const db = getPgDb();
 
   const user = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
 
   if (!user.length) {
-    throw new AppError(
-      "User not found",
-      StatusCodes.NOT_FOUND,
-      ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
-    );
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
   }
 
-  await db.update(usersTable)
-    .set({ 
+  await db
+    .update(usersTable)
+    .set({
       accountStatus: "suspended",
-      updatedAt: new Date()
+      updatedAt: new Date(),
     })
     .where(eq(usersTable.id, userId));
+
+  // Best-effort notification — the suspension has already been applied, so a
+  // failing email must not roll it back.
+  const suspended = user[0];
+  if (suspended) {
+    sendInBackground(() =>
+      sendAccountSuspendedMail(suspended.email, {
+        reason,
+        suspendedAt: new Date(),
+      }),
+    );
+  }
 }
 
 /**
@@ -347,18 +385,16 @@ export async function reinstateUser(userId: string): Promise<void> {
   const user = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
 
   if (!user.length) {
-    throw new AppError(
-      "User not found",
-      StatusCodes.NOT_FOUND,
-      ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
-    );
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
   }
 
-  await db.update(usersTable)
-    .set({ 
+  await db
+    .update(usersTable)
+    .set({
       accountStatus: "active",
-      updatedAt: new Date()
+      updatedAt: new Date(),
     })
     .where(eq(usersTable.id, userId));
 }
@@ -366,7 +402,9 @@ export async function reinstateUser(userId: string): Promise<void> {
 /**
  * List interviews with pagination and filtering
  */
-export async function listInterviews(options: PaginationOptions & Partial<InterviewListFilter>): Promise<{
+export async function listInterviews(
+  options: PaginationOptions & Partial<InterviewListFilter>,
+): Promise<{
   interviews: InterviewSummary[];
   total: number;
   page: number;
@@ -383,10 +421,13 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
       title: interviewsTable.interviewTitle,
       status: interviewsTable.interviewStatus,
       userId: interviewsTable.userId,
-      userName: sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as('userName'),
-      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as('userEmail'), // Make sure email is never null
+      userName:
+        sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as(
+          "userName",
+        ),
+      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"), // Make sure email is never null
       createdAt: interviewsTable.createdAt,
-      updatedAt: interviewsTable.updatedAt
+      updatedAt: interviewsTable.updatedAt,
     })
     .from(interviewsTable)
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id)) as any; // Type assertion to bypass complex type checking
@@ -394,57 +435,63 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
   // Apply filters through one combined predicate: Drizzle's `.where()` replaces
   // the previous predicate, so separate calls silently dropped the status filter
   // as soon as a userId was supplied (and vice versa).
-  const interviewConditions: SQL[] = [];
+  const interviewConditions: SQL<unknown>[] = [];
   if (search) {
     // Free-text search covers the title and the owning user (name + email),
     // matching what the admin table renders.
+    const escapedSearch = escapeLikePattern(search);
+    const fullName = sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`;
     interviewConditions.push(
       or(
-        ilike(interviewsTable.interviewTitle, `%${search}%`),
-        ilike(usersTable.email, `%${search}%`),
-        sql`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '') ILIKE ${`%${search}%`}`
-      ) as SQL
+        ilike(interviewsTable.interviewTitle, `%${escapedSearch}%`),
+        ilike(usersTable.email, `%${escapedSearch}%`),
+        sql`${fullName} ILIKE ${`%${escapedSearch}%`}`,
+      )!,
     );
   }
   if (status) {
-    interviewConditions.push(eq(interviewsTable.interviewStatus, status as any) as SQL); // Type assertion for enum
+    // Statuses match the zod enum on the route, so this is a safe
+    // string→enum comparison at runtime.
+    const interviewStatus = status as (typeof interviewStatusEnum.enumValues)[number];
+    interviewConditions.push(eq(interviewsTable.interviewStatus, interviewStatus));
   }
   if (userId) {
-    interviewConditions.push(eq(interviewsTable.userId, userId) as SQL);
+    interviewConditions.push(eq(interviewsTable.userId, userId));
   }
   if (interviewConditions.length > 0) {
-    query = query.where(and(...interviewConditions)) as any; // Type assertion to bypass complex type checking
+    query = query.where(and(...interviewConditions)); // Type assertion to bypass complex type checking
   }
 
   // Apply sorting
   let sortCol;
   switch (sortBy) {
-    case 'status':
+    case "status":
       sortCol = interviewsTable.interviewStatus;
       break;
-    case 'title':
+    case "title":
       sortCol = interviewsTable.interviewTitle;
       break;
-    case 'userEmail':
+    case "userEmail":
       sortCol = sql<string>`COALESCE(${usersTable.email}, '')`;
       break;
     default:
       sortCol = interviewsTable.createdAt;
   }
-  
-  const sortDirection = sortOrder === 'asc' ? asc(sortCol) : desc(sortCol);
-  query = query.orderBy(sortDirection) as any; // Type assertion to bypass complex type checking
+
+  const sortDirection = sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
+  query = query.orderBy(sortDirection); // Type assertion to bypass complex type checking
 
   // Calculate total count with the exact same predicate as the page query —
   // otherwise the filters and the pagination count disagree.
-  let countQuery = db
+  const countQueryBase = db
     .select({ count: count() })
     .from(interviewsTable)
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id));
 
-  if (interviewConditions.length > 0) {
-    countQuery = countQuery.where(and(...interviewConditions)) as any;
-  }
+  const countQuery =
+    interviewConditions.length > 0
+      ? (countQueryBase.where(and(...interviewConditions)) as typeof countQueryBase)
+      : countQueryBase;
 
   const totalResult = await countQuery;
   const total = Number(totalResult[0]?.count ?? 0);
@@ -461,20 +508,20 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
     // Explicitly check if interview is defined and provide defaults
     if (!interview) {
       return {
-        id: '',
-        title: '',
-        status: '',
-        userId: '',
-        userName: '',
-        userEmail: '',
+        id: "",
+        title: "",
+        status: "",
+        userId: "",
+        userName: "",
+        userEmail: "",
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       };
     }
-    
+
     return {
       ...interview,
-      userEmail: interview.userEmail || ''
+      userEmail: interview.userEmail || "",
     };
   });
 
@@ -485,7 +532,7 @@ export async function listInterviews(options: PaginationOptions & Partial<Interv
     total,
     page,
     limit,
-    totalPages
+    totalPages,
   };
 }
 
@@ -502,13 +549,16 @@ export async function getInterviewDetail(interviewId: string): Promise<any> {
       description: interviewsTable.interviewDescription,
       status: interviewsTable.interviewStatus,
       userId: interviewsTable.userId,
-      userName: sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as('userName'),
-      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as('userEmail'),
+      userName:
+        sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as(
+          "userName",
+        ),
+      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"),
       createdAt: interviewsTable.createdAt,
       updatedAt: interviewsTable.updatedAt,
       scheduledAt: interviewsTable.interviewScheduledDate,
       startedAt: interviewsTable.interviewStartedAt,
-      duration: interviewsTable.interviewDuration
+      duration: interviewsTable.interviewDuration,
     })
     .from(interviewsTable)
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id))
@@ -520,21 +570,21 @@ export async function getInterviewDetail(interviewId: string): Promise<any> {
       "Interview not found",
       StatusCodes.NOT_FOUND,
       ErrorCodes.RESOURCE_NOT_FOUND,
-      { isOperational: true }
+      { isOperational: true },
     );
   }
 
   const interview = result[0]!;
   return {
     ...interview,
-    userEmail: interview.userEmail || ''
+    userEmail: interview.userEmail || "",
   };
 }
 
 /**
  * Get admin overview statistics
  */
-export async function getOverviewStats(period: string = '30d'): Promise<{
+export async function getOverviewStats(period = "30d"): Promise<{
   totalUsers: number;
   totalInterviews: number;
   interviewsByStatus: Record<string, number>;
@@ -542,19 +592,19 @@ export async function getOverviewStats(period: string = '30d'): Promise<{
   activeUsers: number;
 }> {
   const db = getPgDb();
-  
+
   // Parse the period to calculate the date threshold
   const now = new Date();
-  let startDate = new Date(now);
-  
+  const startDate = new Date(now);
+
   switch (period) {
-    case '7d':
+    case "7d":
       startDate.setDate(now.getDate() - 7);
       break;
-    case '30d':
+    case "30d":
       startDate.setDate(now.getDate() - 30);
       break;
-    case '90d':
+    case "90d":
       startDate.setDate(now.getDate() - 90);
       break;
     default:
@@ -573,13 +623,13 @@ export async function getOverviewStats(period: string = '30d'): Promise<{
   const interviewsByStatusResult = await db
     .select({
       status: interviewsTable.interviewStatus,
-      count: count()
+      count: count(),
     })
     .from(interviewsTable)
     .groupBy(interviewsTable.interviewStatus);
 
   const interviewsByStatus: Record<string, number> = {};
-  interviewsByStatusResult.forEach(row => {
+  interviewsByStatusResult.forEach((row) => {
     interviewsByStatus[row.status] = Number(row.count);
   });
 
@@ -598,14 +648,20 @@ export async function getOverviewStats(period: string = '30d'): Promise<{
     FROM ${interviewsTable}
     WHERE ${interviewsTable.interviewStatus} = 'COMPLETED'
   `);
-  
+
   let activeUsers = 0;
   if (Array.isArray(activeUsersResult) && activeUsersResult.length > 0) {
     const firstRow = activeUsersResult[0];
-    if (firstRow && typeof firstRow === 'object' && 'user_count' in firstRow) {
-      activeUsers = Number((firstRow as any).user_count) || 0;
+    if (firstRow && typeof firstRow === "object" && "user_count" in firstRow) {
+      activeUsers = Number((firstRow).user_count) || 0;
     }
-  } else if (typeof activeUsersResult === 'object' && activeUsersResult && 'rows' in activeUsersResult && Array.isArray(activeUsersResult.rows) && activeUsersResult.rows.length > 0) {
+  } else if (
+    typeof activeUsersResult === "object" &&
+    activeUsersResult &&
+    "rows" in activeUsersResult &&
+    Array.isArray(activeUsersResult.rows) &&
+    activeUsersResult.rows.length > 0
+  ) {
     // Handle result with rows property
     activeUsers = Number(activeUsersResult.rows[0]?.user_count) || 0;
   } else {
@@ -618,6 +674,6 @@ export async function getOverviewStats(period: string = '30d'): Promise<{
     totalInterviews,
     interviewsByStatus,
     recentSignups,
-    activeUsers
+    activeUsers,
   };
 }

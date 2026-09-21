@@ -4,6 +4,7 @@
 
 import { vi } from "vitest";
 
+vi.stubEnv("PORT", "4000");
 vi.stubEnv("POSTGRES_URI", "postgresql://test:test@localhost:5432/test");
 vi.stubEnv("REDIS_URI", "redis://localhost:6379");
 vi.stubEnv("JWT_SECRET", "a".repeat(64));

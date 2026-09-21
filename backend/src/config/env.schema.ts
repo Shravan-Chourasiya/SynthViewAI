@@ -27,6 +27,9 @@ const envSchema = z.object({
   GROQ_MODEL: z.string().min(1).default("llama-3.1-8b-instant"),
   MISTRAL_API_KEY: z.string().optional(),
   MISTRAL_MODEL: z.string().min(1).default("mistral-small-latest"),
+  // Embeddings are a separate Mistral model from the chat completion model —
+  // mistral-embed has no chat equivalent and vice versa.
+  MISTRAL_EMBED_MODEL: z.string().min(1).default("mistral-embed"),
 });
 
 export default envSchema;

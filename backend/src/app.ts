@@ -19,6 +19,7 @@ import { redisClient } from "./config/redis.init.js";
 import { readinessCheck } from "./utils/ready.js";
 import { createInterviewRouter } from "./routes/interview.routes.js";
 import { startAbandonStaleInterviewsJob } from "./jobs/abandonStaleInterviews.job.js";
+import { startInterviewReminderJob } from "./jobs/interviewReminder.job.js";
 import AdminRoutes from "./routes/admin.routes.js";
 import AnalyticsRoutes from "./routes/analytics.routes.js";
 config();
@@ -48,6 +49,7 @@ app.use(`/${env.API_VERSION}/admin`, AdminRoutes);
 app.use(`/${env.API_VERSION}/analytics`, AnalyticsRoutes);
 
 startAbandonStaleInterviewsJob();
+startInterviewReminderJob();
 
 //****************************************** Health Check Endpoints ******************************************//
 app.get("/health", (_req, res) => {
