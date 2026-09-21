@@ -1,7 +1,8 @@
-import { eq, and, desc, lt, inArray, notInArray } from "drizzle-orm";
+import { eq, and, desc, gt, lt, lte, inArray, isNull, isNotNull, notInArray } from "drizzle-orm";
 import getPgDb from "../../../db/postgres.init.js";
 import type { interviewStatusEnum } from "../schemas/interview.schema.js";
 import { interviewsTable } from "../schemas/interview.schema.js";
+import { usersTable } from "../../auth/schemas/user.schema.js";
 import { interviewAnswersTable } from "../schemas/answers.schema.js";
 import { interviewQuestionsTable } from "../schemas/question.schema.js";
 import { interviewResultsTable } from "../schemas/result.schema.js";
@@ -43,6 +44,12 @@ import type { AdaptationDecision } from "../../../integrations/ai/adaptive/index
 import type { IoServer } from "../../../websocket/socket.types.js";
 import { EVENT_VERSION } from "../../../websocket/socket.types.js";
 import { logger } from "../../../utils/logger.js";
+import {
+  sendInBackground,
+  sendInterviewCancelledMail,
+  sendInterviewReminderMail,
+  sendPausedInterviewReminderMail,
+} from "../../../services/nodemailer.service.js";
 
 // ── State machine ─────────────────────────────────────────────────────────────
 
@@ -95,7 +102,7 @@ export async function fetchInterviewById(id: string) {
 
 async function resolveInterview(authreq: AuthenticatedRequest, interviewId: string) {
   const interview = await fetchInterviewById(interviewId);
-  if (!interview || interview.userId !== authreq.auth.userId) {
+  if (interview?.userId !== authreq.auth.userId) {
     throw new AppError(
       "Interview not found",
       StatusCodes.NOT_FOUND,
@@ -179,9 +186,13 @@ export async function createInterviewService(
         experience: interviewData.experience,
         isAdaptive: interviewData.isAdaptive,
         ...(interviewData.jobSkills?.length ? { jobSkills: interviewData.jobSkills } : {}),
-        ...(interviewData.targetedCompany ? { targetedCompany: interviewData.targetedCompany } : {}),
+        ...(interviewData.targetedCompany
+          ? { targetedCompany: interviewData.targetedCompany }
+          : {}),
         maxFollowUps: interviewData.maxFollowUps,
-        ...(interviewData.targetedCompanyOther ? { targetedCompanyOther: interviewData.targetedCompanyOther } : {}),
+        ...(interviewData.targetedCompanyOther
+          ? { targetedCompanyOther: interviewData.targetedCompanyOther }
+          : {}),
         endingCriteria: interviewData.endingCriteria,
         ...(interviewData.endingCriteria === "QUESTION_COUNT" && interviewData.questionCount
           ? { questionCount: interviewData.questionCount }
@@ -200,7 +211,29 @@ export async function createInterviewService(
 
 export async function getAllInterviewsService(authreq: AuthenticatedRequest) {
   const db = getPgDb();
-  return db.select().from(interviewsTable).where(eq(interviewsTable.userId, authreq.auth.userId));
+
+  // The final score is produced by the report pipeline and stored on the
+  // generated report row (`interview_results.overall_score`), never on the
+  // interview itself. Left-join it so the list endpoint returns each
+  // interview's score in a single query — the dashboard reads `score` off
+  // every row to build its average/best/trend/category widgets, and without
+  // the join those stayed empty even for completed interviews.
+  const rows = await db
+    .select({
+      interview: interviewsTable,
+      overallScore: interviewResultsTable.overallScore,
+    })
+    .from(interviewsTable)
+    .leftJoin(interviewResultsTable, eq(interviewResultsTable.interviewId, interviewsTable.id))
+    .where(eq(interviewsTable.userId, authreq.auth.userId));
+
+  return rows.map(({ interview, overallScore }) => ({
+    ...interview,
+    score:
+      overallScore === null || overallScore === undefined
+        ? (interview.interviewOutcome?.finalScore ?? null)
+        : Math.round(Number(overallScore)),
+  }));
 }
 
 export async function getInterviewByIdService(authreq: AuthenticatedRequest, interviewId: string) {
@@ -231,10 +264,7 @@ export async function getInterviewByIdService(authreq: AuthenticatedRequest, int
  * and result rows. Redis cleanup is best-effort so stale cache data cannot
  * prevent the database deletion.
  */
-export async function deleteInterviewService(
-  authreq: AuthenticatedRequest,
-  interviewId: string,
-) {
+export async function deleteInterviewService(authreq: AuthenticatedRequest, interviewId: string) {
   const interview = await resolveInterview(authreq, interviewId);
 
   if (interview.interviewStatus === "INPROGRESS") {
@@ -685,9 +715,32 @@ async function skipQuestionInternal(
 }
 
 // ── Services ── (continued)
+/** Best-effort lookup of a user's email address for a notification mail. */
+async function getUserEmailAddress(userId: string): Promise<string | null> {
+  const db = getPgDb();
+  const [user] = await db
+    .select({ email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  return user?.email ?? null;
+}
+
 export async function cancelInterviewService(authreq: AuthenticatedRequest, interviewId: string) {
   const interview = await resolveInterview(authreq, interviewId);
-  return transitionInterview(interviewId, interview.interviewStatus, "CANCELLED");
+  const updated = await transitionInterview(interviewId, interview.interviewStatus, "CANCELLED");
+
+  // Confirmation is best-effort and must never fail the cancellation itself.
+  sendInBackground(async () => {
+    const email = await getUserEmailAddress(interview.userId);
+    if (!email) return;
+    await sendInterviewCancelledMail(email, {
+      interviewTitle: interview.interviewTitle,
+      cancelledAt: new Date(),
+    });
+  });
+
+  return updated;
 }
 
 // ── Report generation ─────────────────────────────────────────────────────────
@@ -754,7 +807,10 @@ export async function generateInterviewReportService(interviewId: string): Promi
   // ── Aggregate text fields — deduplicated union ────────────────────────────
   const allStrengths = [...new Set(evaluated.flatMap((a) => a.evaluationData!.strengths))];
   const allWeaknesses = [...new Set(evaluated.flatMap((a) => a.evaluationData!.weaknesses))];
-  const feedback = evaluated.map((a) => a.evaluationData!.feedback).filter(Boolean).join(" ");
+  const feedback = evaluated
+    .map((a) => a.evaluationData!.feedback)
+    .filter(Boolean)
+    .join(" ");
 
   // ── Fetch interview duration ──────────────────────────────────────────────
   const interview = await fetchInterviewById(interviewId);
@@ -798,7 +854,7 @@ export async function getInterviewReportService(
 
   const db = getPgDb();
   const difficultyProgression = interview.interviewMetaData.isAdaptive
-    ? (await readInterviewContext(interviewId))?.performanceState.difficultyHistory ?? []
+    ? ((await readInterviewContext(interviewId))?.performanceState.difficultyHistory ?? [])
     : [];
   const [report] = await db
     .select()
@@ -829,7 +885,9 @@ export async function endInterviewService(authreq: AuthenticatedRequest, intervi
     .select({ questionState: interviewQuestionsTable.questionState })
     .from(interviewQuestionsTable)
     .where(eq(interviewQuestionsTable.interviewId, interviewId));
-  const answeredCount = answered.filter((question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED").length;
+  const answeredCount = answered.filter(
+    (question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED",
+  ).length;
   const nextStatus: InterviewStatus = answeredCount >= 3 ? "COMPLETED" : "CANCELLED";
   let updated;
   try {
@@ -844,7 +902,10 @@ export async function endInterviewService(authreq: AuthenticatedRequest, intervi
   if (nextStatus === "COMPLETED") {
     // Fire-and-forget — report failure must not roll back the completion.
     void generateInterviewReportService(interviewId).catch((err) => {
-      logger.error({ err, interviewId }, "[report] generateInterviewReportService failed after endInterviewService");
+      logger.error(
+        { err, interviewId },
+        "[report] generateInterviewReportService failed after endInterviewService",
+      );
     });
   }
   return updated;
@@ -866,7 +927,10 @@ export async function endInterviewSystemService(interviewId: string) {
     throw error;
   }
   void generateInterviewReportService(interviewId).catch((err) => {
-    logger.error({ err, interviewId }, "[report] generateInterviewReportService failed after endInterviewSystemService");
+    logger.error(
+      { err, interviewId },
+      "[report] generateInterviewReportService failed after endInterviewSystemService",
+    );
   });
   return updated;
 }
@@ -936,6 +1000,151 @@ export async function detectAndExpireScheduledInterviews() {
   return { expired: stale.length };
 }
 
+// ── Interview reminders ────────────────────────────────────────────────────
+
+const REMINDER_1H_MS = 60 * 60 * 1000;
+const REMINDER_24H_MS = 24 * 60 * 60 * 1000;
+/** Mirrors the stale-interview threshold: an interview untouched this long is
+ * considered paused rather than actively in progress. */
+const PAUSED_REMINDER_AFTER_MS = ABANDONMENT_THRESHOLD_MS;
+
+/**
+ * Sends the two scheduled-interview reminders (≈24h and ≈1h before the slot).
+ *
+ * The flag is stamped *before* the mail is queued, so a slow or failing send
+ * can never cause the same reminder to be re-queued on the next job tick —
+ * exactly one of each reminder per interview.
+ */
+export async function detectAndSendInterviewReminders(): Promise<{
+  reminders24h: number;
+  reminders1h: number;
+}> {
+  const db = getPgDb();
+  const now = new Date();
+
+  const candidates = () =>
+    db
+      .select({
+        id: interviewsTable.id,
+        title: interviewsTable.interviewTitle,
+        email: usersTable.email,
+        scheduledAt: interviewsTable.interviewScheduledDate,
+      })
+      .from(interviewsTable)
+      .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id));
+
+  const due24h = await candidates().where(
+    and(
+      eq(interviewsTable.isInterviewScheduled, true),
+      isNull(interviewsTable.reminder24hSentAt),
+      notInArray(interviewsTable.interviewStatus, TERMINAL_STATUSES),
+      gt(interviewsTable.interviewScheduledDate, new Date(now.getTime() + REMINDER_1H_MS)),
+      lte(interviewsTable.interviewScheduledDate, new Date(now.getTime() + REMINDER_24H_MS)),
+    ),
+  );
+
+  const due1h = await candidates().where(
+    and(
+      eq(interviewsTable.isInterviewScheduled, true),
+      isNull(interviewsTable.reminder1hSentAt),
+      notInArray(interviewsTable.interviewStatus, TERMINAL_STATUSES),
+      gt(interviewsTable.interviewScheduledDate, now),
+      lte(interviewsTable.interviewScheduledDate, new Date(now.getTime() + REMINDER_1H_MS)),
+    ),
+  );
+
+  let reminders24h = 0;
+  for (const row of due24h) {
+    await db
+      .update(interviewsTable)
+      .set({ reminder24hSentAt: now })
+      .where(eq(interviewsTable.id, row.id));
+    const { email, scheduledAt, title } = row;
+    if (!email || !scheduledAt) continue;
+    sendInBackground(() =>
+      sendInterviewReminderMail(email, {
+        interviewTitle: title,
+        scheduledAt,
+        leadTimeLabel: "24 hours",
+      }),
+    );
+    reminders24h += 1;
+  }
+
+  let reminders1h = 0;
+  for (const row of due1h) {
+    await db
+      .update(interviewsTable)
+      .set({ reminder1hSentAt: now })
+      .where(eq(interviewsTable.id, row.id));
+    const { email, scheduledAt, title } = row;
+    if (!email || !scheduledAt) continue;
+    sendInBackground(() =>
+      sendInterviewReminderMail(email, {
+        interviewTitle: title,
+        scheduledAt,
+        leadTimeLabel: "1 hour",
+      }),
+    );
+    reminders1h += 1;
+  }
+
+  return { reminders24h, reminders1h };
+}
+
+/**
+ * Reminds a candidate about an interview they started and then paused for more
+ * than 24 hours.
+ *
+ * There is no dedicated PAUSED status: pausing sets the interview back to
+ * "SCHEDULED", the same value used by a genuinely not-yet-started interview. A
+ * paused interview is therefore identified by `interviewStartedAt IS NOT NULL`
+ * (it *was* started) combined with a stale `lastActivityAt` — the same field and
+ * comparison the stale-interview reaper already uses.
+ */
+export async function detectAndSendPausedInterviewReminders(): Promise<{ reminders: number }> {
+  const db = getPgDb();
+  const now = new Date();
+  const threshold = new Date(now.getTime() - PAUSED_REMINDER_AFTER_MS);
+
+  const paused = await db
+    .select({
+      id: interviewsTable.id,
+      title: interviewsTable.interviewTitle,
+      email: usersTable.email,
+      lastActivityAt: interviewsTable.lastActivityAt,
+    })
+    .from(interviewsTable)
+    .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id))
+    .where(
+      and(
+        eq(interviewsTable.interviewStatus, "SCHEDULED"),
+        isNotNull(interviewsTable.interviewStartedAt),
+        isNull(interviewsTable.pausedReminderSentAt),
+        lt(interviewsTable.lastActivityAt, threshold),
+      ),
+    );
+
+  let reminders = 0;
+  for (const row of paused) {
+    await db
+      .update(interviewsTable)
+      .set({ pausedReminderSentAt: now })
+      .where(eq(interviewsTable.id, row.id));
+    const { email, lastActivityAt, title } = row;
+    if (!email) continue;
+    sendInBackground(() =>
+      sendPausedInterviewReminderMail(email, {
+        interviewTitle: title,
+        pausedSince: lastActivityAt ?? now,
+      }),
+    );
+    reminders += 1;
+  }
+
+  return { reminders };
+}
+
 export async function getInterviewHistoryService(
   authreq: AuthenticatedRequest,
   interviewId: string,
@@ -993,11 +1202,16 @@ export async function getInterviewHistoryService(
 export async function getAnsweredQuestionIdsService(interviewId: string): Promise<string[]> {
   const db = getPgDb();
   const questions = await db
-    .select({ id: interviewQuestionsTable.id, questionState: interviewQuestionsTable.questionState })
+    .select({
+      id: interviewQuestionsTable.id,
+      questionState: interviewQuestionsTable.questionState,
+    })
     .from(interviewQuestionsTable)
     .where(eq(interviewQuestionsTable.interviewId, interviewId));
   return questions
-    .filter((question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED")
+    .filter(
+      (question) => question.questionState === "ANSWERED" || question.questionState === "EVALUATED",
+    )
     .map((question) => question.id);
 }
 
@@ -1294,7 +1508,7 @@ export async function detectAndTimeoutStaleQuestions() {
 
     // Advance context so the next question:next generates fresh
     const ctx = await readInterviewContext(interviewId);
-    if (ctx && ctx.questionState.currentQuestionId === questionId) {
+    if (ctx?.questionState.currentQuestionId === questionId) {
       await writeInterviewContext(
         {
           ...ctx,
@@ -1502,7 +1716,12 @@ export async function getInterviewMetricsService(
     createdAt: interview.createdAt,
     updatedAt: interview.updatedAt,
     activeSeconds: interview.interviewStartedAt
-      ? Math.max(0, Math.round((interview.updatedAt.getTime() - interview.interviewStartedAt.getTime()) / 1000))
+      ? Math.max(
+          0,
+          Math.round(
+            (interview.updatedAt.getTime() - interview.interviewStartedAt.getTime()) / 1000,
+          ),
+        )
       : 0,
     report: report ?? null,
   };

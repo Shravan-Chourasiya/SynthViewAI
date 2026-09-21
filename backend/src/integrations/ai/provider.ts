@@ -12,10 +12,7 @@
 import { env } from "../../config/env.js";
 import { logger } from "../../utils/logger.js";
 import { PROVIDER_CONTEXT_WINDOWS } from "./context.manager.js";
-import {
-  generatedQuestionSchema,
-  aiEvaluateResultSchema,
-} from "./ai.types.js";
+import { generatedQuestionSchema, aiEvaluateResultSchema } from "./ai.types.js";
 import type { GenerateQuestionInput, GeneratedQuestion, AiEvaluateResult } from "./ai.types.js";
 import type { InterviewerPromptResult, EvaluatorPromptResult } from "./prompts.js";
 
@@ -47,7 +44,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+// Shared with embeddings.ts so every provider-bound call in this module is bounded
+// the same way. Exported rather than duplicated for exactly that reason.
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timerId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timerId = setTimeout(() => reject(new Error("PROVIDER_TIMEOUT")), ms);

@@ -8,11 +8,7 @@
 //   - The model abstraction layer (provider.ts) sits cleanly underneath
 
 import type { QuestionHistoryEntry, InterviewerMode, GraphTurnInput } from "./ai.graph.types.js";
-import {
-  coveredTopics,
-  summarizeCategoryMix,
-  type CategoryMix,
-} from "./coverage.js";
+import { coveredTopics, summarizeCategoryMix, type CategoryMix } from "./coverage.js";
 import type { QuestionCategory } from "./coverage.js";
 
 // Minimal state shape prompts.ts needs — no LangGraph dependency
@@ -37,6 +33,14 @@ export interface InterviewerPromptResult {
 
 /** Max topic tags listed in the prompt — keeps the instruction bounded. */
 const MAX_LISTED_TOPICS = 10;
+
+/**
+ * Max question titles rendered into the avoid-list. The list is built from the full
+ * session history (see buildInterviewerPrompt), so this only ever bites in a session
+ * far longer than the configured duration allows — and when it does, the prompt says
+ * so rather than dropping titles silently.
+ */
+const MAX_AVOID_TITLES = 40;
 
 function categoryLabel(category: QuestionCategory): string {
   return category === "BEHAVIORAL" ? "behavioral/situational" : "technical/domain";
@@ -129,14 +133,28 @@ export function buildInterviewerPrompt(
   const difficulty = (hint?.difficulty ?? state.difficulty).toLowerCase();
   const type = state.interviewType;
   const style = state.interviewStyle;
-  const avoidTitles = trimmedHistory.map((h) => h.questionTitle);
+  // Built from the COMPLETE session history, not the context-trimmed slice. Trimming
+  // exists to fit the narrative history in the context window; it must never silently
+  // remove a question from the explicit do-not-repeat list, which is what used to
+  // happen for a very long session (the topic list below already had to make this
+  // same correction). The repetition guard in graph.ts is the mechanical backstop;
+  // this list is the instruction that keeps the model from needing it.
+  const avoidTitles = fullHistory.map((h) => h.questionTitle);
   const mix = summarizeCategoryMix(fullHistory);
   // For MIXED sessions the model types each question itself.
   const questionTypeSchema = type === "MIXED" ? `"BEHAVIORAL" | "TECHNICAL"` : `"${type}"`;
 
+  const omittedTitles = Math.max(0, avoidTitles.length - MAX_AVOID_TITLES);
   const avoidSection =
     avoidTitles.length > 0
-      ? `\n\nDo NOT repeat any of these already-asked questions:\n${avoidTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
+      ? `\n\nDo NOT repeat any of these already-asked questions:\n${avoidTitles
+          .slice(0, MAX_AVOID_TITLES)
+          .map((t, i) => `${i + 1}. ${t}`)
+          .join("\n")}${
+          omittedTitles > 0
+            ? `\n(${omittedTitles} earlier question(s) omitted from this list for length — every question already asked in this session is off-limits, not just the ones shown.)`
+            : ""
+        }`
       : "";
 
   const historySection =

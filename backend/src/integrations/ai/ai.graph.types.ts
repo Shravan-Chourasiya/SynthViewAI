@@ -16,6 +16,15 @@ export interface QuestionHistoryEntry {
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
   /** Short subdomain tag (e.g. "feature-store") used for topic-diversity checks. */
   topic?: string;
+  /**
+   * Semantic vector for this question's text, used to catch a question that has
+   * been asked again in different words (see similarity.ts). A per-session working
+   * set only: it lives in the graph checkpoint for the duration of the interview
+   * and is never written to Postgres — the persisted interview_questions rows the
+   * interview module hands back carry titles, not vectors, so a cold session
+   * simply re-embeds.
+   */
+  embedding?: number[];
   sequenceNumber: number;
   wasAnswered: boolean;
   score: number | null;

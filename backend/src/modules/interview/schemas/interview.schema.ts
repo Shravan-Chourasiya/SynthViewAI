@@ -75,6 +75,13 @@ export const interviewsTable = pgTable("interviews", {
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
   interviewStartedAt: timestamp("interview_started_at", { withTimezone: true }),
 
+  // Notification dedupe timestamps — stamped when a reminder has been queued so
+  // the interval job cannot resend the same reminder on every tick. Timestamps
+  // (not booleans) so we also know *when* each reminder went out.
+  reminder24hSentAt: timestamp("reminder_24h_sent_at", { withTimezone: true }),
+  reminder1hSentAt: timestamp("reminder_1h_sent_at", { withTimezone: true }),
+  pausedReminderSentAt: timestamp("paused_reminder_sent_at", { withTimezone: true }),
+
   // Outcome fields
   interviewQuestionsGeneratedCount: integer("interview_questions_generated_count"),
   interviewQuestionsAnsweredCount: integer("interview_questions_answered_count"),
