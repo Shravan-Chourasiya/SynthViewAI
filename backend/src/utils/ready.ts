@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
+import type { Redis } from "ioredis";
 import { logger } from "./logger.js";
 import { StatusCodes } from "http-status-codes";
+import type { PgDb } from "../db/postgres.init.js";
 
-export async function readinessCheck(dbConn: any, redisClient: any) {
+export async function readinessCheck(dbConn: PgDb, redisClient: Redis) {
   const checks: Record<string, "ok" | "error"> = {};
   let healthy = true;
 

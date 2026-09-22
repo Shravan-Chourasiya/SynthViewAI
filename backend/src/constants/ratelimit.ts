@@ -49,6 +49,13 @@ export const RateLimits = {
     windowMs: 60 * 60 * 1000, // 1 hour
     limit: 20,
   },
+
+  /** Public share-link reads — unauthenticated, so stricter than the
+   * authenticated interview routes (token guessing surface). */
+  SHARE: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: 30,
+  },
 } as const;
 
 export type RateLimitKey = keyof typeof RateLimits;

@@ -19,6 +19,14 @@ export const ACCESS_TOKEN_TTL = "15m";
 export const REFRESH_TOKEN_TTL = "30d";
 export const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+// ── Report share links ────────────────────────────────────────────────────────
+// A share token is a short-lived signed JWT of type "share". Seven days
+// balances "the mentor will get to it eventually" against a window small
+// enough that a leaked link ages out on its own; revocation is available via
+// POST /interviews/:id/share/revoke (Redis blacklist).
+export const SHARE_TOKEN_TTL = "7d";
+export const SHARE_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 // ── Cookie Names ──────────────────────────────────────────────────────────────
 export const COOKIE_NAMES = {
   ACCESS: "access_token",

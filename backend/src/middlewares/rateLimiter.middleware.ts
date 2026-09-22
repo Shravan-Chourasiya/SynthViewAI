@@ -1,5 +1,5 @@
 import rateLimit, { ipKeyGenerator, MemoryStore } from "express-rate-limit";
-import { RedisStore } from "rate-limit-redis";
+import { RedisStore, type SendCommandFn } from "rate-limit-redis";
 import { StatusCodes } from "http-status-codes";
 import { redisClient } from "../config/redis.init.js";
 import { RateLimits, type RateLimitKey } from "../constants/ratelimit.js";
@@ -69,11 +69,12 @@ export function createRateLimiter(key: RateLimitKey) {
     // I/O (which is what used to throw "Stream isn't writeable" on startup).
     passOnStoreError: true,
     store:
-      redisClient.status === "ready" || redisUsable
-        ? new RedisStore({
-            sendCommand: ((...args: [string, ...string[]]) => redisClient.call(...args)) as (
-              ...args: string[]
-            ) => Promise<any>,
+      redisClient.status === "ready" || redisUsable          ? new RedisStore({
+            // `rate-limit-redis` types this as `SendCommandFn`; ioredis resolves
+            // `call` to `Promise<unknown>`, so assert to the store's own contract
+            // rather than the previous untyped `Promise<any>`.
+            sendCommand: ((...args: [string, ...string[]]) =>
+              redisClient.call(...args)) as unknown as SendCommandFn,
             prefix: `rl:${key.toLowerCase()}:`,
           })
         : new MemoryStore(),

@@ -5,6 +5,7 @@ import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL,
   REFRESH_TOKEN_TTL_SECONDS,
+  SHARE_TOKEN_TTL,
 } from "../constants/auth.constants.js";
 export { COOKIE_NAMES } from "../constants/auth.constants.js";
 
@@ -13,6 +14,13 @@ export interface TokenPayload {
   sessionId: string;
   tokenFamily: string;
   type: "access" | "refresh";
+}
+
+/** Payload carried by a report share-link token. No session fields — a share
+ * token never authenticates a user, it only names one interview. */
+export interface ShareTokenPayload {
+  interviewId: string;
+  type: "share";
 }
 
 export function signAccessToken(payload: Omit<TokenPayload, "type">): string {
@@ -27,6 +35,21 @@ export function signRefreshToken(payload: Omit<TokenPayload, "type">): string {
 
 export function verifyToken(token: string): TokenPayload {
   return jwt.verify(token, env.JWT_SECRET) as TokenPayload;
+}
+
+export function signShareToken(payload: Omit<ShareTokenPayload, "type">): string {
+  return jwt.sign({ ...payload, type: "share" }, env.JWT_SECRET, { expiresIn: SHARE_TOKEN_TTL });
+}
+
+/** Verifies a share token and rejects anything that is valid JWT but not a
+ * share token (access/refresh tokens must not open share links). Throws on
+ * any failure — callers map that to a 404-style response. */
+export function verifyShareToken(token: string): ShareTokenPayload {
+  const payload = jwt.verify(token, env.JWT_SECRET) as ShareTokenPayload;
+  if (payload.type !== "share" || typeof payload.interviewId !== "string") {
+    throw new jwt.JsonWebTokenError("not a share token");
+  }
+  return payload;
 }
 
 export async function blacklistToken(token: string): Promise<void> {

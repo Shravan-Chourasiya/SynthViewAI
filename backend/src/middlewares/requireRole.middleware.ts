@@ -14,7 +14,6 @@ declare global {
       auth?: {
         userId: string;
         userRole: string;
-        [key: string]: any;
       };
     }
   }
