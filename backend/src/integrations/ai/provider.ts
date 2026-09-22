@@ -21,6 +21,13 @@ import type { InterviewerPromptResult, EvaluatorPromptResult } from "./prompts.j
 const MAX_RETRIES_PER_PROVIDER = 2;
 const BASE_BACKOFF_MS = 300; // doubles each retry: 300 → 600
 const CALL_TIMEOUT_MS = 8_000;
+// Evaluator output is a single JSON object (score + 4 sub-scores + feedback +
+// strengths/weaknesses + detectionSignals). 1024 tokens truncated it
+// mid-generation, which surfaced as cut-off text in reports/exports.
+const EVALUATOR_MAX_OUTPUT_TOKENS = 2048;
+// Only ever logged on a parse/validation failure, and only this many characters —
+// enough to see where the JSON was cut off without dumping a full model response.
+const MAX_LOGGED_RESPONSE_CHARS = 500;
 
 // ── Model provider interface ──────────────────────────────────────────────────
 // Nodes call this interface — never a vendor SDK directly.
@@ -237,12 +244,12 @@ const groqProvider: ModelProvider = {
         { role: "user", content: prompt.userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 1024,
+      max_tokens: EVALUATOR_MAX_OUTPUT_TOKENS,
       response_format: { type: "json_object" },
       ...(isGroqQwenReasoningModel ? { reasoning_format: "hidden", reasoning_effort: "none" } : {}),
     });
     const raw = res.choices[0]?.message?.content ?? "";
-    return parseAndValidateEvaluation(raw);
+    return parseAndValidateEvaluation(raw, { provider: "groq", model: env.GROQ_MODEL });
   },
 };
 
@@ -279,12 +286,12 @@ const mistralProvider: ModelProvider = {
         { role: "user", content: prompt.userPrompt },
       ],
       temperature: 0.3,
-      maxTokens: 1024,
+      maxTokens: EVALUATOR_MAX_OUTPUT_TOKENS,
       responseFormat: { type: "json_object" },
     });
     const raw = res.choices?.[0]?.message?.content ?? "";
     const rawStr = typeof raw === "string" ? raw : JSON.stringify(raw);
-    return parseAndValidateEvaluation(rawStr);
+    return parseAndValidateEvaluation(rawStr, { provider: "mistral", model: env.MISTRAL_MODEL });
   },
 };
 
@@ -313,11 +320,42 @@ function parseAndValidateQuestion(
   return { ...result.data, topic: result.data.topic ?? null };
 }
 
-function parseAndValidateEvaluation(raw: string): AiEvaluateResult {
-  const json = parseJsonResponse<unknown>(raw);
+// `origin` identifies which provider/model produced the response so a truncated
+// evaluation is diagnosable from logs instead of silently reaching the report.
+// The raw response is logged only on failure, truncated, so the cut-off point is visible.
+function parseAndValidateEvaluation(
+  raw: string,
+  origin: { provider: string; model: string },
+): AiEvaluateResult {
+  let json: unknown;
+  try {
+    json = parseJsonResponse<unknown>(raw);
+  } catch (err) {
+    logger.error(
+      {
+        provider: origin.provider,
+        model: origin.model,
+        rawLength: raw.length,
+        raw: raw.slice(0, MAX_LOGGED_RESPONSE_CHARS),
+        reason: err instanceof Error ? err.message : String(err),
+      },
+      "[ai] evaluation response was not valid JSON — likely truncated",
+    );
+    // Rethrow unchanged: the caller's fallback loop treats this as retryable.
+    throw err;
+  }
   const result = aiEvaluateResultSchema.safeParse(json);
   if (!result.success) {
-    logger.warn({ issues: result.error.issues }, "[ai] evaluation result failed validation");
+    logger.error(
+      {
+        provider: origin.provider,
+        model: origin.model,
+        rawLength: raw.length,
+        raw: raw.slice(0, MAX_LOGGED_RESPONSE_CHARS),
+        issues: result.error.issues,
+      },
+      "[ai] evaluation result failed validation",
+    );
     throw new Error("MALFORMED_RESPONSE");
   }
   return result.data;

@@ -3,7 +3,12 @@ import { createRateLimiter } from "../middlewares/rateLimiter.middleware.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { csrfTokenMiddleware } from "../middlewares/csrf.middleware.js";
 import { requireOwnership } from "../middlewares/ownership.middleware.js";
-import { validateBody } from "../middlewares/zodValidator.middleware.js";
+import { validateBody, validateParams } from "../middlewares/zodValidator.middleware.js";
+import {
+  interviewIdParamSchema,
+  revokeShareSchema,
+  shareTokenParamSchema,
+} from "../modules/interview/zodschemas/share.zschema.js";
 import { requireInterviewState } from "../modules/interview/middlewares/interviewState.middleware.js";
 import { createInterviewSchema } from "../modules/interview/zodschemas/interview.zschema.js";
 import {
@@ -21,11 +26,16 @@ import {
   cancelInterviewController,
   endInterviewController,
   submitAnswerController,
+  createShareLinkController,
+  getSharedReportController,
+  revokeShareLinkController,
 } from "../modules/interview/controller/interview.controller.js";
 import { fetchInterviewById } from "../modules/interview/services/interview.service.js";
 
 const InterviewLimiter = createRateLimiter("INTERVIEW");
 const CreateInterviewLimiter = createRateLimiter("CREATE_INTERVIEW");
+// Unauthenticated and token-guessable: stricter than the authed limiter.
+const ShareLimiter = createRateLimiter("SHARE");
 
 const requireInterviewOwnership = requireOwnership(
   fetchInterviewById,
@@ -158,6 +168,35 @@ export function createInterviewRouter() {
     InterviewLimiter,
     requireInterviewOwnership,
     submitAnswerController,
+  );
+
+  // ── Report share links ────────────────────────────────────────────────────
+  // Create/revoke are owner actions (auth + CSRF); the public read is
+  // intentionally unauthenticated but heavily rate-limited.
+  router.post(
+    "/interviews/:id/share",
+    requireAuth,
+    csrfTokenMiddleware,
+    InterviewLimiter,
+    validateParams(interviewIdParamSchema),
+    createShareLinkController,
+  );
+
+  router.post(
+    "/interviews/:id/share/revoke",
+    requireAuth,
+    csrfTokenMiddleware,
+    InterviewLimiter,
+    validateParams(interviewIdParamSchema),
+    validateBody(revokeShareSchema),
+    revokeShareLinkController,
+  );
+
+  router.get(
+    "/interviews/shared/:token",
+    ShareLimiter,
+    validateParams(shareTokenParamSchema),
+    getSharedReportController,
   );
 
   return router;

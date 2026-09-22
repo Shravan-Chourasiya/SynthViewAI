@@ -17,6 +17,9 @@ import {
   cancelInterviewService,
   endInterviewService,
   submitAnswerService,
+  createShareLinkService,
+  getSharedReportService,
+  revokeShareTokenService,
 } from "../services/interview.service.js";
 
 export const createInterviewController = async (
@@ -293,6 +296,75 @@ export const getInterviewReportController = async (
       success: true,
       statusCode: StatusCodes.OK,
       message: "Interview report retrieved successfully.",
+      data,
+    };
+    res.status(StatusCodes.OK).json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /interviews/:id/share — owner-only; returns the token + shareable URL.
+ */
+export const createShareLinkController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const authreq = req as AuthenticatedRequest;
+    const data = await createShareLinkService(authreq, String(req.params.id));
+    const response: SuccessResponse = {
+      success: true,
+      statusCode: StatusCodes.CREATED,
+      message: "Share link created successfully.",
+      data,
+    };
+    res.status(StatusCodes.CREATED).json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /interviews/shared/:token — public, unauthenticated by design.
+ */
+export const getSharedReportController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const data = await getSharedReportService(String(req.params.token));
+    const response: SuccessResponse = {
+      success: true,
+      statusCode: StatusCodes.OK,
+      message: "Shared report retrieved successfully.",
+      data,
+    };
+    res.status(StatusCodes.OK).json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /interviews/:id/share/revoke — owner-only; blacklists the token.
+ */
+export const revokeShareLinkController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const authreq = req as AuthenticatedRequest;
+    const { token } = req.body as { token: string };
+    const data = await revokeShareTokenService(authreq, String(req.params.id), token);
+    const response: SuccessResponse = {
+      success: true,
+      statusCode: StatusCodes.OK,
+      message: "Share link revoked successfully.",
       data,
     };
     res.status(StatusCodes.OK).json(response);

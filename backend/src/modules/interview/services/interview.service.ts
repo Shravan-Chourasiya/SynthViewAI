@@ -44,12 +44,21 @@ import type { AdaptationDecision } from "../../../integrations/ai/adaptive/index
 import type { IoServer } from "../../../websocket/socket.types.js";
 import { EVENT_VERSION } from "../../../websocket/socket.types.js";
 import { logger } from "../../../utils/logger.js";
+import { createNotification } from "../../notification/services/notification.service.js";
 import {
   sendInBackground,
   sendInterviewCancelledMail,
   sendInterviewReminderMail,
   sendPausedInterviewReminderMail,
 } from "../../../services/nodemailer.service.js";
+import {
+  blacklistToken,
+  isTokenBlacklisted,
+  signShareToken,
+  verifyShareToken,
+} from "../../../utils/token.util.js";
+import { env } from "../../../config/env.js";
+import { SHARE_TOKEN_TTL } from "../../../constants/auth.constants.js";
 
 // ── State machine ─────────────────────────────────────────────────────────────
 
@@ -1026,6 +1035,7 @@ export async function detectAndSendInterviewReminders(): Promise<{
     db
       .select({
         id: interviewsTable.id,
+        userId: interviewsTable.userId,
         title: interviewsTable.interviewTitle,
         email: usersTable.email,
         scheduledAt: interviewsTable.interviewScheduledDate,
@@ -1061,6 +1071,7 @@ export async function detectAndSendInterviewReminders(): Promise<{
       .where(eq(interviewsTable.id, row.id));
     const { email, scheduledAt, title } = row;
     if (!email || !scheduledAt) continue;
+    // Email path unchanged; the in-app notification is a parallel write.
     sendInBackground(() =>
       sendInterviewReminderMail(email, {
         interviewTitle: title,
@@ -1068,6 +1079,11 @@ export async function detectAndSendInterviewReminders(): Promise<{
         leadTimeLabel: "24 hours",
       }),
     );
+    void createNotification(row.userId, "REMINDER_24H", {
+      title: "Interview in 24 hours",
+      body: `Your interview "${title}" is scheduled for ${scheduledAt.toLocaleString()}.`,
+      relatedInterviewId: row.id,
+    });
     reminders24h += 1;
   }
 
@@ -1086,6 +1102,11 @@ export async function detectAndSendInterviewReminders(): Promise<{
         leadTimeLabel: "1 hour",
       }),
     );
+    void createNotification(row.userId, "REMINDER_1H", {
+      title: "Interview in 1 hour",
+      body: `Your interview "${title}" starts at ${scheduledAt.toLocaleString()}. Head to the lobby now.`,
+      relatedInterviewId: row.id,
+    });
     reminders1h += 1;
   }
 
@@ -1110,6 +1131,7 @@ export async function detectAndSendPausedInterviewReminders(): Promise<{ reminde
   const paused = await db
     .select({
       id: interviewsTable.id,
+      userId: interviewsTable.userId,
       title: interviewsTable.interviewTitle,
       email: usersTable.email,
       lastActivityAt: interviewsTable.lastActivityAt,
@@ -1139,6 +1161,11 @@ export async function detectAndSendPausedInterviewReminders(): Promise<{ reminde
         pausedSince: lastActivityAt ?? now,
       }),
     );
+    void createNotification(row.userId, "INTERVIEW_PAUSED", {
+      title: "Paused interview waiting",
+      body: `Your interview "${title}" has been paused for a while. Rejoin from the dashboard to resume where you left off.`,
+      relatedInterviewId: row.id,
+    });
     reminders += 1;
   }
 
@@ -1725,4 +1752,147 @@ export async function getInterviewMetricsService(
       : 0,
     report: report ?? null,
   };
+}
+
+// ── Report share links ──────────────────────────────────────────────────────
+
+/**
+ * Creates a shareable link to this interview's report (owner-only).
+ *
+ * The token is a signed JWT of type "share" with a fixed 7-day expiry, held
+ * to the same signing secret and Redis-blacklist machinery as the auth tokens
+ * — no new secret, no new mechanism. The candidate name is intentionally
+ * excluded from the token and the public view; the token names one interview,
+ * nothing else.
+ */
+export async function createShareLinkService(authreq: AuthenticatedRequest, interviewId: string) {
+  const interview = await resolveInterview(authreq, interviewId);
+
+  if (interview.interviewStatus !== "COMPLETED") {
+    throw new AppError(
+      "Reports can only be shared for completed interviews",
+      StatusCodes.BAD_REQUEST,
+      ErrorCodes.INTERVIEW_INVALID_STATE,
+      { isOperational: true },
+    );
+  }
+
+  const token = signShareToken({ interviewId: interview.id });
+  const shareUrl = `${env.CORS_ORIGIN[0]}/interviews/shared/${token}`;
+
+  return { token, shareUrl, expiresIn: SHARE_TOKEN_TTL };
+}
+
+/**
+ * Resolves a share token to a read-only, redacted report view (no auth).
+ *
+ * Exposed data is the report a viewer would see in the owner's own full
+ * export — scores, feedback, question-level results — with the candidate
+ * identity and every account-adjacent field removed. If a field is not
+ * already part of the report result row, it is not added here.
+ */
+export async function getSharedReportService(token: string) {
+  if (await isTokenBlacklisted(token)) {
+    throw new AppError(
+      "This share link has been revoked",
+      StatusCodes.NOT_FOUND,
+      ErrorCodes.RESOURCE_NOT_FOUND,
+      { isOperational: true },
+    );
+  }
+
+  const payload = verifyShareToken(token);
+  const interview = await fetchInterviewById(payload.interviewId);
+  if (!interview || interview.interviewStatus !== "COMPLETED") {
+    throw new AppError(
+      "This report is not available",
+      StatusCodes.NOT_FOUND,
+      ErrorCodes.RESOURCE_NOT_FOUND,
+      { isOperational: true },
+    );
+  }
+
+  const db = getPgDb();
+  const [report] = await db
+    .select()
+    .from(interviewResultsTable)
+    .where(eq(interviewResultsTable.interviewId, interview.id))
+    .limit(1);
+
+  if (!report) {
+    throw new AppError(
+      "This report is not available",
+      StatusCodes.NOT_FOUND,
+      ErrorCodes.RESOURCE_NOT_FOUND,
+      { isOperational: true },
+    );
+  }
+
+  const questions = await db
+    .select({
+      sequenceNumber: interviewQuestionsTable.sequenceNumber,
+      questionTitle: interviewQuestionsTable.questionTitle,
+      questionType: interviewQuestionsTable.questionType,
+      answerData: interviewAnswersTable.answerData,
+      evaluationData: interviewAnswersTable.evaluationData,
+      timeTakenSeconds: interviewAnswersTable.timeTakenSeconds,
+    })
+    .from(interviewQuestionsTable)
+    .leftJoin(interviewAnswersTable, eq(interviewAnswersTable.questionId, interviewQuestionsTable.id))
+    .where(eq(interviewQuestionsTable.interviewId, interview.id))
+    .orderBy(interviewQuestionsTable.sequenceNumber);
+
+  return {
+    interview: {
+      // Deliberately redacted: no userId, no account fields. These metadata
+      // values are already part of what the owner's report surfaces.
+      id: interview.id,
+      title: interview.interviewTitle,
+      type: interview.interviewType,
+      difficulty: interview.interviewDifficulty,
+      duration: interview.interviewDuration,
+      domain: interview.interviewMetaData.domain ?? null,
+      jobRole: interview.interviewMetaData.jobRole ?? null,
+      completedAt: interview.updatedAt,
+    },
+    report,
+    questions,
+  };
+}
+
+/**
+ * Revokes a share token (owner-only) by blacklisting it for its remaining
+ * lifetime via the same Redis mechanism used for auth tokens.
+ */
+export async function revokeShareTokenService(
+  authreq: AuthenticatedRequest,
+  interviewId: string,
+  token: string,
+) {
+  // Ownership and existence first — a foreign interview is a plain 404.
+  const interview = await resolveInterview(authreq, interviewId);
+
+  let payload: { interviewId: string };
+  try {
+    payload = verifyShareToken(token);
+  } catch {
+    throw new AppError(
+      "Invalid share token",
+      StatusCodes.BAD_REQUEST,
+      ErrorCodes.VALIDATION_FAILED,
+      { isOperational: true },
+    );
+  }
+
+  if (payload.interviewId !== interview.id) {
+    throw new AppError(
+      "Token does not belong to this interview",
+      StatusCodes.BAD_REQUEST,
+      ErrorCodes.VALIDATION_FAILED,
+      { isOperational: true },
+    );
+  }
+
+  await blacklistToken(token);
+  return { revoked: true };
 }
