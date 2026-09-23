@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.check.json && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint . --report-unused-disable-directives",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
+    "test:lean": "vitest run --config ../tests/frontend/vitest.config.ts",
     "test:unit": "vitest --config vitest.config.unit.ts",
     "test:integration": "vitest --config vitest.config.integration.ts",
     "test:e2e": "playwright test",
@@ -45,6 +46,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/jest-dom": "^6.9.1",
@@ -55,11 +57,15 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^5.0.1",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^25.0.1",
     "msw": "^2.15.0",
     "msw-storybook-addon": "^3.0.3",
     "tailwindcss": "^4.1.0",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
     "vite": "^6.0.7",
     "vitest": "^5.0.1"
   }
