@@ -26,7 +26,8 @@
     "test:integration": "vitest run \"tests/integration.*.test.ts\"",
     "test:all": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:lean": "vitest run --config ../tests/backend/vitest.config.ts"
   },
   "keywords": [],
   "author": "",

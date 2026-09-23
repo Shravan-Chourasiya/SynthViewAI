@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
-type PgDb = ReturnType<typeof drizzle>;
+export type PgDb = ReturnType<typeof drizzle>;
 
 interface PgSingleton {
   pool: Pool;
