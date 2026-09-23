@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDown, ClipboardList, FileDown, Loader2, Play, RotateCcw, SearchX } from 'lucide-react'
 import { Badge, StatusBadge } from '@/components/ui/badge'
@@ -46,10 +46,14 @@ export function InterviewHeader({
   interview,
   active,
   className,
+  actions,
 }: {
   interview: Interview
   active: DetailTab
   className?: string
+  /** Page-specific actions rendered next to the header's own action (e.g. the
+   * report page's Share button — doc 07 Task C). Purely additive. */
+  actions?: ReactNode
 }) {
   const tabs: { key: DetailTab; to: string; label: string }[] = [
     { key: 'overview', to: `/interviews/${interview.id}`, label: 'Overview' },
@@ -85,7 +89,10 @@ export function InterviewHeader({
             </div>
           </div>
         </div>
-        <StateAction interview={interview} active={active} />
+        <div className="flex flex-wrap items-center gap-2">
+          <StateAction interview={interview} active={active} />
+          {actions}
+        </div>
       </div>
 
       <nav aria-label="Interview sections" className="scrollbar-none flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
