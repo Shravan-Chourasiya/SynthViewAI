@@ -1,4 +1,19 @@
-import { and, eq, ilike, or, desc, asc, gt, gte, lt, lte, count, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  eq,
+  ilike,
+  or,
+  desc,
+  asc,
+  gt,
+  gte,
+  lt,
+  lte,
+  count,
+  sql,
+  type SQL,
+  type SQLWrapper,
+} from "drizzle-orm";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
 import type { interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
@@ -26,6 +41,15 @@ import {
  */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * The owner's full name as a single SQL expression. Shared by the search
+ * predicate and the projected `userName` column so the two can never disagree
+ * about what "name" means, and so a change only has to happen in one place.
+ */
+function userFullNameSql() {
+  return sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`;
 }
 
 interface PaginationOptions {
@@ -59,7 +83,9 @@ interface UserSummary {
   createdAt: Date;
   updatedAt: Date;
   interviewCount: number;
-  lastInterviewAt?: Date;
+  // The SQL projection is `SELECT MAX(...)`, which is NULL (not absent) when the
+  // user has no interviews.
+  lastInterviewAt: Date | null;
 }
 
 interface InterviewSummary {
@@ -86,8 +112,66 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
   const db = getPgDb();
   const { page, limit, search, role, sortBy, sortOrder } = options;
 
-  // Build base query with filters
-  let query = db
+  // Build the filter predicate first, then apply it inside ONE chained query.
+  // Drizzle's `.where()` *replaces* the previous predicate rather than ANDing
+  // with it, so chaining `.where()` twice silently dropped the search whenever a
+  // role filter was also active. Collecting the conditions up-front also lets
+  // Drizzle infer the selected row type, which is what the previous `as any`
+  // assertion on the query was suppressing.
+  const userConditions: SQL<unknown>[] = [];
+  if (search) {
+    // `username` is what the admin table renders, so it has to be searchable too.
+    const escaped = escapeLikePattern(search);
+    userConditions.push(
+      or(
+        ilike(usersTable.email, `%${escaped}%`),
+        ilike(usersTable.username, `%${escaped}%`),
+        ilike(usersTable.firstName, `%${escaped}%`),
+        ilike(usersTable.lastName, `%${escaped}%`),
+      )!,
+    );
+  }
+  if (role) {
+    userConditions.push(
+      eq(usersTable.userrole, role as (typeof USER_ROLES)[number]),
+    );
+  }
+  // Apply sorting
+  let sortCol: SQLWrapper;
+  switch (sortBy) {
+    case "userrole":
+      sortCol = usersTable.userrole;
+      break;
+    case "email":
+      sortCol = usersTable.email;
+      break;
+    case "firstName":
+      sortCol = usersTable.firstName;
+      break;
+    case "lastName":
+      sortCol = usersTable.lastName;
+      break;
+    default:
+      sortCol = usersTable.createdAt;
+  }
+
+  const sortDirection = sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
+
+  // Calculate total count with the exact same predicate as the page query —
+  // otherwise the filters and the pagination count disagree.
+  const countQueryBase = db.select({ count: count() }).from(usersTable);
+  const countQuery =
+    userConditions.length > 0
+      ? (countQueryBase.where(and(...userConditions)) as typeof countQueryBase)
+      : countQueryBase;
+  const totalResult = await countQuery;
+  const total = Number(totalResult[0]?.count ?? 0);
+
+  // Calculate pagination
+  const offset = (page - 1) * limit;
+
+  // Get users
+  const rawUsers = await db
     .select({
       id: usersTable.id,
       email: usersTable.email,
@@ -107,102 +191,22 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
           "lastInterviewAt",
         ),
     })
-    .from(usersTable) as any; // Type assertion to bypass complex type checking
+    .from(usersTable)
+    .where(userConditions.length > 0 ? and(...userConditions) : undefined)
+    .orderBy(sortDirection)
+    .limit(limit)
+    .offset(offset);
 
-  // Apply filters. Drizzle's `.where()` *replaces* the previous predicate rather
-  // than ANDing with it, so chaining `.where()` twice silently dropped the search
-  // whenever a role filter was also active. Build one combined predicate instead.
-  const userConditions: SQL<unknown>[] = [];
-  if (search) {
-    // `username` is what the admin table renders, so it has to be searchable too.
-    const escaped = escapeLikePattern(search);
-    userConditions.push(
-      or(
-        ilike(usersTable.email, `%${escaped}%`),
-        ilike(usersTable.username, `%${escaped}%`),
-        ilike(usersTable.firstName, `%${escaped}%`),
-        ilike(usersTable.lastName, `%${escaped}%`),
-      )!,
-    );
-  }
-  if (role) {
-    userConditions.push(
-      eq(usersTable.userrole, role as (typeof USER_ROLES)[number]),
-    );
-  }
-  if (userConditions.length > 0) {
-    query = query.where(and(...userConditions)); // Type assertion to bypass complex type checking
-  }
-
-  // Apply sorting
-  let sortCol;
-  switch (sortBy) {
-    case "userrole":
-      sortCol = usersTable.userrole;
-      break;
-    case "email":
-      sortCol = usersTable.email;
-      break;
-    case "firstName":
-      sortCol = usersTable.firstName;
-      break;
-    case "lastName":
-      sortCol = usersTable.lastName;
-      break;
-    default:
-      sortCol = usersTable.createdAt;
-  }
-
-  const sortDirection = sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
-  query = query.orderBy(sortDirection); // Type assertion to bypass complex type checking
-
-  // Calculate total count with the exact same predicate as the page query —
-  // otherwise the filters and the pagination count disagree.
-  const countQueryBase = db.select({ count: count() }).from(usersTable);
-  const countQuery =
-    userConditions.length > 0
-      ? (countQueryBase.where(and(...userConditions)) as typeof countQueryBase)
-      : countQueryBase;
-  const totalResult = await countQuery;
-  const total = Number(totalResult[0]?.count ?? 0);
-
-  // Calculate pagination
-  const offset = (page - 1) * limit;
-  const paginatedQuery = query.limit(limit).offset(offset);
-
-  // Get users
-  const rawUsers = await paginatedQuery;
-
-  // Map to ensure non-null values for required fields with explicit type guard
-  const users = rawUsers.map((user: any) => {
-    // Explicitly check if user is defined and provide defaults
-    if (!user) {
-      return {
-        id: "",
-        email: "",
-        firstName: "",
-        lastName: "",
-        userrole: "",
-        accountStatus: "active" as const,
-        isActive: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        interviewCount: 0,
-        lastInterviewAt: undefined,
-      };
-    }
-
-    return {
-      ...user,
-      firstName: user.firstName || "",
-      lastName: user.lastName || "",
-    };
-  });
+  const users: UserSummary[] = rawUsers.map((user) => ({
+    ...user,
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+  }));
 
   const totalPages = Math.ceil(total / limit);
 
   return {
-    users: users as UserSummary[],
+    users,
     total,
     page,
     limit,
@@ -249,9 +253,9 @@ export async function getUserById(userId: string): Promise<UserSummary> {
   const user = result[0]!;
   return {
     ...user,
-    firstName: user.firstName || "",
-    lastName: user.lastName || "",
-  } as UserSummary;
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+  };
 }
 
 /**
@@ -414,24 +418,6 @@ export async function listInterviews(
   const db = getPgDb();
   const { page, limit, search, status, userId, sortBy, sortOrder } = options;
 
-  // Build query with joins
-  let query = db
-    .select({
-      id: interviewsTable.id,
-      title: interviewsTable.interviewTitle,
-      status: interviewsTable.interviewStatus,
-      userId: interviewsTable.userId,
-      userName:
-        sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as(
-          "userName",
-        ),
-      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"), // Make sure email is never null
-      createdAt: interviewsTable.createdAt,
-      updatedAt: interviewsTable.updatedAt,
-    })
-    .from(interviewsTable)
-    .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id)) as any; // Type assertion to bypass complex type checking
-
   // Apply filters through one combined predicate: Drizzle's `.where()` replaces
   // the previous predicate, so separate calls silently dropped the status filter
   // as soon as a userId was supplied (and vice versa).
@@ -440,7 +426,7 @@ export async function listInterviews(
     // Free-text search covers the title and the owning user (name + email),
     // matching what the admin table renders.
     const escapedSearch = escapeLikePattern(search);
-    const fullName = sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`;
+    const fullName = userFullNameSql();
     interviewConditions.push(
       or(
         ilike(interviewsTable.interviewTitle, `%${escapedSearch}%`),
@@ -458,12 +444,8 @@ export async function listInterviews(
   if (userId) {
     interviewConditions.push(eq(interviewsTable.userId, userId));
   }
-  if (interviewConditions.length > 0) {
-    query = query.where(and(...interviewConditions)); // Type assertion to bypass complex type checking
-  }
-
   // Apply sorting
-  let sortCol;
+  let sortCol: SQLWrapper;
   switch (sortBy) {
     case "status":
       sortCol = interviewsTable.interviewStatus;
@@ -479,7 +461,6 @@ export async function listInterviews(
   }
 
   const sortDirection = sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
-  query = query.orderBy(sortDirection); // Type assertion to bypass complex type checking
 
   // Calculate total count with the exact same predicate as the page query —
   // otherwise the filters and the pagination count disagree.
@@ -498,37 +479,35 @@ export async function listInterviews(
 
   // Calculate pagination
   const offset = (page - 1) * limit;
-  const paginatedQuery = query.limit(limit).offset(offset);
 
   // Get interviews
-  const rawInterviews = await paginatedQuery;
+  const rawInterviews = await db
+    .select({
+      id: interviewsTable.id,
+      title: interviewsTable.interviewTitle,
+      status: interviewsTable.interviewStatus,
+      userId: interviewsTable.userId,
+      userName: userFullNameSql().as("userName"),
+      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"), // Make sure email is never null
+      createdAt: interviewsTable.createdAt,
+      updatedAt: interviewsTable.updatedAt,
+    })
+    .from(interviewsTable)
+    .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id))
+    .where(interviewConditions.length > 0 ? and(...interviewConditions) : undefined)
+    .orderBy(sortDirection)
+    .limit(limit)
+    .offset(offset);
 
-  // Map to ensure non-null values for required fields with explicit type guard
-  const interviews = rawInterviews.map((interview: any) => {
-    // Explicitly check if interview is defined and provide defaults
-    if (!interview) {
-      return {
-        id: "",
-        title: "",
-        status: "",
-        userId: "",
-        userName: "",
-        userEmail: "",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-    }
-
-    return {
-      ...interview,
-      userEmail: interview.userEmail || "",
-    };
-  });
+  const interviews: InterviewSummary[] = rawInterviews.map((interview) => ({
+    ...interview,
+    userEmail: interview.userEmail || "",
+  }));
 
   const totalPages = Math.ceil(total / limit);
 
   return {
-    interviews: interviews as InterviewSummary[],
+    interviews,
     total,
     page,
     limit,
@@ -539,7 +518,7 @@ export async function listInterviews(
 /**
  * Get interview detail by ID
  */
-export async function getInterviewDetail(interviewId: string): Promise<any> {
+export async function getInterviewDetail(interviewId: string) {
   const db = getPgDb();
 
   const result = await db
@@ -549,10 +528,7 @@ export async function getInterviewDetail(interviewId: string): Promise<any> {
       description: interviewsTable.interviewDescription,
       status: interviewsTable.interviewStatus,
       userId: interviewsTable.userId,
-      userName:
-        sql<string>`COALESCE(CONCAT(${usersTable.firstName}, ' ', ${usersTable.lastName}), '')`.as(
-          "userName",
-        ),
+      userName: userFullNameSql().as("userName"),
       userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"),
       createdAt: interviewsTable.createdAt,
       updatedAt: interviewsTable.updatedAt,

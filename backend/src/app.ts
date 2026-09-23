@@ -22,6 +22,7 @@ import { startAbandonStaleInterviewsJob } from "./jobs/abandonStaleInterviews.jo
 import { startInterviewReminderJob } from "./jobs/interviewReminder.job.js";
 import AdminRoutes from "./routes/admin.routes.js";
 import AnalyticsRoutes from "./routes/analytics.routes.js";
+import { createNotificationRouter } from "./routes/notification.routes.js";
 config();
 const app = express();
 
@@ -47,6 +48,7 @@ app.use(`/${env.API_VERSION}/`, InterviewRoutes);
 // Register admin and analytics routes
 app.use(`/${env.API_VERSION}/admin`, AdminRoutes);
 app.use(`/${env.API_VERSION}/analytics`, AnalyticsRoutes);
+app.use(`/${env.API_VERSION}/`, createNotificationRouter());
 
 startAbandonStaleInterviewsJob();
 startInterviewReminderJob();

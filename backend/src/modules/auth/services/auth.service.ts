@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { StatusCodes } from "http-status-codes";
 import bcrypt from "bcrypt";
@@ -778,11 +778,32 @@ export async function getMeService(userId: string) {
 
 export async function updateProfileService(userId: string, input: UpdateProfileInput) {
   const db = getPgDb();
+
+  // Username is unique — a duplicate must surface as a clean 409, not a raw
+  // Postgres unique-violation 500. Checked before the write; the unique index
+  // remains the final guard against races.
+  if (input.username !== undefined) {
+    const [taken] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.username, input.username), ne(usersTable.id, userId)))
+      .limit(1);
+    if (taken) {
+      throw new AppError(
+        "That username is already taken",
+        StatusCodes.CONFLICT,
+        ErrorCodes.RESOURCE_ALREADY_EXISTS,
+        { isOperational: true },
+      );
+    }
+  }
+
   const [user] = await db
     .update(usersTable)
     .set({
       ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
       ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
+      ...(input.username !== undefined ? { username: input.username } : {}),
     })
     .where(eq(usersTable.id, userId))
     .returning({

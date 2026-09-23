@@ -72,10 +72,18 @@ export const updateProfileSchema = z
   .object({
     firstName: z.string().trim().min(1).max(100).optional(),
     lastName: z.string().trim().max(100).optional(),
+    username: z.string().regex(userRegex.usernameRegex, {
+      message:
+        "Username must be 3-30 characters long and can only contain letters, numbers, and underscores",
+    }).optional(),
   })
-  .refine((data) => data.firstName !== undefined || data.lastName !== undefined, {
-    message: "At least one profile field is required",
-  });
+  .refine(
+    (data) =>
+      data.firstName !== undefined || data.lastName !== undefined || data.username !== undefined,
+    {
+      message: "At least one profile field is required",
+    },
+  );
 
 export const emailUpdateOtpVerifySchema = z.object({
   email: z.string().regex(userRegex.emailRegex, { message: "Invalid email format" }),
