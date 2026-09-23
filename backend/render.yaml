@@ -1,0 +1,127 @@
+# Render Blueprint — SynthView AI backend
+#
+# Where this file lives matters. There is no root package.json and no workspace
+# manifest in this repo, so `backend/` and `frontend/` are two independent npm
+# projects rather than a workspace monorepo. Render treats the directory
+# containing the Blueprint as the service root, so placing it next to
+# `backend/package.json` means `npm install` / `npm run build` resolve against
+# the backend with no `rootDir` override needed.
+#
+# To use it: Render Dashboard -> New + -> Blueprint -> pick this repo ->
+# Blueprint Path: `backend/render.yaml`.
+#
+# Why Render and not Vercel for the backend: the API owns a stateful Socket.IO
+# server attached to the same HTTP server (backend/server.ts), which serverless
+# functions cannot host. Backend -> Render, frontend -> Vercel is deliberate.
+
+services:
+  - type: web
+    name: synthview-ai-backend
+    runtime: node
+    # Free plan spins down after ~15 minutes of inactivity, so the first request
+    # after idle is slow and any live interview socket is dropped. Move to a paid
+    # instance for anything beyond a demo.
+    plan: free
+    # backend/package.json already declares engines.node "^24.0.0", which Render
+    # reads directly — no separate .node-version file is needed (and adding one
+    # would duplicate the same fact in two places).
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    # `/health` is a flat 200 liveness response (backend/src/app.ts). The deeper
+    # `/ready` probe pings Postgres and Redis and returns 503 when either is
+    # unreachable, which is what you want to *monitor* — but gating deploys on it
+    # means a transient Redis blip fails the rollout, so the deploy gate stays on
+    # `/health`.
+    healthCheckPath: /health
+    #
+    # Recommended, currently commented out on purpose: apply pending Drizzle
+    # migrations before each deploy. Without it a schema change (like the
+    # interview-reminder columns) reaches production un-migrated and the affected
+    # queries fail at runtime with "column does not exist". prompt 3 scopes this
+    # file to build/start/health config only, so this is left as an opt-in — see
+    # the deployment report.
+    #
+    # preDeployCommand: npm run db:migrate
+    #
+    envVars:
+      # ── App ───────────────────────────────────────────────────────────────────
+      # Must be `production` in production. env.schema.ts defaults it to
+      # `development`, which would enable the localhost CORS fallback and disable
+      # the Secure cookie flag, so the default is deliberately overridden here.
+      - key: NODE_ENV
+        value: production
+      # PORT is intentionally absent: Render injects its own PORT at runtime, and
+      # backend/src/config/env.ts hands process.env straight to env.schema.ts
+      # (`z.coerce.number().int().positive().default(4000)`), so the dynamic port
+      # is picked up correctly with no override.
+      # API_VERSION has no schema default (`z.string()`, required). It is a fixed
+      # part of the API contract (mirrored as VITE_API_VERSION in the frontend)
+      # rather than deployment-specific, so it is committed here instead of
+      # prompting for it.
+      - key: API_VERSION
+        value: api/v1
+
+      # ── Database ─────────────────────────────────────────────────────────────
+      # Full connection string, e.g. from a Render Postgres instance's
+      # "Internal Database URL".
+      - key: POSTGRES_URI
+        sync: false
+
+      # ── Redis ────────────────────────────────────────────────────────────────
+      # REDIS_URI is required by the schema (validated as a URL). REDIS_HOST /
+      # REDIS_PORT / REDIS_PASSWORD are required *separately* because the rate
+      # limiter builds its own ioredis client from the discrete fields rather than
+      # parsing REDIS_URI — see backend/src/config/redis.init.ts. Set both forms.
+      - key: REDIS_URI
+        sync: false
+      - key: REDIS_HOST
+        sync: false
+      # REDIS_PORT is omitted: schema default 6379.
+      - key: REDIS_PASSWORD
+        sync: false
+
+      # ── Auth / JWT ───────────────────────────────────────────────────────────
+      # Must be 64-512 characters. Generate with:
+      #   node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+      - key: JWT_SECRET
+        sync: false
+
+      # ── CORS / Cookies ───────────────────────────────────────────────────────
+      # Comma-separated, no trailing slash. Must contain the deployed frontend's
+      # exact origin, e.g. `https://your-app.vercel.app`. In production an empty
+      # value is a hard startup failure by design (see constants/cors.ts).
+      - key: CORS_ORIGIN
+        sync: false
+      # Only meaningful once the frontend and backend share one registrable
+      # domain, e.g. `.example.com` for app.example.com + api.example.com.
+      # Leave blank when they are on unrelated hosts (*.vercel.app +
+      # *.onrender.com) — see the cookie findings in the deployment report.
+      - key: COOKIE_DOMAIN
+        sync: false
+
+      # ── Gmail OAuth2 (Nodemailer) ────────────────────────────────────────────
+      # All four of these are REQUIRED by env.schema.ts (only
+      # GMAIL_APP_PASSWORD is optional). Missing any one of them makes the
+      # process exit at boot with "Invalid environment variables", since OTP
+      # email is part of the registration flow.
+      - key: GMAIL_USER_EMAIL
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+
+      # ── AI Providers ─────────────────────────────────────────────────────────
+      # Optional by schema: with neither key set the AI module falls back to a
+      # built-in stub that returns generic questions and flat evaluations, so the
+      # app boots but the product's core feature is inert. Set at least one.
+      - key: GROQ_API_KEY
+        sync: false
+      # GROQ_MODEL is omitted: schema default `llama-3.1-8b-instant`.
+      - key: MISTRAL_API_KEY
+        sync: false
+      # MISTRAL_MODEL is omitted: schema default `mistral-small-latest`.
