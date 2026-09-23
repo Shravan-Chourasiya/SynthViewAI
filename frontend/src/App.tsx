@@ -40,6 +40,7 @@ const AnalyticsPage = lazy(() => import('@/pages/analytics').then((m) => ({ defa
 const ProfilePage = lazy(() => import('@/pages/profile').then((m) => ({ default: m.ProfilePage })))
 const SettingsPage = lazy(() => import('@/pages/settings').then((m) => ({ default: m.SettingsPage })))
 const SessionsPage = lazy(() => import('@/pages/sessions').then((m) => ({ default: m.SessionsPage })))
+const SharedReportPage = lazy(() => import('@/pages/interviews/shared-report'))
 
 // Admin
 const AdminOverviewPage = lazy(() => import('@/pages/admin/overview').then((m) => ({ default: m.AdminOverviewPage })))
@@ -101,6 +102,8 @@ export default function App() {
         {/* Remove separate verify-email route - now integrated into AuthPage */}
         <Route path="/forgot-password" element={<Suspense fallback={<PublicFallback />}><ForgotPasswordPage /></Suspense>} />
         <Route path="/reset-password" element={<Suspense fallback={<PublicFallback />}><ResetPasswordPage /></Suspense>} />
+        {/* Public share-link viewer — no auth, by design (doc 07 Task C stretch). */}
+        <Route path="/interviews/shared/:token" element={<Suspense fallback={<PublicFallback />}><SharedReportPage /></Suspense>} />
 
         {/* candidate app */}
         <Route path="/dashboard" element={<RequireAuth><Suspense fallback={<PageFallback />}><DashboardPage /></Suspense></RequireAuth>} />

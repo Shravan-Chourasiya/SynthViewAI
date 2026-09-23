@@ -15,7 +15,9 @@ import {
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { BrandMark } from '@/components/brand-mark'
+import { NotificationBell } from '@/components/notification-bell'
 import { useAuthStore } from '@/lib/stores/auth.store'
+import { resumableInterviews } from '@/lib/services/interview.service'
 import { canAccessAdmin } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
@@ -23,7 +25,8 @@ interface NavItem {
   to: string
   label: string
   icon: typeof LayoutDashboard
-  count?: number
+  /** null = still loading, undefined = fetch failed — both suppress the badge. */
+  count?: number | null
 }
 
 const isActive = (pathname: string, to: string) => {
@@ -36,7 +39,24 @@ const isActive = (pathname: string, to: string) => {
 function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const { pathname } = useLocation()
   const user = useAuthStore((s) => s.user)
-  const resumable = 0
+  // Task A: the real resumable count. While loading (null) or on error
+  // (undefined) no badge renders — a flashing 0 or a broken fetch must never
+  // look like "nothing to resume".
+  const [resumable, setResumable] = useState<number | null | undefined>(null)
+
+  useEffect(() => {
+    let alive = true
+    resumableInterviews()
+      .then((items) => {
+        if (alive) setResumable(items.length)
+      })
+      .catch(() => {
+        if (alive) setResumable(undefined) // fail silent → no badge
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const groups: { title: string; items: NavItem[] }[] = [
     {
@@ -45,7 +65,7 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
         { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { to: '/interviews/new', label: 'New Interview', icon: Plus },
         { to: '/interviews', label: 'Interviews', icon: ClipboardList },
-        { to: '/interviews/resumable', label: 'Resumable', icon: RotateCcw, count: resumable },
+        { to: '/interviews/resumable', label: 'Resumable', icon: RotateCcw, count: resumable ?? null },
       ],
     },
     {
@@ -96,7 +116,7 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
                 >
                   <Icon className="size-4 shrink-0" />
                   {item.label}
-                  {item.count ? (
+                  {item.count != null && item.count > 0 ? (
                     <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 font-mono text-[10px] leading-none text-primary-foreground">
                       {item.count}
                     </span>
@@ -205,7 +225,10 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
             </button>
             <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="app-shell-main flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
