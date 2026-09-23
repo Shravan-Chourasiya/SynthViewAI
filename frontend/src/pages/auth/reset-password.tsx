@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, api } from '@/lib/api'
-import { PasswordChecklist, passwordIsValid } from './password-checklist'
+import { PasswordChecklist, PasswordRulesInfo, passwordIsValid } from './password-checklist'
 import { notifyError, notifySuccess } from '@/lib/notify'
 
 export function ResetPasswordPage() {

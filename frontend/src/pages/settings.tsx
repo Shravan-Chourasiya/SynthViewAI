@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { CheckCircle2, ChevronDown, Loader2, Monitor } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { CheckCircle2, ChevronDown, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
@@ -10,7 +10,6 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { usePreferencesStore } from '@/lib/stores/preferences.store'
 import type { Difficulty, EndingCriteria, ExperienceLevel, InterviewStyle, InterviewType } from '@/lib/types'
-import { PasswordChecklist, passwordIsValid } from '@/pages/auth/password-checklist'
 import { notifyError, notifySuccess } from '@/lib/notify'
 
 const selectCls =
@@ -36,12 +35,6 @@ const ENDING_OPTIONS: { value: EndingCriteria; label: string }[] = [
 export function SettingsPage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
-
-  /* security */
-  const [current, setCurrent] = useState('')
-  const [next, setNext] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [pwLoading, setPwLoading] = useState(false)
 
   /* preferences
    * Draft state is seeded from the persisted store and committed on save, so the
@@ -86,35 +79,6 @@ export function SettingsPage() {
   /* danger */
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  const changePassword = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (pwLoading) return
-    if (!current) {
-      notifyError('Enter your current password.')
-      return
-    }
-    if (!passwordIsValid(next)) {
-      notifyError('New password does not meet the requirements.')
-      return
-    }
-    if (next !== confirm) {
-      notifyError('Passwords do not match.')
-      return
-    }
-    setPwLoading(true)
-    try {
-      await api.changePassword(current, next)
-      setCurrent('')
-      setNext('')
-      setConfirm('')
-      notifySuccess('Password updated successfully!')
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : 'Unable to update password. Please try again.');
-    } finally {
-      setPwLoading(false)
-    }
-  }
-
   // Commits the draft to the persisted preferences store. Unlike the previous
   // implementation this is a real write — the saved values are what the New
   // Interview wizard and the interview lobby read back.
@@ -151,47 +115,6 @@ export function SettingsPage() {
           </p>
           <h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">Settings</h1>
         </header>
-
-        {/* security */}
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="text-sm font-semibold">Security</h2>
-          <form className="mt-4 flex flex-col gap-4" onSubmit={changePassword} noValidate>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="current">Current password</Label>
-              <Input id="current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="next">New password</Label>
-                <Input id="next" type="password" value={next} onChange={(e) => setNext(e.target.value)} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="confirm">Confirm new password</Label>
-                <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-              </div>
-            </div>
-            <PasswordChecklist value={next} />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" disabled={pwLoading}>
-                {pwLoading ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Updating…
-                  </>
-                ) : (
-                  'Update password'
-                )}
-              </Button>
-              <Link
-                to="/settings/sessions"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Monitor className="size-3.5" />
-                Active sessions
-              </Link>
-            </div>
-          </form>
-        </section>
 
         {/* preferences */}
         <section className="rounded-2xl border border-border bg-card p-6">
