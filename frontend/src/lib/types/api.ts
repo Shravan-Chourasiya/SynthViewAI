@@ -101,6 +101,7 @@ export interface UpdateEmailVerifyRequest {
 export interface UpdateProfileRequest {
   firstName?: string;
   lastName?: string;
+  username?: string;
 }
 
 // ── User / Session ────────────────────────────────────────────────────────────

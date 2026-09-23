@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { adminService, UserSummary, InterviewSummary, AdminOverviewStats, UserListFilter, InterviewListFilter, PaginatedResponse } from '../services/admin.service';
 
+/**
+ * Shape of the single-interview detail payload. Derived from the service rather
+ * than re-declared here, so the store can never drift from the API client.
+ */
+type InterviewDetail = Awaited<ReturnType<typeof adminService.getInterviewById>>;
+
 interface AdminState {
   // Users state
   users: UserSummary[];
@@ -23,7 +29,7 @@ interface AdminState {
     limit: number;
     totalPages: number;
   };
-  selectedInterview: any; // More specific type would be needed based on backend
+  selectedInterview: InterviewDetail | null;
   interviewsLoading: boolean;
   interviewsError: string | null;
   
@@ -94,9 +100,9 @@ export const useAdminStore = create<AdminState>()(
           },
           usersLoading: false,
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          usersError: error.message || 'Failed to load users',
+          usersError: error instanceof Error ? error.message : 'Failed to load users',
           usersLoading: false 
         });
       }
@@ -111,9 +117,9 @@ export const useAdminStore = create<AdminState>()(
           selectedUser: user,
           usersLoading: false 
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          usersError: error.message || 'Failed to load user',
+          usersError: error instanceof Error ? error.message : 'Failed to load user',
           usersLoading: false 
         });
       }
@@ -125,8 +131,8 @@ export const useAdminStore = create<AdminState>()(
         // Optionally refresh the user list or update the specific user in the store
         const { loadUsers } = get();
         loadUsers({ page: get().userPagination.page, limit: get().userPagination.limit });
-      } catch (error: any) {
-        set({ usersError: error.message || 'Failed to update user role' });
+      } catch (error) {
+        set({ usersError: error instanceof Error ? error.message : 'Failed to update user role' });
       }
     },
     
@@ -135,8 +141,8 @@ export const useAdminStore = create<AdminState>()(
         await adminService.suspendUser(userId, reason);
         const { loadUsers } = get();
         loadUsers({ page: get().userPagination.page, limit: get().userPagination.limit });
-      } catch (error: any) {
-        set({ usersError: error.message || 'Failed to suspend user' });
+      } catch (error) {
+        set({ usersError: error instanceof Error ? error.message : 'Failed to suspend user' });
       }
     },
     
@@ -145,8 +151,8 @@ export const useAdminStore = create<AdminState>()(
         await adminService.reinstateUser(userId);
         const { loadUsers } = get();
         loadUsers({ page: get().userPagination.page, limit: get().userPagination.limit });
-      } catch (error: any) {
-        set({ usersError: error.message || 'Failed to reinstate user' });
+      } catch (error) {
+        set({ usersError: error instanceof Error ? error.message : 'Failed to reinstate user' });
       }
     },
     
@@ -169,9 +175,9 @@ export const useAdminStore = create<AdminState>()(
           },
           interviewsLoading: false,
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          interviewsError: error.message || 'Failed to load interviews',
+          interviewsError: error instanceof Error ? error.message : 'Failed to load interviews',
           interviewsLoading: false 
         });
       }
@@ -186,9 +192,9 @@ export const useAdminStore = create<AdminState>()(
           selectedInterview: interview,
           interviewsLoading: false 
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          interviewsError: error.message || 'Failed to load interview',
+          interviewsError: error instanceof Error ? error.message : 'Failed to load interview',
           interviewsLoading: false 
         });
       }
@@ -203,9 +209,9 @@ export const useAdminStore = create<AdminState>()(
           overviewStats: stats,
           overviewLoading: false 
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          overviewError: error.message || 'Failed to load overview stats',
+          overviewError: error instanceof Error ? error.message : 'Failed to load overview stats',
           overviewLoading: false 
         });
       }

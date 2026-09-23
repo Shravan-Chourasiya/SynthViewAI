@@ -38,5 +38,13 @@ export const ENDPOINTS = {
     end: (id: string) => `/interviews/${id}/end`,
     answer: (interviewId: string, questionId: string) =>
       `/interviews/${interviewId}/questions/${questionId}/answer`,
+    share: (id: string) => `/interviews/${id}/share`,
+    shareRevoke: (id: string) => `/interviews/${id}/share/revoke`,
+    sharedReport: (token: string) => `/interviews/shared/${encodeURIComponent(token)}`,
+  },
+  notifications: {
+    list: "/notifications",
+    readAll: "/notifications/read-all",
+    read: (id: string) => `/notifications/${id}/read`,
   },
 } as const;

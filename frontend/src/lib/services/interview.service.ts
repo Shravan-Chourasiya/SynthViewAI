@@ -1,4 +1,4 @@
-import { httpGet, httpPost } from "../http";
+import { httpGet, httpPatch, httpPost } from "../http";
 import { ENDPOINTS } from "../constants/endpoints";
 import type {
   InterviewResponse,
@@ -122,4 +122,22 @@ export function submitAnswer(
   body: AnswerRequest,
 ): Promise<void> {
   return httpPost(ENDPOINTS.interviews.answer(interviewId, body.questionId), body);
+}
+
+// ── Report share links ───────────────────────────────────────────────────────
+
+export interface ShareLinkResponse {
+  token: string;
+  shareUrl: string;
+  expiresIn: string;
+}
+
+/** POST /interviews/:id/share — creates a 7-day share link (owner-only). */
+export function shareInterviewReport(id: string): Promise<ShareLinkResponse> {
+  return httpPost<ShareLinkResponse>(ENDPOINTS.interviews.share(id));
+}
+
+/** POST /interviews/:id/share/revoke — blacklists a previously issued token. */
+export function revokeInterviewShare(id: string, token: string): Promise<void> {
+  return httpPatch<unknown>(ENDPOINTS.interviews.shareRevoke(id), { token }).then(() => undefined);
 }

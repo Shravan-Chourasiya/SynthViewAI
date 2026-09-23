@@ -6,8 +6,8 @@ interface AnalyticsState {
   userAnalytics: UserAnalytics | null;
   loading: boolean;
   error: string | null;
-  trendData: any[];
-  overallStats: any;
+  trendData: UserAnalytics['trendData'];
+  overallStats: UserAnalytics['overallStats'] | null;
   
   loadUserAnalytics: () => Promise<void>;
   loadTrendData: () => Promise<void>;
@@ -32,9 +32,9 @@ export const useAnalyticsStore = create<AnalyticsState>()(
           userAnalytics: analytics,
           loading: false 
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          error: error.message || 'Failed to load analytics',
+          error: error instanceof Error ? error.message : 'Failed to load analytics',
           loading: false 
         });
       }
@@ -49,9 +49,9 @@ export const useAnalyticsStore = create<AnalyticsState>()(
           overallStats: trend.overallStats,
           loading: false 
         });
-      } catch (error: any) {
+      } catch (error) {
         set({ 
-          error: error.message || 'Failed to load trend data',
+          error: error instanceof Error ? error.message : 'Failed to load trend data',
           loading: false 
         });
       }

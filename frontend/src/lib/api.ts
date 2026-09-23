@@ -296,13 +296,14 @@ export const api = {
   // ── Profile ────────────────────────────────────────────────────────────────
 
   async updateProfile(
-    patch: Pick<User, "name">,
+    patch: Pick<User, "name"> & { username?: string },
   ): Promise<User> {
     const [firstName, ...rest] = patch.name.trim().split(/\s+/);
     return normalizeUser(
       await authSvc.updateProfile({
         firstName,
         lastName: rest.join(" "),
+        ...(patch.username !== undefined ? { username: patch.username } : {}),
       }),
     );
   },

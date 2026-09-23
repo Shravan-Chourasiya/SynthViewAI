@@ -7,9 +7,8 @@ import type { Interview, InterviewReport, TimelineEvent } from './types'
  * ## Option B — client-side, data-driven generation
  *
  * This module builds the PDF from the report *data* (the same objects the React
- * pages already hold) using jsPDF's native text/vector drawing API. It does not
- * read or rasterize the rendered DOM, which is what the previous
- * `pdf.html()`/html2canvas implementation did.
+ * pages already hold) using jsPDF's native text/vector drawing API. It never
+ * reads or rasterizes the rendered DOM.
  *
  * Two concrete bars this clears, neither of which a screenshot-to-PDF can:
  *
