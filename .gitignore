@@ -18,7 +18,7 @@ __pycache__/
 # IDEs
 .vscode/
 .idea/
-
+.agents*
 # OS
 .DS_Store
 Thumbs.db
@@ -67,6 +67,9 @@ cypress/videos/
 test-results/
 playwright-report/
 
+# Docs folder (generated documentation)
+docs/
+
 # Ignore any markdown files that are temporary notes
 *.tmp.md
 *.temp.md
@@ -81,3 +84,6 @@ cb561ae8-184d-4953-8cc6-bca4707d7621.png
 .agents/skills/Ui design Guide/SKILL.md
 temp.md
 t2gl0ded.png
+ml-engineer-interview-report.pdf
+00-execution-plan.md
+thread-Execute Temp File Tasks-9360c897-12f.md
