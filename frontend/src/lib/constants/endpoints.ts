@@ -47,4 +47,8 @@ export const ENDPOINTS = {
     readAll: "/notifications/read-all",
     read: (id: string) => `/notifications/${id}/read`,
   },
+  contact: {
+    // Public: the contact form is available to signed-out visitors.
+    submit: "/contact",
+  },
 } as const;

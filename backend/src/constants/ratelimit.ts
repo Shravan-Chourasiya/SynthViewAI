@@ -56,6 +56,14 @@ export const RateLimits = {
     windowMs: 15 * 60 * 1000, // 15 minutes
     limit: 30,
   },
+
+  /** Public contact form — each hit sends two emails, so keep it tight enough
+   * that the form cannot be used to burn the mail quota or spam a stranger's
+   * inbox with acknowledgements. */
+  CONTACT: {
+    windowMs: 60 * 60 * 1000, // 1 hour
+    limit: 5,
+  },
 } as const;
 
 export type RateLimitKey = keyof typeof RateLimits;

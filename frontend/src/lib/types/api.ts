@@ -104,6 +104,15 @@ export interface UpdateProfileRequest {
   username?: string;
 }
 
+// ── Contact ───────────────────────────────────────────────────────────────────
+
+export interface ContactRequest {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+}
+
 // ── User / Session ────────────────────────────────────────────────────────────
 
 // Shape returned by getMeService; role is `userrole` to mirror the backend.
