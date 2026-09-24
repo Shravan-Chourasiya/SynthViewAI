@@ -69,6 +69,10 @@ function clearAuthCookies(res: Response): void {
   res.clearCookie(COOKIE_NAMES.ACCESS, COOKIE_CONFIG.ACCESS);
   res.clearCookie(COOKIE_NAMES.REFRESH, COOKIE_CONFIG.REFRESH);
   res.clearCookie(COOKIE_NAMES.DEVICE_ID, COOKIE_CONFIG.DEVICE_ID);
+  // The CSRF cookie is set alongside the others, so it has to be cleared with
+  // them — otherwise the token from the previous session survives logout and
+  // the next login silently reuses a value the server no longer recognises.
+  res.clearCookie(COOKIE_NAMES.CSRF, COOKIE_CONFIG.CSRF);
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────

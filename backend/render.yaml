@@ -11,8 +11,14 @@
 # Blueprint Path: `backend/render.yaml`.
 #
 # Why Render and not Vercel for the backend: the API owns a stateful Socket.IO
-# server attached to the same HTTP server (backend/server.ts), which serverless
-# functions cannot host. Backend -> Render, frontend -> Vercel is deliberate.
+# server attached to the same HTTP server (backend/src/server.ts), which
+# serverless functions cannot host. Backend -> Render, frontend -> Vercel is
+# deliberate.
+#
+# The entry point is `backend/src/server.ts`, and it must stay inside `src/`:
+# tsconfig.json compiles `src/**/*.ts` only, so an entry point living at the
+# backend root would be excluded from `npm run build` and `npm run start` would
+# look for a `dist/server.js` that was never emitted.
 
 services:
   - type: web
@@ -25,7 +31,19 @@ services:
     # backend/package.json already declares engines.node "^24.0.0", which Render
     # reads directly — no separate .node-version file is needed (and adding one
     # would duplicate the same fact in two places).
-    buildCommand: npm install && npm run build
+    #
+    # `--include=dev` is deliberate and load-bearing, not a typo. Two separate
+    # reasons the build needs devDependencies:
+    #   1. `npm run build` is `tsc`, and TypeScript is a devDependency.
+    #   2. The `postinstall` script rewrites node_modules/@types/pg/package.json,
+    #      another devDependency — so a dev-stripped install fails before the
+    #      build even starts.
+    # npm omits devDependencies whenever it sees NODE_ENV=production, and this
+    # file sets exactly that a few lines below. Render applies its own Node
+    # `NODE_ENV=production` at runtime only, but a service-defined value is not
+    # subject to that restriction — so the flag removes the dependency on which
+    # phase actually wins.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     # `/health` is a flat 200 liveness response (backend/src/app.ts). The deeper
     # `/ready` probe pings Postgres and Redis and returns 503 when either is
@@ -125,3 +143,7 @@ services:
       - key: MISTRAL_API_KEY
         sync: false
       # MISTRAL_MODEL is omitted: schema default `mistral-small-latest`.
+      # MISTRAL_EMBED_MODEL is omitted too: schema default `mistral-embed`. It is
+      # a separate model family from MISTRAL_MODEL (embeddings vs chat) and is
+      # only read by the semantic-retrieval path, so the default is correct here
+      # and no dashboard entry is needed.

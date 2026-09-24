@@ -1,10 +1,14 @@
-import { gracefulShutdown } from "./src/utils/shutdown.js";
-import { env } from "./src/config/env.js";
-import { logger } from "./src/utils/logger.js";
-import app from "./src/app.js";
-import { testPgConnection } from "./src/db/postgres.init.js";
-import { verifyMailTransporter } from "./src/services/nodemailer.service.js";
-import { attachSocketServer } from "./src/websocket/socket.server.js";
+// Entry point. Lives inside `src/` on purpose: tsconfig.json sets
+// `rootDir: ./src` and `include: ["src/**/*.ts"]`, so a file outside src/ is
+// never compiled and `npm run build` would emit no `dist/server.js` — which is
+// exactly what `npm run start` (and Render's start command) launches.
+import { gracefulShutdown } from "./utils/shutdown.js";
+import { env } from "./config/env.js";
+import { logger } from "./utils/logger.js";
+import app from "./app.js";
+import { testPgConnection } from "./db/postgres.init.js";
+import { verifyMailTransporter } from "./services/nodemailer.service.js";
+import { attachSocketServer } from "./websocket/socket.server.js";
 import { createServer } from "http";
 
 const httpServer = createServer(app);

@@ -44,29 +44,50 @@ export const COOKIE_MAX_AGE = {
 } as const;
 
 // ── Cookie Configurations ──────────────────────────────────────────────────────
+// Applies to every auth cookie, and only when COOKIE_DOMAIN is actually set.
+//
+// When production puts the frontend and the API on one registrable domain
+// (app.example.com + api.example.com), the CSRF cookie needs `Domain=.example.com`:
+// the frontend reads it through `document.cookie` to fill the `X-CSRF-Token`
+// header, and a host-only cookie written by the API host is invisible to every
+// other origin — so the header would never be sent and every mutating request
+// would 403. `res.clearCookie` only deletes a cookie whose attributes match the
+// ones it was set with, which is why this lives here and not in the controller.
+//
+// Left unset (local development, and any deployment where the two apps sit on
+// unrelated hosts) the cookies stay host-only — today's behaviour, unchanged.
+// Never point this at a public suffix such as `.onrender.com`: browsers reject
+// those cookies outright.
+const cookieDomain = process.env.COOKIE_DOMAIN?.trim();
+const domainAttr = cookieDomain ? { domain: cookieDomain } : {};
+
 export const COOKIE_CONFIG = {
   ACCESS: {
     httpOnly: true,
     secure: process.env.NODE_ENV !== "development",
     sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.ACCESS,
+    ...domainAttr,
   },
   REFRESH: {
     httpOnly: true,
     secure: process.env.NODE_ENV !== "development",
     sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.REFRESH,
+    ...domainAttr,
   },
   DEVICE_ID: {
     httpOnly: true,
     secure: process.env.NODE_ENV !== "development",
     sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.DEVICE_ID,
+    ...domainAttr,
   },
   CSRF: {
     httpOnly: false,
     secure: process.env.NODE_ENV !== "development",
     sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.REFRESH,
+    ...domainAttr,
   },
 };
