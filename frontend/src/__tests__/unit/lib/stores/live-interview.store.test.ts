@@ -116,6 +116,36 @@ describe('live-interview.store', () => {
       expect(state.lastEvaluation).toBeNull(); // Should be reset
       expect(state.aiStatus).toBe('idle'); // Should be reset
     });
+
+    it('keeps the busy state when the same question is redelivered', () => {
+      // Mid-evaluation, the server redelivers the current question on join
+      // (resume / reconnect). That echo is not an arrival, so it must not
+      // clear aiStatus — this is what used to re-enable the submit button
+      // while the answer was still being scored.
+      const mockQuestion = { id: 'q1', text: 'What is React?' } as never;
+      useLiveInterviewStore.getState().applyQuestion(mockQuestion, 1, 5);
+      useLiveInterviewStore.setState({ aiStatus: 'evaluating', lastEvaluation: null });
+
+      useLiveInterviewStore.getState().applyQuestion(mockQuestion, 1, 5);
+
+      const state = useLiveInterviewStore.getState();
+      expect(state.aiStatus).toBe('evaluating');
+    });
+
+    it('clears the busy state when a genuinely new question arrives', () => {
+      useLiveInterviewStore.setState({
+        currentQuestion: { id: 'q1', text: 'Old question' } as never,
+        aiStatus: 'generating',
+      });
+
+      useLiveInterviewStore
+        .getState()
+        .applyQuestion({ id: 'q2', text: 'New question' } as never, 2, 5);
+
+      const state = useLiveInterviewStore.getState();
+      expect(state.aiStatus).toBe('idle');
+      expect(state.lastEvaluation).toBeNull();
+    });
   });
 
   describe('setAiStatus', () => {

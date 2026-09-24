@@ -157,7 +157,28 @@ export function useInterviewSocket(
       join();
     });
     socket.on("disconnect", () => {
-      if (!intentionalCloseRef.current) setState("disconnected");
+      // Allow the next "connect" to re-join. The backend's join handler is
+      // idempotent (it treats a returning user as a reconnect, clears the
+      // grace period and re-delivers the current question), so a fresh join is
+      // exactly the recovery path. Without this, a socket that dropped and
+      // came back was never re-added to the interview room: the room went
+      // silent, question:delivered never arrived, and the submit button stayed
+      // disabled for the rest of the session while the server's grace timer
+      // eventually paused the interview under a "connected" user.
+      joinedRef.current = false;
+      if (!intentionalCloseRef.current) {
+        setState("disconnected");
+        // Hold the room busy across the transport gap. When the socket comes
+        // back the server redelivers the current question; if the candidate had
+        // just submitted, that echo arrives while the evaluation is still
+        // running, and the redelivery path in the store keeps the busy state
+        // until the real evaluation:feedback + question:delivered sequence
+        // completes. Without this the room looked ready while nothing was
+        // actually listening — the candidate could type and "send" into a
+        // socket that was down.
+        const status = store.getState().aiStatus;
+        if (status !== "idle") store.getState().setAiStatus("generating");
+      }
     });
     socket.io.on("reconnect_attempt", () => setState("reconnecting"));
     socket.io.on("reconnect", () => setState("connected"));

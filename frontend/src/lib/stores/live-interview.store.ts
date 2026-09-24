@@ -91,12 +91,20 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
     }),
   applyStateChange: (interviewStatus) => set({ interviewStatus }),
   applyQuestion: (currentQuestion, questionNumber, totalQuestions) =>
-    set({
-      currentQuestion,
-      questionNumber,
-      totalQuestions,
-      lastEvaluation: null,
-      aiStatus: "idle",
+    set((state) => {
+      // The server redelivers the *current* question on join (boot, resume and
+      // reconnect all funnel through generateAndDeliverQuestionService). That
+      // echo must not clear the busy state: mid-evaluation it is exactly what
+      // re-enabled the submit button while the server was still scoring the
+      // answer. Only a genuinely new question is the arrival the busy state
+      // waits for.
+      const isRedelivery = state.currentQuestion?.id === currentQuestion.id;
+      return {
+        currentQuestion,
+        questionNumber,
+        totalQuestions,
+        ...(isRedelivery ? {} : { lastEvaluation: null, aiStatus: "idle" as LiveAiStatus }),
+      };
     }),
   setAiStatus: (aiStatus) => set({ aiStatus }),
   applyEvaluation: (lastEvaluation) => set({ lastEvaluation }),

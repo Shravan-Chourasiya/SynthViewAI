@@ -551,5 +551,54 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       expect(state.aiStatus).toBe('idle');
       expect(state.error).toBeDefined();
     });
+
+    it('re-joins the room after a reconnect and holds busy through the redelivery', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-1', 1));
+      await settle();
+
+      act(() => {
+        result.current.submitAnswer('q-1', 'Answer submitted just before the drop.', 'TEXT');
+      });
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('evaluating');
+
+      // Transport drops mid-evaluation and comes back.
+      capturedSocket.simulateDisconnect();
+      await settle();
+
+      // Busy is held across the gap — the room must not look ready while the
+      // socket is down and the evaluation is still in flight server-side.
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('generating');
+      expect(useLiveInterviewStore.getState().connectionState).toBe('disconnected');
+
+      capturedSocket.simulateConnect();
+      await settle();
+
+      // The join must be re-emitted — the old guarded join never re-joined
+      // after a drop, so question:delivered could never arrive again and the
+      // submit button stayed disabled for the rest of the session.
+      const joinCount = capturedSocket.emittedEvents.filter(
+        (event: { event: string }) => event.event === SOCKET_EVENTS.client.join,
+      ).length;
+      expect(joinCount).toBeGreaterThanOrEqual(2);
+
+      // The server redelivers the *same* question on join; the echo must not
+      // clear the busy state because the evaluation is still running.
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-1', 1));
+      await settle();
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('generating');
+
+      // The real sequence then completes normally.
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.evaluationFeedback, evaluationFeedback('q-1', true));
+      await settle();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-2', 2));
+      await settle();
+
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('idle');
+      expect(useLiveInterviewStore.getState().currentQuestion?.id).toBe('q-2');
+    });
   });
 });
