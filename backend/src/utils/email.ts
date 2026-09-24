@@ -1,5 +1,5 @@
 import { StatusCodes } from "http-status-codes";
-import { AppError } from "./appError.js";
+import { AppError } from "./AppError.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
 import { logger } from "./logger.js";
 

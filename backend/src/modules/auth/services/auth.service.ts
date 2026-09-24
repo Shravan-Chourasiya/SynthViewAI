@@ -2,7 +2,7 @@ import { eq, and, ne } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { StatusCodes } from "http-status-codes";
 import bcrypt from "bcrypt";
-import { AppError } from "../../../utils/appError.js";
+import { AppError } from "../../../utils/AppError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import { getRandomOtp } from "../../../utils/email.js";
 import {

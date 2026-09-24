@@ -7,7 +7,7 @@ import { interviewAnswersTable } from "../schemas/answers.schema.js";
 import { interviewQuestionsTable } from "../schemas/question.schema.js";
 import { interviewResultsTable } from "../schemas/result.schema.js";
 import type { AuthenticatedRequest } from "../../../types/request.js";
-import { AppError } from "../../../utils/appError.js";
+import { AppError } from "../../../utils/AppError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import {
   ABANDONMENT_THRESHOLD_MS,

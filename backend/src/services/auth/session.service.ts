@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getPgDb } from "../../db/postgres.init.js";
 import { sessionsTable } from "../../modules/auth/schemas/session.schema.js";
 import { usersTable } from "../../modules/auth/schemas/user.schema.js";
-import { AppError } from "../../utils/appError.js";
+import { AppError } from "../../utils/AppError.js";
 import { ErrorCodes } from "../../constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
 import { z } from "zod";

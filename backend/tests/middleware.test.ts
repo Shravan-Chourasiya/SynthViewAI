@@ -9,7 +9,7 @@ import { StatusCodes } from "http-status-codes";
 import type { Server } from "http";
 import { errorHandler } from "../src/middlewares/errorHandler.middleware.js";
 import { requestIdMiddleware } from "../src/middlewares/requestId.middleware.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 
 interface TestServer {

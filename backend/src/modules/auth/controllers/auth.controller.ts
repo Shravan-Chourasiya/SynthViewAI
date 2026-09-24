@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { StatusCodes } from "http-status-codes";
-import { AppError } from "../../../utils/appError.js";
+import { AppError } from "../../../utils/AppError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import type { ValidatedRequest } from "../../../middlewares/zodValidator.middleware.js";
 import type { AuthenticatedRequest } from "../../../types/request.js";

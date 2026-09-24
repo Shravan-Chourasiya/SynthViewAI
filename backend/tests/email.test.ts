@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getRandomOtp, handlerNodeMailerError } from "../src/utils/email.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
 

@@ -9,7 +9,7 @@ import { refreshTokenService } from "../src/modules/auth/services/auth.service.j
 import { getPgDb } from "../src/db/postgres.init.js";  // Correct import path
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 
 // Mock dependencies
 vi.mock("../src/db/postgres.init.js", () => ({

@@ -2,7 +2,7 @@ import { type Request, type Response, type NextFunction } from "express";
 import { verifyToken } from "../utils/token.util.js";
 import { SessionService } from "../services/auth/session.service.js";
 import { COOKIE_NAMES } from "../constants/auth.constants.js";
-import { AppError } from "../utils/appError.js";
+import { AppError } from "../utils/AppError.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
 import type { AuthenticatedRequest } from "../types/request.js";

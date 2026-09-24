@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { AppError } from "../utils/appError.js";
+import { AppError } from "../utils/AppError.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
 import {

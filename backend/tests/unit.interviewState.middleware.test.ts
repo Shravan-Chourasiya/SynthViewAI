@@ -7,11 +7,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Request, Response, NextFunction } from "express";
 import { requireInterviewState } from "../src/modules/interview/middlewares/interviewState.middleware.js";
 import { redisClient } from "../src/config/redis.init.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { StatusCodes } from "http-status-codes";
 
 // Mock the AppError as a constructor
-vi.mock("../src/utils/appError.js", async (importOriginal) => {
+vi.mock("../src/utils/AppError.js", async (importOriginal) => {
   const actual = await importOriginal();
   class MockAppError extends Error {
     statusCode: number;

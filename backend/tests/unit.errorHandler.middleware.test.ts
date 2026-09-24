@@ -8,7 +8,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Request, Response, NextFunction } from "express";
 import { errorHandler } from "../src/middlewares/errorHandler.middleware.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
 

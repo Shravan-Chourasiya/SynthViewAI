@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { StatusCodes } from "http-status-codes";
 import getPgDb from "../../../db/postgres.init.js";
 import { logger } from "../../../utils/logger.js";
-import { AppError } from "../../../utils/appError.js";
+import { AppError } from "../../../utils/AppError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import { notificationsTable } from "../schemas/notification.schema.js";
 import type { notificationTypeEnum } from "../schemas/notification.schema.js";

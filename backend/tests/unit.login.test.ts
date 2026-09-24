@@ -8,7 +8,7 @@ import { Request, Response, NextFunction } from "express";
 import { loginController } from "../src/modules/auth/controllers/auth.controller.js";
 import { loginService } from "../src/modules/auth/services/auth.service.js";
 import { COOKIE_NAMES } from "../src/utils/token.util.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { StatusCodes } from "http-status-codes";
 
 // Mock the login service
@@ -35,7 +35,7 @@ vi.mock("../src/utils/token.util.js", async (importOriginal) => {
 });
 
 // Mock the AppError
-vi.mock("../src/utils/appError.js", async (importOriginal) => {
+vi.mock("../src/utils/AppError.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,

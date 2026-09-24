@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { setupTestEnvironment, resetDb, resetRedis } from "./helpers/containers.js";
 import { interviewService } from "../src/modules/interview/services/interview.service.js";
 import { InterviewStatus } from "../src/types/schemas.js";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 
 const { pool, redisClient } = await setupTestEnvironment();
 

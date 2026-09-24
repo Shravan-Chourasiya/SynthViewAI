@@ -43,6 +43,22 @@ services:
     # `NODE_ENV=production` at runtime only, but a service-defined value is not
     # subject to that restriction — so the flag removes the dependency on which
     # phase actually wins.
+    #
+    # Render does NOT install dependencies for a custom build command: the
+    # install has to be part of the command itself. A service whose Build Command
+    # is plain `npm run build` — one created from the Dashboard, or a Blueprint
+    # service that has not been synced since its Build Command was overridden —
+    # therefore runs tsc against an empty node_modules. That does not surface as
+    # "tsc: not found", because Render's native runtimes preinstall TypeScript
+    # (see the tools table in the native-runtimes docs), so tsc really does run
+    # and then dies on the first type library it cannot resolve. The entire
+    # failure is a single line with no hint of the missing install:
+    #
+    #     error TS2688: Cannot find type definition file for 'node'.
+    #
+    # A Dashboard Build Command wins over this file and only follows it on a
+    # Blueprint sync, so keep the two in sync. `scripts/verify-build-deps.mjs`
+    # (wired up as `prebuild`) now fails with the actionable message instead.
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     # `/health` is a flat 200 liveness response (backend/src/app.ts). The deeper

@@ -8,13 +8,14 @@
     "node": "^24.0.0"
   },
   "scripts": {
-    "postinstall": "node -e \"const fs=require('fs'); const p=JSON.parse(fs.readFileSync('./node_modules/@types/pg/package.json','utf8')); if(!p.exports['.']['types']){p.exports['.']['types']='./index.d.mts'; fs.writeFileSync('./node_modules/@types/pg/package.json',JSON.stringify(p,null,2));}\"",
+    "postinstall": "node -e \"const fs=require('fs'); const f='./node_modules/@types/pg/package.json'; if(!fs.existsSync(f)){console.warn('postinstall: @types/pg is not installed (devDependency); skipping the exports patch.'); process.exit(0);} const p=JSON.parse(fs.readFileSync(f,'utf8')); p.exports=p.exports||{}; p.exports['.']=p.exports['.']||{}; if(!p.exports['.'].types){p.exports['.'].types='./index.d.mts'; fs.writeFileSync(f,JSON.stringify(p,null,2));}\"",
     "db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
     "db:migrate": "tsx ./src/db/drizzle/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed:interviews": "tsx ./src/db/seeds/seed-interviews.ts",
     "dev": "tsx watch ./src/server.ts",
+    "prebuild": "node ./scripts/verify-build-deps.mjs",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",

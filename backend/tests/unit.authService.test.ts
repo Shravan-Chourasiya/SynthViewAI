@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { StatusCodes } from "http-status-codes";
-import { AppError } from "../src/utils/appError.js";
+import { AppError } from "../src/utils/AppError.js";
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────

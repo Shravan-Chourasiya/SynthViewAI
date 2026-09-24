@@ -5,7 +5,7 @@ import { logger } from "../utils/logger.js";
 import type { ErrorResponse } from "../types/response.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
 import type { StandardRequest } from "../types/request.js";
-import { AppError } from "../utils/appError.js";
+import { AppError } from "../utils/AppError.js";
 
 function getRoutePath(req: Request): string | undefined {
   const route = (req as { route?: { path?: string } }).route;

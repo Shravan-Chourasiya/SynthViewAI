@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import type * as z from "zod";
 import { StatusCodes } from "http-status-codes";
-import { AppError } from "../utils/appError.js";
+import { AppError } from "../utils/AppError.js";
 import { ErrorCodes } from "../constants/errorCodes.js";
 
 export interface ValidatedRequest<T> extends Request {

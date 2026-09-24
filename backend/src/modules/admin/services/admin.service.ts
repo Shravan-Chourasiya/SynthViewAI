@@ -19,7 +19,7 @@ import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
 import type { interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
 import { interviewsTable } from "../../interview/schemas/interview.schema.js";
 import { interviewResultsTable } from "../../interview/schemas/result.schema.js";
-import { AppError } from "../../../utils/appError.js";
+import { AppError } from "../../../utils/AppError.js";
 import { ErrorCodes } from "../../../constants/errorCodes.js";
 import {
   ROLE_MANAGEMENT_MIN_ROLE,
