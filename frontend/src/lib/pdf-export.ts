@@ -76,6 +76,44 @@ export function safeFilename(value: string) {
   return value.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'interview-report'
 }
 
+// ── Text encoding ───────────────────────────────────────────────────────────
+
+/**
+ * The built-in Helvetica that jsPDF draws with is a **single-byte** font: only
+ * code points U+0000–U+00FF survive `text()`. Anything above that is either
+ * silently dropped or re-encoded as UTF-16 — which is how an em dash in an AI
+ * sentence used to turn the rest of that line into NUL-interleaved garbage in
+ * the exported report.
+ *
+ * The evaluator emits typographic punctuation (curly quotes, en/em dashes,
+ * bullets, arrows) as a matter of course and candidates paste emoji, so rather
+ * than trusting every caller to avoid it, all drawn text is normalised here.
+ */
+const GLYPH_FALLBACKS: Array<[RegExp, string]> = [
+  [/[\u2018\u2019\u201A\u201B\u2032]/g, "'"],
+  [/[\u201C\u201D\u201E\u201F\u2033]/g, '"'],
+  [/[\u2012\u2013\u2014\u2015\u2212]/g, '-'],
+  [/[\u2022\u2023\u25CF\u25E6\u25AA\u2043]/g, '-'],
+  [/[\u2026]/g, '...'],
+  [/[\u2192\u21D2]/g, '->'],
+  [/[\u2190\u21D0]/g, '<-'],
+  [/[\u2265]/g, '>='],
+  [/[\u2264]/g, '<='],
+  [/[\u2713\u2714]/g, '+'],
+  [/[\u2717\u2718\u2716\u274C]/g, 'x'],
+  [/[\u00A0\u2007\u2009\u202F]/g, ' '],
+  [/[\u00AD\u200B\u200C\u200D\u2060\uFEFF]/g, ''],
+]
+
+/** Normalises text to the character range jsPDF's core fonts can actually render. */
+export function pdfSafe(value: string): string {
+  let out = String(value ?? '')
+  for (const [pattern, replacement] of GLYPH_FALLBACKS) out = out.replace(pattern, replacement)
+  // Whatever is still out of range (emoji, non-Latin scripts) would be dropped or
+  // corrupted, so it becomes one visible placeholder per code point instead.
+  return out.replace(/[^\u0000-\u00FF]/gu, '?')
+}
+
 // ── Measure-then-draw primitives ────────────────────────────────────────────
 // Every block advertises its exact height before it is drawn, which is what lets
 // `placeBlock` decide whether it still fits on the current page.
@@ -111,7 +149,7 @@ function createBuilder(documentTitle: string) {
     pdf.setFont('helvetica', 'normal')
     pdf.setFontSize(7.5)
     textColor(COLORS.muted)
-    pdf.text(documentTitle, PAGE.margin, FOOTER_Y)
+    pdf.text(pdfSafe(documentTitle), PAGE.margin, FOOTER_Y)
     pdf.text(`Page ${pageNumber}`, PAGE.width - PAGE.margin, FOOTER_Y, { align: 'right' })
   }
 
@@ -137,7 +175,7 @@ function createBuilder(documentTitle: string) {
     const lineHeight = mmPerLine(size)
     pdf.setFont('helvetica', options.bold ? 'bold' : 'normal')
     pdf.setFontSize(size)
-    const lines = pdf.splitTextToSize(text, CONTENT_WIDTH - indent) as string[]
+    const lines = pdf.splitTextToSize(pdfSafe(text), CONTENT_WIDTH - indent) as string[]
     return {
       height: lines.length * lineHeight + gapAfter,
       draw: () => {
@@ -168,11 +206,11 @@ function createBuilder(documentTitle: string) {
           pdf.setFont('helvetica', 'normal')
           pdf.setFontSize(8.5)
           textColor(COLORS.muted)
-          pdf.text(label, PAGE.margin, y + 3.6)
+          pdf.text(pdfSafe(label), PAGE.margin, y + 3.6)
           pdf.setFont('helvetica', 'bold')
           pdf.setFontSize(9.5)
           textColor(COLORS.ink)
-          const lines = pdf.splitTextToSize(value, CONTENT_WIDTH - 52) as string[]
+          const lines = pdf.splitTextToSize(pdfSafe(value), CONTENT_WIDTH - 52) as string[]
           pdf.text(lines, PAGE.margin + 52, y + 3.6)
           y += rowHeight * Math.max(1, lines.length)
         }
@@ -192,7 +230,7 @@ function createBuilder(documentTitle: string) {
           pdf.setFont('helvetica', 'normal')
           pdf.setFontSize(8.5)
           textColor(COLORS.muted)
-          pdf.text(item.label, PAGE.margin, y + 3.4)
+          pdf.text(pdfSafe(item.label), PAGE.margin, y + 3.4)
           pdf.setFont('helvetica', 'bold')
           textColor(COLORS.ink)
           pdf.text(String(item.value), PAGE.width - PAGE.margin, y + 3.4, { align: 'right' })
@@ -214,8 +252,8 @@ function createBuilder(documentTitle: string) {
   function listBlock(items: string[], options: { bullet?: string; size?: number; color?: Rgb } = {}): Block {
     const size = options.size ?? 9.5
     const lineHeight = mmPerLine(size)
-    const bullet = options.bullet ?? '•'
-    const prepared = items.map((item) => pdf.splitTextToSize(item, CONTENT_WIDTH - 6) as string[])
+    const bullet = pdfSafe(options.bullet ?? '-')
+    const prepared = items.map((item) => pdf.splitTextToSize(pdfSafe(item), CONTENT_WIDTH - 6) as string[])
     return {
       height: prepared.reduce((sum, lines) => sum + lines.length * lineHeight + 1.6, 0),
       draw: () => {
@@ -223,21 +261,26 @@ function createBuilder(documentTitle: string) {
         pdf.setFontSize(size)
         textColor(options.color ?? COLORS.ink)
         for (const lines of prepared) {
-          const startY = y
           for (let i = 0; i < lines.length; i += 1) {
             if (y + lineHeight > BOTTOM) addPage()
             if (i === 0) pdf.text(bullet, PAGE.margin, y + lineHeight * 0.72)
             pdf.text(lines[i]!, PAGE.margin + 5, y + lineHeight * 0.72)
             y += lineHeight
           }
-          y = Math.max(y, startY) + 1.6
+          // The gap goes *after* the item that was just drawn. Restoring to the
+          // item's start row (as an earlier version did) assumed the item never
+          // crossed a page boundary; when it did, the cursor was pulled back up to
+          // the previous page's coordinates and every later item was pushed onto a
+          // page of its own.
+          y += 1.6
         }
       },
     }
   }
 
   /** Small wrapped chips (score bands, difficulty steps, topics). */
-  function chipBlock(labels: string[], colorFor: (label: string) => Rgb): Block {
+  function chipBlock(rawLabels: string[], colorFor: (label: string) => Rgb): Block {
+    const labels = rawLabels.map(pdfSafe)
     const size = 8
     const chipHeight = 6
     const gap = 2
@@ -356,9 +399,13 @@ function createBuilder(documentTitle: string) {
     block.draw()
   }
 
-  function finish(filename: string) {
+  /**
+   * Closes the document and hands back the jsPDF instance. Callers save it; tests
+   * read its bytes, which is the only way to verify what the encoding produced.
+   */
+  function document() {
     drawFooter()
-    pdf.save(filename)
+    return pdf
   }
 
   return {
@@ -372,7 +419,7 @@ function createBuilder(documentTitle: string) {
     cardBlock,
     spacerBlock,
     scoreChipColor,
-    finish,
+    document,
   }
 }
 
@@ -505,7 +552,7 @@ function renderReport(builder: Builder, report: InterviewReport) {
   builder.placeBlock(
     builder.cardBlock(
       strengths.length
-        ? [builder.listBlock(strengths, { bullet: '✓', color: COLORS.strong })]
+        ? [builder.listBlock(strengths, { bullet: '+', color: COLORS.strong })]
         : [builder.textBlock('No strengths were recorded for this interview.', { color: COLORS.muted })],
       { title: 'Strengths' },
     ),
@@ -519,17 +566,19 @@ function renderReport(builder: Builder, report: InterviewReport) {
       { title: 'Areas to improve' },
     ),
   )
-  builder.placeBlock(builder.spacerBlock(3))
-  builder.placeBlock(
-    builder.cardBlock(
-      recommendations.length
-        ? recommendations.map((rec) =>
-            builder.textBlock(`${rec.gap} — ${rec.resource}`),
-          )
-        : [builder.textBlock('No recommended resources were recorded.', { color: COLORS.muted })],
-      { title: 'Recommended resources' },
-    ),
-  )
+  // Only rendered when the API actually supplied resources. The section used to
+  // print one line per weakness with identical boilerplate, which read as nine
+  // copies of the same sentence; an empty "nothing recorded" card is dead weight
+  // in a report, so the whole block is skipped instead.
+  if (recommendations.length) {
+    builder.placeBlock(builder.spacerBlock(3))
+    builder.placeBlock(
+      builder.cardBlock(
+        recommendations.map((rec) => builder.textBlock(`${rec.gap} - ${rec.resource}`)),
+        { title: 'Recommended resources' },
+      ),
+    )
+  }
 
   builder.placeBlock(builder.spacerBlock(4))
   builder.placeBlock(builder.headingBlock(`Question-level analysis (${questions.length})`, 12))
@@ -547,7 +596,7 @@ function renderReport(builder: Builder, report: InterviewReport) {
     if (question.evaluation.strengths.length) {
       parts.push(
         builder.textBlock('Strengths', { size: 8.5, bold: true, color: COLORS.strong }),
-        builder.listBlock(question.evaluation.strengths, { bullet: '✓', size: 9 }),
+        builder.listBlock(question.evaluation.strengths, { bullet: '+', size: 9 }),
       )
     }
     if (question.evaluation.weaknesses.length) {
@@ -587,6 +636,11 @@ function renderTimeline(builder: Builder, events: TimelineEvent[]) {
 
 /** Export for the tab the user currently has open. */
 export function downloadTabPdf(payload: ExportPayload): void {
+  buildTabPdf(payload).save(`${safeFilename(title(payload.interview))}-${payload.tab}.pdf`)
+}
+
+/** Builds the current tab's document without saving it. */
+export function buildTabPdf(payload: ExportPayload) {
   const { interview, tab, report, metrics, history } = payload
   const builder = createBuilder(`${title(interview)} — ${tab}`)
 
@@ -609,7 +663,7 @@ export function downloadTabPdf(payload: ExportPayload): void {
     renderTimeline(builder, history ?? [])
   }
 
-  builder.finish(`${safeFilename(title(interview))}-${tab}.pdf`)
+  return builder.document()
 }
 
 export interface FullReportInput {
@@ -620,10 +674,20 @@ export interface FullReportInput {
 }
 
 /** Export the full report: Overview + Metrics + Report + History. */
-export function downloadFullReportPdf({ interview, report, metrics, history }: FullReportInput): void {
+export function downloadFullReportPdf(input: FullReportInput): void {
+  buildFullReportPdf(input).save(
+    `${safeFilename(title(input.interview))}-full-report.pdf`,
+  )
+}
+
+/** Builds the full report document without saving it. */
+export function buildFullReportPdf({ interview, report, metrics, history }: FullReportInput) {
   const builder = createBuilder(`${title(interview)} — full report`)
 
-  renderOverview(builder, interview, metrics)
+  // The overview tab's export carries its own session summary; in the full report
+  // the Metrics section has the same three numbers plus the charts, so the summary
+  // is suppressed here rather than printed twice on page 1.
+  renderOverview(builder, interview, null)
   builder.placeBlock(builder.spacerBlock(6))
 
   if (metrics) {
@@ -636,5 +700,5 @@ export function downloadFullReportPdf({ interview, report, metrics, history }: F
 
   renderTimeline(builder, history)
 
-  builder.finish(`${safeFilename(title(interview))}-full-report.pdf`)
+  return builder.document()
 }

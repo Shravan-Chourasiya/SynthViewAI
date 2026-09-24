@@ -69,8 +69,10 @@ export function makeReport(overrides: Partial<InterviewReport> = {}): InterviewR
     strengths: ["Clear structure", "Good tradeoff reasoning"],
     weaknesses: ["Could go deeper on failure modes"],
     summary: "A solid interview with strong fundamentals and room to grow on depth.",
+    // Shape matches the `Recommendation` type the report page renders (`gap`/`resource`);
+    // the fixture previously used title/detail, which rendered as an empty chip.
     recommendations: [
-      { title: "Practise failure-mode reasoning", detail: "Walk through what breaks first." },
+      { gap: "Failure modes", resource: "Practise failure-mode reasoning: walk through what breaks first." },
     ],
     difficultyProgression: ["MEDIUM", "HARD"],
     questions: [

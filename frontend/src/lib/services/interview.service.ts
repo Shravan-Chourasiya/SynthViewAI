@@ -1,4 +1,4 @@
-import { httpGet, httpPatch, httpPost } from "../http";
+import { httpGet, httpPost } from "../http";
 import { ENDPOINTS } from "../constants/endpoints";
 import type {
   InterviewResponse,
@@ -137,7 +137,9 @@ export function shareInterviewReport(id: string): Promise<ShareLinkResponse> {
   return httpPost<ShareLinkResponse>(ENDPOINTS.interviews.share(id));
 }
 
-/** POST /interviews/:id/share/revoke — blacklists a previously issued token. */
+/** POST /interviews/:id/share/revoke — blacklists a previously issued token.
+ *  POST (not PATCH) is what the route registers; sending PATCH previously 404'd,
+ *  so "Revoke access" in the share dialog could never succeed. */
 export function revokeInterviewShare(id: string, token: string): Promise<void> {
-  return httpPatch<unknown>(ENDPOINTS.interviews.shareRevoke(id), { token }).then(() => undefined);
+  return httpPost<unknown>(ENDPOINTS.interviews.shareRevoke(id), { token }).then(() => undefined);
 }

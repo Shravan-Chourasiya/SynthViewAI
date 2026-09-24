@@ -61,6 +61,8 @@ type BackendReport = {
   strengths?: string[];
   weaknesses?: string[];
   difficultyProgression?: string[];
+  /** Not produced by the current report endpoint; carried for forward compatibility. */
+  recommendations?: InterviewReport["recommendations"];
 };
 
 type ReportHistory = {
@@ -124,7 +126,11 @@ function normalizeReport(data: BackendReport, history: ReportHistory | null): In
     strengths,
     weaknesses,
     summary: data.feedback || `This report is based on ${questions.length} evaluated answer${questions.length === 1 ? "" : "s"}.`,
-    recommendations: weaknesses.map((gap) => ({ gap, resource: "Review this area and practise a focused follow-up response." })),
+    // The report API has no recommendations concept, so this stays empty unless a
+    // future version starts sending one. It used to be derived from `weaknesses`
+    // with a fixed sentence, which only ever produced near-duplicate filler in the
+    // UI and one identical "Recommended resources" line per weakness in the PDF.
+    recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
     difficultyProgression: Array.isArray(data.difficultyProgression) ? data.difficultyProgression : [],
     questions,
   };

@@ -372,18 +372,20 @@ export function InterviewReportPage() {
           </section>
         </div>
 
-        {/* recommendations (FR-29) */}
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <BookOpen className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold">Recommended resources</h2>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              tied to observed gaps
-            </span>
-          </div>
-          <ul className="mt-3 flex flex-col divide-y divide-border">
-            {recommendations.length ? (
-              recommendations.map((r) => (
+        {/* recommendations — rendered only when the report actually carries them.
+            Nothing in the API produces this today, and a permanent "nothing was
+            recorded" card reads as a broken section rather than an empty one. */}
+        {recommendations.length ? (
+          <section className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <BookOpen className="size-4 text-primary" />
+              <h2 className="text-sm font-semibold">Recommended resources</h2>
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                tied to observed gaps
+              </span>
+            </div>
+            <ul className="mt-3 flex flex-col divide-y divide-border">
+              {recommendations.map((r) => (
                 <li
                   key={r.gap}
                   className="flex flex-col gap-1.5 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4"
@@ -395,14 +397,10 @@ export function InterviewReportPage() {
                     {r.resource}
                   </span>
                 </li>
-              ))
-            ) : (
-              <li className="py-3 text-sm text-muted-foreground first:pt-0">
-                No recommended resources were recorded for this interview.
-              </li>
-            )}
-          </ul>
-        </section>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         {/* activity history — same data the full export includes */}
         <details

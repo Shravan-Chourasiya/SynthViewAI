@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -30,7 +31,14 @@ export function Dialog({
 
   if (!open) return null
 
-  return (
+  // Portalled to <body> on purpose. A `fixed` overlay is positioned against the
+  // viewport only while no ancestor establishes a containing block — and an
+  // ancestor with a `transform` does exactly that, which any `animate-*` utility
+  // leaves behind permanently (the animation's fill mode keeps `translateY(0)`).
+  // Rendering the report page's Share dialog in place put the backdrop over the
+  // report and the panel thousands of pixels down the page, so the user saw a
+  // fogged screen and nothing else.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         aria-hidden="true"
@@ -47,7 +55,8 @@ export function Dialog({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
