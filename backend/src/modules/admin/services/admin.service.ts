@@ -371,7 +371,7 @@ export async function suspendUser(
   // failing email must not roll it back.
   const suspended = user[0];
   if (suspended) {
-    sendInBackground(() =>
+    sendInBackground("account suspended", () =>
       sendAccountSuspendedMail(suspended.email, {
         reason,
         suspendedAt: new Date(),

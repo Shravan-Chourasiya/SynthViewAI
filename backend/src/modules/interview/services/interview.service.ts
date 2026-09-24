@@ -740,7 +740,7 @@ export async function cancelInterviewService(authreq: AuthenticatedRequest, inte
   const updated = await transitionInterview(interviewId, interview.interviewStatus, "CANCELLED");
 
   // Confirmation is best-effort and must never fail the cancellation itself.
-  sendInBackground(async () => {
+  sendInBackground("interview cancelled", async () => {
     const email = await getUserEmailAddress(interview.userId);
     if (!email) return;
     await sendInterviewCancelledMail(email, {
@@ -1072,7 +1072,7 @@ export async function detectAndSendInterviewReminders(): Promise<{
     const { email, scheduledAt, title } = row;
     if (!email || !scheduledAt) continue;
     // Email path unchanged; the in-app notification is a parallel write.
-    sendInBackground(() =>
+    sendInBackground("interview reminder (24h)", () =>
       sendInterviewReminderMail(email, {
         interviewTitle: title,
         scheduledAt,
@@ -1095,7 +1095,7 @@ export async function detectAndSendInterviewReminders(): Promise<{
       .where(eq(interviewsTable.id, row.id));
     const { email, scheduledAt, title } = row;
     if (!email || !scheduledAt) continue;
-    sendInBackground(() =>
+    sendInBackground("interview reminder (1h)", () =>
       sendInterviewReminderMail(email, {
         interviewTitle: title,
         scheduledAt,
@@ -1155,7 +1155,7 @@ export async function detectAndSendPausedInterviewReminders(): Promise<{ reminde
       .where(eq(interviewsTable.id, row.id));
     const { email, lastActivityAt, title } = row;
     if (!email) continue;
-    sendInBackground(() =>
+    sendInBackground("interview paused reminder", () =>
       sendPausedInterviewReminderMail(email, {
         interviewTitle: title,
         pausedSince: lastActivityAt ?? now,

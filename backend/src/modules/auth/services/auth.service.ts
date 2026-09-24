@@ -130,7 +130,7 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
 
     // One-time welcome mail. Only the REGISTER purpose provisions an account,
     // so this fires exactly once, on the successful verification of it.
-    sendInBackground(() => sendWelcomeMail(input.email));
+    sendInBackground("welcome (verify-otp)", () => sendWelcomeMail(input.email));
     return;
   }
 
@@ -161,7 +161,7 @@ export async function verifyOtpService(input: VerifyOtpInput): Promise<void> {
   });
 
   // First-run account → the single welcome email.
-  sendInBackground(() => sendWelcomeMail(input.email, data.firstName));
+  sendInBackground("welcome (register)", () => sendWelcomeMail(input.email, data.firstName));
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ export async function loginService(
     .where(eq(usersTable.id, user.id));
 
   if (isNewDevice) {
-    sendInBackground(() =>
+    sendInBackground("new login alert", () =>
       sendNewLoginAlertMail(user.email, {
         deviceType: input.deviceType,
         ipAddress,
@@ -507,7 +507,7 @@ export async function deleteAccountService(
 
   // Deletion is soft (the address stays on record during the recovery window),
   // so this is sent while the email is still known and valid.
-  sendInBackground(() =>
+  sendInBackground("account deletion scheduled", () =>
     sendAccountDeletedMail(user.email, {
       deletedAt: now,
       recoveryWindowDays: Math.round(ACCOUNT_RECOVERY_WINDOW_MS / (24 * 60 * 60 * 1000)),
@@ -676,7 +676,7 @@ export async function updatePasswordService(input: UpdatePasswordInput): Promise
   ]);
 
   // Security-relevant, user-initiated change → confirm it in writing.
-  sendInBackground(() =>
+  sendInBackground("credential updated (password)", () =>
     sendCredentialUpdatedMail(input.email, { field: "password", changedAt: new Date() }),
   );
 
@@ -738,7 +738,7 @@ export async function emailUpdateOtpVerifyService(input: EmailUpdateOtpVerifyInp
   // The address only actually changes in this step (the earlier step merely
   // sends the OTP), so this is where a truthful "email updated" confirmation
   // goes — to the new address.
-  sendInBackground(() =>
+  sendInBackground("credential updated (email)", () =>
     sendCredentialUpdatedMail(result.newValue!, {
       field: "email",
       newEmail: result.newValue!,

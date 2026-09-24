@@ -300,6 +300,62 @@ export const getPausedInterviewReminderTemplate = (
   });
 };
 
+export interface ContactMessageDetails {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  submittedAt: Date;
+  /** Request context — kept for abuse triage of an unauthenticated endpoint. */
+  ipAddress: string;
+  userAgent: string;
+}
+
+/**
+ * Contact form → team inbox. Every user-supplied value goes through
+ * `escapeHtml` (the layout only escapes the values it interpolates itself), and
+ * the reply-to on the sent mail is the visitor, so support can answer directly.
+ */
+export const getContactMessageTemplate = (details: ContactMessageDetails): string => {
+  return renderEmailLayout({
+    subject: `New contact form message: ${details.subject}`,
+    heading: "New contact form message",
+    intro: `<strong>${escapeHtml(details.name)}</strong> sent a message through the SynthView AI contact form.`,
+    bodyHtml:
+      detailRows([
+        ["From", `${details.name} <${details.email}>`],
+        ["Topic", details.subject],
+        ["Received", formatWhen(details.submittedAt)],
+        ["IP address", details.ipAddress],
+        ["Browser", details.userAgent],
+      ]) +
+      `<p style="margin:16px 0 6px;font-size:13px;color:#6b7280;">Message</p>` +
+      `<blockquote style="margin:0;padding:12px 16px;border-left:3px solid #d1d5db;background:#f9fafb;font-size:14px;line-height:1.7;white-space:pre-wrap;">${escapeHtml(details.message)}</blockquote>`,
+    footnote: "Sent from the public contact form — replying to this email answers the visitor directly.",
+  });
+};
+
+export interface ContactAcknowledgementDetails {
+  name: string;
+  subject: string;
+}
+
+/** Contact form → visitor confirmation, so the sender knows the message landed. */
+export const getContactAcknowledgementTemplate = (
+  emailto: string,
+  details: ContactAcknowledgementDetails,
+): string => {
+  return renderEmailLayout({
+    subject: "We received your message",
+    heading: `Thanks for reaching out, ${details.name}`,
+    intro: `Hello <strong>${escapeHtml(emailto)}</strong>, your message reached the SynthView AI team and we will reply to this address within two business days.`,
+    bodyHtml:
+      detailRows([["Topic", details.subject]]) +
+      `<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:#4b5563;">If your question is about an existing account, reply with the email on that account so we can find it faster.</p>`,
+    footnote: "This is an automatic confirmation — you don't need to act on it.",
+  });
+};
+
 export const handlerNodeMailerError = (error: unknown): never => {
   // Pino serializes Error instances under the conventional `err` key. This
   // preserves the provider error/message for diagnostics without exposing it
