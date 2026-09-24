@@ -433,4 +433,123 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
     // This is handled in the useEffect condition: if (!interviewId || socketRef.current) return;
     expect(result.current.connectionState).toBeDefined(); // Should still have a valid state
   });
+
+  describe('busy state around answer submission', () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+
+    const evaluationFeedback = (questionId: string, shouldAdvance: boolean) => ({
+      interviewId: mockInterviewId,
+      questionId,
+      answerId: `answer-${questionId}`,
+      shouldAdvance,
+      score: 72,
+      correctness: 70,
+      relevance: 74,
+      clarity: 76,
+      technicalDepth: 68,
+      feedback: 'Solid answer with room to go deeper.',
+      strengths: ['Structure'],
+      weaknesses: ['Depth'],
+    });
+
+    const deliveredQuestion = (questionId: string, sequenceNumber: number) => ({
+      interviewId: mockInterviewId,
+      questionId,
+      sequenceNumber,
+      totalQuestions: 5,
+      questionType: 'TECHNICAL' as const,
+      questionTitle: 'Explain database indexing',
+      questionDescription: 'Cover the trade-offs.',
+      deliveredAt: new Date().toISOString(),
+      timeoutSeconds: 300,
+    });
+
+    it('stays busy after evaluation feedback until the next question is delivered', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-1', 1));
+      await settle();
+
+      act(() => {
+        result.current.submitAnswer('q-1', 'I would start from the requirements.', 'TEXT');
+      });
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('evaluating');
+
+      capturedSocket.simulateServerEvent(
+        SOCKET_EVENTS.server.evaluationFeedback,
+        evaluationFeedback('q-1', true),
+      );
+      await settle();
+
+      // The spinner/disabled state must survive the gap while the server
+      // generates the next question — this is the regression: the room used to
+      // drop to "idle" here, re-enabling the submit button ~2s before the
+      // question actually changed.
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('generating');
+      expect(
+        capturedSocket.emittedEvents.filter(
+          (event: { event: string }) => event.event === SOCKET_EVENTS.client.nextQuestion,
+        ),
+      ).toHaveLength(1);
+
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-2', 2));
+      await settle();
+
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('idle');
+      expect(useLiveInterviewStore.getState().currentQuestion?.id).toBe('q-2');
+    });
+
+    it('does not stay busy when the backend says there is no next question', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-9', 1));
+      await settle();
+
+      act(() => {
+        result.current.submitAnswer('q-9', 'Final answer for this interview.', 'TEXT');
+      });
+
+      capturedSocket.simulateServerEvent(
+        SOCKET_EVENTS.server.evaluationFeedback,
+        evaluationFeedback('q-9', false),
+      );
+      await settle();
+
+      // Nothing else will arrive to clear the state, so the hook must clear it.
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('idle');
+      expect(
+        capturedSocket.emittedEvents.filter(
+          (event: { event: string }) => event.event === SOCKET_EVENTS.client.nextQuestion,
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('clears the busy state on a websocket error so the candidate can retry', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, deliveredQuestion('q-3', 1));
+      await settle();
+
+      act(() => {
+        result.current.submitAnswer('q-3', 'Answer that will be rejected.', 'TEXT');
+      });
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('evaluating');
+
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.error, {
+        code: 'ANSWER_REJECTED',
+        message: 'rejected',
+      });
+      await settle();
+
+      const state = useLiveInterviewStore.getState();
+      expect(state.aiStatus).toBe('idle');
+      expect(state.error).toBeDefined();
+    });
+  });
 });

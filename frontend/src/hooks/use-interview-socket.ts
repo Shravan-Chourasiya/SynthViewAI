@@ -239,11 +239,22 @@ export function useInterviewSocket(
         if (duplicate) return;
         advancedEvaluationRef.current.add(payload.questionId);
         store.getState().applyEvaluation(evaluationFromPayload(payload));
-        store.getState().setAiStatus("idle");
         // Evaluation feedback is the canonical advancement signal. Keying by
         // question id makes duplicate websocket deliveries harmless.
         if (payload.shouldAdvance !== false) {
+          // Stay busy ("generating") until question:delivered arrives, which is
+          // what clears this status. Dropping to "idle" here re-enabled the
+          // submit button and hid the spinner while the server was still
+          // generating the next question — the client asked for it a moment ago
+          // and the answer only lands a couple of seconds later, so the room
+          // briefly looked ready and then the question swapped underneath the
+          // candidate.
+          store.getState().setAiStatus("generating");
           requestNextQuestion();
+        } else {
+          // The backend has already decided there is no next question; nothing
+          // will be delivered to clear the busy state, so clear it here.
+          store.getState().setAiStatus("idle");
         }
       },
     );
@@ -260,6 +271,10 @@ export function useInterviewSocket(
     );
     socket.on(SOCKET_EVENTS.server.error, (payload: WsErrorPayload) => {
       store.getState().setError(WS_ERROR_MESSAGES[payload.code]);
+      // A rejected answer or a failed question:next arrives as an error, and
+      // nothing else would clear the busy state — without this the submit button
+      // would stay disabled forever and the candidate could not retry.
+      store.getState().setAiStatus("idle");
       if (
         payload.code === "AUTH_UNAUTHORIZED" ||
         payload.code === "AUTH_SESSION_EXPIRED"

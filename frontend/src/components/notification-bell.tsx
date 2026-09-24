@@ -18,6 +18,10 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
   const [unread, setUnread] = useState(0)
+  // "Nothing to show" and "we could not load anything" are different states: a
+  // failing request used to render as "You're all caught up", which hides real
+  // breakage (a missing table, an expired session) behind a healthy-looking bell.
+  const [loadFailed, setLoadFailed] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -31,8 +35,11 @@ export function NotificationBell() {
       ])
       setItems(list.items)
       setUnread(unreadList.total)
+      setLoadFailed(false)
     } catch {
-      // The bell is a secondary element — fail silent, keep the last state.
+      // The bell is a secondary element — keep the last good state and retry on
+      // the next poll, but remember the failure so the panel can say so.
+      setLoadFailed(true)
     }
   }, [])
 
@@ -132,7 +139,7 @@ export function NotificationBell() {
           <div className="max-h-96 overflow-y-auto">
             {items.length === 0 ? (
               <p className="px-3.5 py-6 text-center text-sm text-muted-foreground">
-                You're all caught up.
+                {loadFailed ? "Couldn't load notifications. Retrying shortly." : "You're all caught up."}
               </p>
             ) : (
               <ul className="divide-y divide-border">
