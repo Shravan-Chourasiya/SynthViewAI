@@ -356,11 +356,20 @@ export const getContactAcknowledgementTemplate = (
   });
 };
 
-export const handlerNodeMailerError = (error: unknown): never => {
-  // Pino serializes Error instances under the conventional `err` key. This
-  // preserves the provider error/message for diagnostics without exposing it
-  // in the HTTP response.
-  logger.error({ err: error }, "Nodemailer error occurred");
+/**
+ * Turns a transport failure into the application's standard error.
+ *
+ * Pino serializes Error instances under the conventional `err` key, so the
+ * relay's reply code and message survive for diagnostics without ever reaching
+ * the HTTP response. `context` adds the safe metadata a log reader needs to tell
+ * one mail apart from another — the mail kind and the recipient's domain; no
+ * addresses, OTPs or credentials belong here.
+ */
+export const handleMailError = (
+  error: unknown,
+  context: { mail?: string; domain?: string } = {},
+): never => {
+  logger.error({ err: error, ...context }, "Email delivery failed");
   throw new AppError(
     "Failed to send email. Please try again later.",
     StatusCodes.INTERNAL_SERVER_ERROR,

@@ -121,9 +121,14 @@ export async function bootTestServer(options: BootOptions = {}): Promise<TestSer
     redisClient: containers.redis,
   }));
 
-  vi.doMock("../../backend/src/services/nodemailer.service.js", () => ({
+  vi.doMock("../../backend/src/services/mail.service.js", () => ({
     verifyMailTransporter: async () => true,
-    sendInBackground: (task: () => Promise<void>) => void task().catch(() => undefined),
+    // The signature has to match the real helper: callers pass
+    // `sendInBackground(label, task)`, so a one-argument mock receives the label
+    // as the task and every verify-otp request fails with "task is not a
+    // function".
+    sendInBackground: (_label: string, task: () => Promise<void>) =>
+      void task().catch(() => undefined),
     sendOtpMail: async (email: string, otp: string) => {
       otpInbox.push({ email, otp });
     },

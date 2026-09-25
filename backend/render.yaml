@@ -133,21 +133,29 @@ services:
       - key: COOKIE_DOMAIN
         sync: false
 
-      # ── Gmail OAuth2 (Nodemailer) ────────────────────────────────────────────
-      # All four of these are REQUIRED by env.schema.ts (only
-      # GMAIL_APP_PASSWORD is optional). Missing any one of them makes the
-      # process exit at boot with "Invalid environment variables", since OTP
-      # email is part of the registration flow.
-      - key: GMAIL_USER_EMAIL
+      # ── Email (Brevo SMTP relay) ─────────────────────────────────────────────
+      # Every one of these is REQUIRED by env.schema.ts. Missing any of them
+      # makes the process exit at boot with "Invalid environment variables",
+      # because OTP email is part of the registration flow — and the transport is
+      # verified at startup (see backend/src/services/mail.service.ts), so a
+      # revoked SMTP key shows up as a loud boot log rather than as silently
+      # undelivered OTPs.
+      #
+      # SMTP_HOST is the relay's hostname (smtp-relay.brevo.com).
+      - key: SMTP_HOST
         sync: false
-      - key: GMAIL_CLIENT_ID
+      # SMTP_PORT is omitted: schema default 587, i.e. STARTTLS. 465 (implicit
+      # TLS) also works — the client picks implicit TLS for that port.
+      - key: SMTP_USER
         sync: false
-      - key: GMAIL_CLIENT_SECRET
+      # The SMTP key, never the Brevo account password.
+      - key: SMTP_PASSWORD
         sync: false
-      - key: GMAIL_REFRESH_TOKEN
+      # Must be a sender (or on a domain) verified on the Brevo account, or the
+      # relay rejects every message.
+      - key: EMAIL_FROM
         sync: false
-      - key: GMAIL_APP_PASSWORD
-        sync: false
+      # EMAIL_FROM_NAME is omitted: schema default "SynthView AI".
 
       # ── AI Providers ─────────────────────────────────────────────────────────
       # Optional by schema: with neither key set the AI module falls back to a

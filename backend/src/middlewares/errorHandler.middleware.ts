@@ -31,10 +31,12 @@ export function toErrorLike(value: unknown): {
       return { name: "JWTNotBeforeError", message: value.message, stack: value.stack };
     }
 
-    // Nodemailer errors (often just Error with a code)
+    // Errors that carry a string `code` — SMTP replies and socket/TLS failures
+    // from the mail transport, plus Postgres and Redis errors. The code is the
+    // useful part of the log line, so surface it in the name.
     if ("code" in value && typeof value.code === "string") {
       return {
-        name: `NodemailerError:${value.code}`,
+        name: `TransportError:${value.code}`,
         message: value.message,
         stack: value.stack,
       };

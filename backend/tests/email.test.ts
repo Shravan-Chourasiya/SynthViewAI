@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getRandomOtp, handlerNodeMailerError } from "../src/utils/email.js";
+import { getRandomOtp, handleMailError } from "../src/utils/email.js";
 import { AppError } from "../src/utils/AppError.js";
 import { ErrorCodes } from "../src/constants/errorCodes.js";
 import { StatusCodes } from "http-status-codes";
@@ -41,14 +41,14 @@ describe("getRandomOtp", () => {
   });
 });
 
-describe("handlerNodeMailerError", () => {
+describe("handleMailError", () => {
   it("throws an AppError", () => {
-    expect(() => handlerNodeMailerError(new Error("smtp failure"))).toThrow(AppError);
+    expect(() => handleMailError(new Error("smtp failure"))).toThrow(AppError);
   });
 
   it("throws with INTERNAL_SERVER_ERROR code", () => {
     try {
-      handlerNodeMailerError(new Error("smtp failure"));
+      handleMailError(new Error("smtp failure"));
     } catch (err) {
       expect(err).toBeInstanceOf(AppError);
       expect((err as AppError).errorCode).toBe(ErrorCodes.INTERNAL_SERVER_ERROR);
@@ -57,7 +57,7 @@ describe("handlerNodeMailerError", () => {
 
   it("throws with 500 status code", () => {
     try {
-      handlerNodeMailerError(new Error("smtp failure"));
+      handleMailError(new Error("smtp failure"));
     } catch (err) {
       expect((err as AppError).statusCode).toBe(StatusCodes.INTERNAL_SERVER_ERROR);
     }
@@ -65,9 +65,24 @@ describe("handlerNodeMailerError", () => {
 
   it("marks the error as operational", () => {
     try {
-      handlerNodeMailerError(new Error("smtp failure"));
+      handleMailError(new Error("smtp failure"));
     } catch (err) {
       expect((err as AppError).isOperational).toBe(true);
     }
+  });
+
+  it("never puts the transport's own message in the client-facing error", () => {
+    try {
+      handleMailError(new Error("535 5.7.8 Authentication failed for user brevo-smtp-user"));
+    } catch (err) {
+      expect((err as AppError).message).toBe("Failed to send email. Please try again later.");
+      expect((err as AppError).message).not.toContain("535");
+    }
+  });
+
+  it("accepts safe log context without needing it", () => {
+    expect(() => handleMailError(new Error("smtp failure"), { mail: "otp", domain: "ispmail.dev" })).toThrow(
+      AppError,
+    );
   });
 });

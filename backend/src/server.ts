@@ -7,7 +7,7 @@ import { env } from "./config/env.js";
 import { logger } from "./utils/logger.js";
 import app from "./app.js";
 import { testPgConnection } from "./db/postgres.init.js";
-import { verifyMailTransporter } from "./services/nodemailer.service.js";
+import { verifyMailTransporter } from "./services/mail.service.js";
 import { attachSocketServer } from "./websocket/socket.server.js";
 import { createServer } from "http";
 

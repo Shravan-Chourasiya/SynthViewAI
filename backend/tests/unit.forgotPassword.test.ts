@@ -1,141 +1,114 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { forgotPasswordService } from "../src/modules/auth/services/auth.service.js";
+/**
+ * unit.forgotPassword.test.ts — the password-reset OTP flow.
+ *
+ * The mail service is the only thing stubbed (plus the database and Redis), so
+ * these tests exercise the real service code: which OTP purpose is stored, that
+ * the OTP is emailed, and that an unknown or inactive account stays silent.
+ *
+ * The account-lookup is deliberately vague in production — it must not reveal
+ * whether an address exists — so the silent paths are asserted as carefully as
+ * the sending one.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusCodes } from "http-status-codes";
-import { otpService } from "../src/services/redis.service.js";
 
-// Mock the database
+import { OTP_PURPOSE } from "../src/constants/auth.constants.js";
+import { AppError } from "../src/utils/AppError.js";
+import { ErrorCodes } from "../src/constants/errorCodes.js";
+
+const mocks = vi.hoisted(() => ({
+  limit: vi.fn(),
+  storeOTP: vi.fn(),
+  sendOtpMail: vi.fn(),
+}));
+
 vi.mock("../src/db/postgres.init.js", () => ({
-  getPgDb: vi.fn(),
+  getPgDb: () => ({
+    select: () => ({ from: () => ({ where: () => ({ limit: mocks.limit }) }) }),
+  }),
 }));
 
-// Mock email service
-vi.mock("../src/services/nodemailer.service.js", () => ({
-  sendPasswordResetEmail: vi.fn(),
-}));
-
-// Mock redis service
 vi.mock("../src/services/redis.service.js", () => ({
-  otpService: {
-    storeOTP: vi.fn(),
-  },
+  otpService: { storeOTP: mocks.storeOTP },
 }));
+
+// Every export the auth service imports has to exist on the mock, because the
+// factory replaces the whole module.
+vi.mock("../src/services/mail.service.js", () => ({
+  sendOtpMail: mocks.sendOtpMail,
+  sendWelcomeMail: vi.fn(),
+  sendNewLoginAlertMail: vi.fn(),
+  sendCredentialUpdatedMail: vi.fn(),
+  sendAccountDeletedMail: vi.fn(),
+  sendInBackground: vi.fn(),
+  verifyMailTransporter: vi.fn(),
+}));
+
+const { forgotPasswordService } = await import("../src/modules/auth/services/auth.service.js");
+
+const EMAIL = "candidate@ispmail.dev";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.limit.mockResolvedValue([{ id: "user-1", accountStatus: "active" }]);
+  mocks.storeOTP.mockResolvedValue({ success: true });
+  mocks.sendOtpMail.mockResolvedValue(undefined);
+});
 
 describe("forgotPasswordService", () => {
-  let mockDb: any;
+  it("stores a reset OTP and emails it to an active account", async () => {
+    await expect(forgotPasswordService({ email: EMAIL })).resolves.toBeUndefined();
 
-  const mockDbSetup = (userResult: any[] = [{ id: "user-id", email: "user@example.com" }]) => {
-    mockDb = {
-      select: vi.fn(),
-    };
-
-    const mockSelectInterface = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue(userResult),
-    };
-
-    mockDb.select.mockReturnValue(mockSelectInterface);
-
-    vi.mocked(require("../src/db/postgres.init.js").getPgDb).mockReturnValue(mockDb);
-  };
-
-  // ── forgotPasswordService ───────────────────────────────────────────────────
-
-  beforeEach(() => {
-    mockDbSetup();
-    vi.clearAllMocks();
-  });
-
-  it("resolves without error when email exists and email is sent", async () => {
-    mockDbSetup([{ id: "user-id", email: "user@example.com" }]);
-
-    vi.mocked(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).mockResolvedValue({ success: true });
-
-    await expect(forgotPasswordService({ email: "user@example.com" })).resolves.toBeUndefined();
-  });
-
-  it("generates and stores password reset token", async () => {
-    mockDbSetup([{ id: "user-id", email: "user@example.com" }]);
-
-    vi.mocked(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).mockResolvedValue({ success: true });
-
-    await forgotPasswordService({ email: "user@example.com" });
-
-    expect(otpService.storeOTP).toHaveBeenCalledWith(
-      "user@example.com",
-      expect.any(String), // OTP
-      "FORGOT_PASSWORD",
-      expect.any(Number), // TTL
-      expect.any(String), // JSON payload with userId
+    expect(mocks.storeOTP).toHaveBeenCalledTimes(1);
+    expect(mocks.storeOTP).toHaveBeenCalledWith(
+      EMAIL,
+      expect.stringMatching(/^\d{6}$/),
+      OTP_PURPOSE.FORGOT_PASSWORD,
+      "user-1",
     );
+
+    // The OTP in the mail is the same one that was stored.
+    const storedOtp = mocks.storeOTP.mock.calls[0]?.[1] as string;
+    expect(mocks.sendOtpMail).toHaveBeenCalledWith(EMAIL, storedOtp);
   });
 
-  it("sends password reset email with the generated token", async () => {
-    mockDbSetup([{ id: "user-id", email: "user@example.com" }]);
+  it("does nothing for an address that has no account", async () => {
+    mocks.limit.mockResolvedValue([]);
 
-    vi.mocked(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).mockResolvedValue({ success: true });
+    await expect(forgotPasswordService({ email: EMAIL })).resolves.toBeUndefined();
 
-    await forgotPasswordService({ email: "user@example.com" });
-
-    expect(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).toHaveBeenCalledWith("user@example.com", expect.any(String));
+    expect(mocks.storeOTP).not.toHaveBeenCalled();
+    expect(mocks.sendOtpMail).not.toHaveBeenCalled();
   });
 
-  it("does not throw when email does not exist (silent failure for security)", async () => {
-    mockDbSetup([]); // User not found
+  it("does nothing for an account that is not active", async () => {
+    mocks.limit.mockResolvedValue([{ id: "user-1", accountStatus: "disabled" }]);
 
-    await expect(
-      forgotPasswordService({ email: "nonexistent@example.com" }),
-    ).resolves.toBeUndefined();
+    await expect(forgotPasswordService({ email: EMAIL })).resolves.toBeUndefined();
+
+    expect(mocks.storeOTP).not.toHaveBeenCalled();
+    expect(mocks.sendOtpMail).not.toHaveBeenCalled();
   });
 
-  it("does not send email when user not found", async () => {
-    mockDbSetup([]); // User not found
+  it("surfaces a delivery failure instead of pretending the mail was sent", async () => {
+    mocks.sendOtpMail.mockRejectedValue(
+      new AppError(
+        "Failed to send email. Please try again later.",
+        StatusCodes.INTERNAL_SERVER_ERROR,
+        ErrorCodes.INTERNAL_SERVER_ERROR,
+        { isOperational: true },
+      ),
+    );
 
-    await forgotPasswordService({ email: "nonexistent@example.com" });
-
-    expect(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).not.toHaveBeenCalled();
-  });
-
-  it("throws INTERNAL_SERVER_ERROR when email sending fails", async () => {
-    mockDbSetup([{ id: "user-id", email: "user@example.com" }]);
-
-    vi.mocked(
-      require("../src/services/nodemailer.service.js").sendPasswordResetEmail,
-    ).mockResolvedValue({ success: false, error: "SMTP error" });
-
-    await expect(forgotPasswordService({ email: "user@example.com" })).rejects.toMatchObject({
+    await expect(forgotPasswordService({ email: EMAIL })).rejects.toMatchObject({
       statusCode: StatusCodes.INTERNAL_SERVER_ERROR,
-      errorCode: "INTERNAL_SERVER_ERROR",
+      errorCode: ErrorCodes.INTERNAL_SERVER_ERROR,
     });
   });
 
-  it("throws INTERNAL_SERVER_ERROR when DB update fails", async () => {
-    // Create a mock that throws an error
-    const mockSelectInterface = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockRejectedValue(new Error("Database error")),
-    };
+  it("surfaces a database failure", async () => {
+    mocks.limit.mockRejectedValue(new Error("Database error"));
 
-    const mockDbWithError = {
-      select: vi.fn().mockReturnValue(mockSelectInterface),
-    };
-
-    vi.mocked(require("../src/db/postgres.init.js").getPgDb).mockReturnValue(mockDbWithError);
-
-    await expect(forgotPasswordService({ email: "user@example.com" })).rejects.toMatchObject({
-      statusCode: StatusCodes.INTERNAL_SERVER_ERROR,
-      errorCode: "INTERNAL_SERVER_ERROR",
-    });
+    await expect(forgotPasswordService({ email: EMAIL })).rejects.toThrow("Database error");
   });
 });

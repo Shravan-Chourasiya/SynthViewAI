@@ -9,8 +9,12 @@ vi.stubEnv("POSTGRES_URI", "postgresql://test:test@localhost:5432/test");
 vi.stubEnv("REDIS_URI", "redis://localhost:6379");
 vi.stubEnv("JWT_SECRET", "a".repeat(64));
 vi.stubEnv("API_VERSION", "1");
-vi.stubEnv("GMAIL_USER_EMAIL", "test@test.com");
-vi.stubEnv("GMAIL_CLIENT_ID", "test-client-id");
-vi.stubEnv("GMAIL_CLIENT_SECRET", "test-client-secret");
-vi.stubEnv("GMAIL_REFRESH_TOKEN", "test-refresh-token");
+// Email (Brevo SMTP relay). Stub values only — never real credentials. The
+// transport itself is mocked in every suite that would otherwise send mail, so
+// these exist purely to satisfy env.schema.ts.
+vi.stubEnv("SMTP_HOST", "smtp-relay.brevo.com");
+vi.stubEnv("SMTP_PORT", "587");
+vi.stubEnv("SMTP_USER", "test-smtp-user@test.com");
+vi.stubEnv("SMTP_PASSWORD", "test-smtp-key");
+vi.stubEnv("EMAIL_FROM", "no-reply@test.com");
 vi.stubEnv("REDIS_HOST", "localhost");

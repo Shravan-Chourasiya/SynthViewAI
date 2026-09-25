@@ -33,7 +33,7 @@ import { randomUUID } from "crypto";
 import {
   sendAccountSuspendedMail,
   sendInBackground,
-} from "../../../services/nodemailer.service.js";
+} from "../../../services/mail.service.js";
 
 /**
  * Escapes `%`, `_` and `\` so a user's search text is matched literally

@@ -15,11 +15,18 @@ const envSchema = z.object({
     .pipe(z.array(z.string().url())),
   COOKIE_DOMAIN: z.string().optional(),
   API_VERSION: z.string(),
-  GMAIL_USER_EMAIL: z.string().email(),
-  GMAIL_CLIENT_ID: z.string(),
-  GMAIL_CLIENT_SECRET: z.string(),
-  GMAIL_REFRESH_TOKEN: z.string(),
-  GMAIL_APP_PASSWORD: z.string().min(1).optional(),
+  // ── Email (Brevo SMTP relay) ────────────────────────────────────────────────
+  // Every value is required. Registration, OTP verification, password reset and
+  // email change all depend on mail being deliverable, so a missing or malformed
+  // value has to stop the process at boot instead of degrading into a platform
+  // where sign-up silently cannot complete.
+  SMTP_HOST: z.string().min(1),
+  SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
+  SMTP_USER: z.string().min(1),
+  SMTP_PASSWORD: z.string().min(1),
+  // Must be a sender (or domain) verified on the Brevo account.
+  EMAIL_FROM: z.string().email(),
+  EMAIL_FROM_NAME: z.string().min(1).default("SynthView AI"),
   REDIS_HOST: z.string(),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional(),

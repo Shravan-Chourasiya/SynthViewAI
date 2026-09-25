@@ -24,10 +24,9 @@ describe("Secrets Management in Test Setup", () => {
     expect(process.env.JWT_SECRET).toBeDefined();
     expect(process.env.JWT_SECRET).toMatch(/^a{64}$/); // Dummy value used in setup.ts
     
-    expect(process.env.GMAIL_USER_EMAIL).toBe("test@test.com");
-    expect(process.env.GMAIL_CLIENT_ID).toBe("test-client-id");
-    expect(process.env.GMAIL_CLIENT_SECRET).toBe("test-client-secret");
-    expect(process.env.GMAIL_REFRESH_TOKEN).toBe("test-refresh-token");
+    expect(process.env.SMTP_USER).toBe("test-smtp-user@test.com");
+    expect(process.env.SMTP_PASSWORD).toBe("test-smtp-key");
+    expect(process.env.EMAIL_FROM).toBe("no-reply@test.com");
   });
 
   it("should validate that dummy secrets pass environment validation", () => {
@@ -37,10 +36,10 @@ describe("Secrets Management in Test Setup", () => {
       JWT_SECRET: z.string().min(32),
       POSTGRES_URI: z.string().url(),
       REDIS_URI: z.string().url(),
-      GMAIL_USER_EMAIL: z.string().optional(),
-      GMAIL_CLIENT_ID: z.string().optional(),
-      GMAIL_CLIENT_SECRET: z.string().optional(),
-      GMAIL_REFRESH_TOKEN: z.string().optional(),
+      SMTP_HOST: z.string().optional(),
+      SMTP_USER: z.string().optional(),
+      SMTP_PASSWORD: z.string().optional(),
+      EMAIL_FROM: z.string().optional(),
       // Add other required fields
       API_VERSION: z.string(),
       CORS_ORIGIN: z.string().url().optional(),
@@ -52,10 +51,10 @@ describe("Secrets Management in Test Setup", () => {
       JWT_SECRET: "a".repeat(64), // Dummy value from setup.ts
       POSTGRES_URI: "postgresql://test:test@localhost:5432/test",
       REDIS_URI: "redis://localhost:6379",
-      GMAIL_USER_EMAIL: "test@test.com",
-      GMAIL_CLIENT_ID: "test-client-id",
-      GMAIL_CLIENT_SECRET: "test-client-secret",
-      GMAIL_REFRESH_TOKEN: "test-refresh-token",
+      SMTP_HOST: "smtp-relay.brevo.com",
+      SMTP_USER: "test-smtp-user@test.com",
+      SMTP_PASSWORD: "test-smtp-key",
+      EMAIL_FROM: "no-reply@test.com",
       API_VERSION: "1",
     };
 
@@ -100,14 +99,14 @@ describe("Secrets Management in Test Setup", () => {
       JWT_SECRET: "a".repeat(64),
       POSTGRES_URI: "postgresql://test:test@localhost:5432/test",
       REDIS_URI: "redis://localhost:6379",
-      GMAIL_USER_EMAIL: "test@test.com",
-      GMAIL_CLIENT_ID: "test-client-id",
-      GMAIL_CLIENT_SECRET: "test-client-secret",
-      GMAIL_REFRESH_TOKEN: "test-refresh-token",
+      SMTP_HOST: "smtp-relay.brevo.com",
+      SMTP_USER: "test-smtp-user@test.com",
+      SMTP_PASSWORD: "test-smtp-key",
+      EMAIL_FROM: "no-reply@test.com",
     };
 
     // This should not cause any secrets to leak
     expect(mixedEnv.JWT_SECRET).toBe("a".repeat(64));
-    expect(mixedEnv.GMAIL_CLIENT_ID).toBe("test-client-id");
+    expect(mixedEnv.SMTP_USER).toBe("test-smtp-user@test.com");
   });
 });

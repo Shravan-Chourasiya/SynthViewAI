@@ -3,7 +3,7 @@ import {
   sendContactAcknowledgementMail,
   sendContactMessageMail,
   sendInBackground,
-} from "../../../services/nodemailer.service.js";
+} from "../../../services/mail.service.js";
 import type { ContactSubmission } from "../zodschemas/contact.zschema.js";
 
 export interface ContactRequestContext {
@@ -17,8 +17,8 @@ export interface ContactRequestContext {
  *
  * The name, email and subject end up in mail *headers*, where an unescaped
  * newline (or any other control character) would let a visitor append their own
- * headers — e.g. a second `To:` — so this runs before anything reaches
- * nodemailer. Done with a character scan rather than a regex so the intent is
+ * headers — e.g. a second `To:` — so this runs before anything reaches the mail
+ * transport. Done with a character scan rather than a regex so the intent is
  * explicit and eslint's `no-control-regex` stays happy.
  */
 function stripControlCharacters(value: string, keepLineBreaks = false): string {

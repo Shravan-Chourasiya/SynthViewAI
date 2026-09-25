@@ -6,7 +6,7 @@
  * proceeding. A failure at step N stops the test immediately (fail-fast).
  *
  * Email verification (OTP) step: The OTP is intercepted by mocking
- * nodemailer and redis.service so we can capture and replay the OTP
+ * mail service and redis.service so we can capture and replay the OTP
  * without a real mail server. This exercises the real OTP code path.
  *
  * Requires: Docker running, @testcontainers/* installed.
@@ -47,12 +47,24 @@ beforeAll(async () => {
     },
   }));
 
-  // Intercept nodemailer to capture the OTP without sending real email
-  vi.doMock("../src/services/nodemailer.service.js", () => ({
-    sendOtpMail: vi.fn().mockImplementation((_email: string, otp: string) => {
+  // Intercept the mail service so the real OTP is captured instead of sent. The
+  // factory covers every export the app imports at load time.
+  vi.doMock("../src/services/mail.service.js", () => ({
+    verifyMailTransporter: async () => true,
+    // Signature matches the real helper: callers pass (label, task).
+    sendInBackground: (_label: string, task: () => Promise<void>) =>
+      void task().catch(() => undefined),
+    sendOtpMail: async (_email: string, otp: string) => {
       capturedOtp = otp;
-      return Promise.resolve();
-    }),
+    },
+    sendWelcomeMail: async () => undefined,
+    sendNewLoginAlertMail: async () => undefined,
+    sendCredentialUpdatedMail: async () => undefined,
+    sendAccountSuspendedMail: async () => undefined,
+    sendAccountDeletedMail: async () => undefined,
+    sendInterviewReminderMail: async () => undefined,
+    sendInterviewCancelledMail: async () => undefined,
+    sendPausedInterviewReminderMail: async () => undefined,
   }));
 
   const { default: app } = await import("../src/app.js");

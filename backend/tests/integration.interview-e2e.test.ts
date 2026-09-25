@@ -6,7 +6,7 @@
  *   end the interview → fetch history + report.
  *
  * Runs against real Postgres + Redis testcontainers and a real Socket.IO
- * server, with nodemailer mocked to capture the OTP and the AI provider chain
+ * server, with the mail service mocked to capture the OTP and the AI provider chain
  * mocked so no LLM call is made. Asserts on both the persisted DB state and the
  * WebSocket event sequence observed by the client.
  */
@@ -82,12 +82,24 @@ beforeAll(async () => {
     },
   }));
 
-  // Intercept nodemailer so the real OTP is captured, not emailed.
-  vi.doMock("../src/services/nodemailer.service.js", () => ({
-    sendOtpMail: vi.fn().mockImplementation((_email: string, otp: string) => {
+  // Intercept the mail service so the real OTP is captured, not emailed.
+  // The factory covers every export the app imports at load time.
+  vi.doMock("../src/services/mail.service.js", () => ({
+    verifyMailTransporter: async () => true,
+    // Signature matches the real helper: callers pass (label, task).
+    sendInBackground: (_label: string, task: () => Promise<void>) =>
+      void task().catch(() => undefined),
+    sendOtpMail: async (_email: string, otp: string) => {
       capturedOtp = otp;
-      return Promise.resolve();
-    }),
+    },
+    sendWelcomeMail: async () => undefined,
+    sendNewLoginAlertMail: async () => undefined,
+    sendCredentialUpdatedMail: async () => undefined,
+    sendAccountSuspendedMail: async () => undefined,
+    sendAccountDeletedMail: async () => undefined,
+    sendInterviewReminderMail: async () => undefined,
+    sendInterviewCancelledMail: async () => undefined,
+    sendPausedInterviewReminderMail: async () => undefined,
   }));
 
   const [{ default: app }, { default: supertest }, socketServer] = await Promise.all([

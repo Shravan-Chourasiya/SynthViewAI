@@ -12,7 +12,7 @@ import {
   sendNewLoginAlertMail,
   sendOtpMail,
   sendWelcomeMail,
-} from "../../../services/nodemailer.service.js";
+} from "../../../services/mail.service.js";
 import { otpService } from "../../../services/redis.service.js";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable } from "../schemas/user.schema.js";
