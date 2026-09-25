@@ -10,10 +10,13 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
+import { PageHeader } from '@/components/page-header'
 import { Sparkline } from '@/components/charts'
 import { StatusBadge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Panel, PanelHeader, Meter } from '@/components/ui/panel'
+import { CountUp } from '@/components/ui/count-up'
 import { DifficultyBadge, RowAction, TypeBadge } from '@/components/interview-ui'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { useInterviewListStore } from '@/lib/stores/interview-list.store'
@@ -102,30 +105,20 @@ function DashboardContent({
 }) {
   return (
     <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-6">
-      {/* greeting header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            Candidate dashboard
-          </p>
-          <h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">
-            {greeting}, {firstName}.
-          </h1>
-          <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
-            Every answer changes what the interviewer asks next. Pick up where
-            you left off, or start a fresh adaptive session.
-          </p>
-        </div>
-        {data.total > 0 ? (
-          <Link
-            to="/interviews/new"
-            className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}
-          >
-            <Plus className="size-4" />
-            Start New Interview
-          </Link>
-        ) : null}
-      </div>
+      {/* greeting header — PageHeader is the app-wide heading block; the
+          per-page mono eyebrow is gone (one of two competing header systems) */}
+      <PageHeader
+        title={`${greeting}, ${firstName}.`}
+        lede="Every answer changes what the interviewer asks next. Pick up where you left off, or start a fresh adaptive session."
+        actions={
+          data?.total ? (
+            <Link to="/interviews/new" className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}>
+              <Plus className="size-4" />
+              Start New Interview
+            </Link>
+          ) : null
+        }
+      />
 
       {data.total === 0 ? (
         <EmptyDashboard />
@@ -133,28 +126,29 @@ function DashboardContent({
         <>
           {data.resumable ? <ResumeBanner interview={data.resumable} /> : null}
 
-          {/* stats */}
+          {/* stats — one entrance choreography: cards rise in sequence, the two
+              score numbers count up, the icons' meters fill */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard icon={ClipboardList} label="Total interviews" value={String(data.total)} />
-            <StatCard icon={Award} label="Completed" value={String(data.completed)} />
-            <StatCard icon={BarChart3} label="Average score" value={data.average ? String(data.average) : '—'} />
-            <StatCard icon={Sparkles} label="Best score" value={data.best ? String(data.best) : '—'} />
+            <StatCard index={0} icon={ClipboardList} label="Total interviews" value={String(data.total)} />
+            <StatCard index={1} icon={Award} label="Completed" value={String(data.completed)} />
+            <StatCard index={2} icon={BarChart3} label="Average score" value={data.average ? String(data.average) : null} />
+            <StatCard index={3} icon={Sparkles} label="Best score" value={data.best ? String(data.best) : null} />
           </div>
 
           {/* trend + categories */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-2xl border border-border bg-card p-6">
+            <Panel>
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold">Score trend</h2>
-                <span className="font-mono text-[11px] text-muted-foreground">
+                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
                   Last {data.trend.length} completed
                 </span>
               </div>
               <div className="mt-4">
                 <Sparkline values={data.trend} height={80} />
               </div>
-            </section>
-            <section className="rounded-2xl border border-border bg-card p-6">
+            </Panel>
+            <Panel>
               <h2 className="text-sm font-semibold">Category performance</h2>
               <div className="mt-4 flex flex-col gap-4">
                 {data.categories.map((c) => (
@@ -165,34 +159,31 @@ function DashboardContent({
                         {c.value}%
                       </span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${c.value}%` }}
-                      />
-                    </div>
+                    {/* Meter unifies bar motion with analytics (which already eased)
+                        and with the live-room progress bar; dashboard bars previously snapped. */}
+                    <Meter value={c.value} />
                   </div>
                 ))}
               </div>
-            </section>
+            </Panel>
           </div>
 
           {/* recent interviews */}
-          <section className="overflow-hidden rounded-2xl border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-5 py-3">
-              <h2 className="text-sm font-semibold">Recent interviews</h2>
-              <Link
-                to="/interviews"
-                className="font-mono text-[11px] text-primary hover:underline"
-              >
-                View all →
-              </Link>
-            </div>
+          <Panel flush>
+            <PanelHeader
+              title="Recent interviews"
+              aside={
+                <Link to="/interviews" className="font-mono text-[11px] text-primary hover:underline">
+                  View all
+                </Link>
+              }
+            />
             <ul className="divide-y divide-border">
-              {data.recent.map((i) => (
+              {data.recent.map((i, index) => (
                 <li
                   key={i.id}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-accent/40"
+                  className="animate-rise-in flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-accent/40"
+                  style={{ ['--stagger-i' as string]: index }}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{i.roleTitle}</p>
@@ -219,7 +210,7 @@ function DashboardContent({
                 </li>
               ))}
             </ul>
-          </section>
+          </Panel>
         </>
       )}
     </div>
@@ -230,22 +221,27 @@ function StatCard({
   icon: Icon,
   label,
   value,
+  index,
 }: {
   icon: typeof ClipboardList
   label: string
-  value: string
+  value: string | null
+  index: number
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
+    <div
+      className="animate-rise-in rounded-2xl border border-border bg-card p-5"
+      style={{ ['--stagger-i' as string]: index }}
+    >
       <div className="flex items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/25">
           <Icon className="size-4 text-primary" />
         </span>
-        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </p>
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
       </div>
-      <p className="mt-3 font-mono text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight">
+        <CountUp value={value == null ? null : Number(value)} />
+      </p>
     </div>
   )
 }

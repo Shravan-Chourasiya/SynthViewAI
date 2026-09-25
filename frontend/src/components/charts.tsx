@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 export function Sparkline({
@@ -120,6 +120,19 @@ export function ScoreRing({
   const r = (size - stroke) / 2
   const circ = 2 * Math.PI * r
   const offset = circ * (1 - clamped / 100)
+  // Draw the arc in on mount: the ring is the hero number of the report, and it
+  // previously jumped to its final value while every other metric on the page
+  // eased in. The CSS transition animates strokeDashoffset from empty to the
+  // value one frame after mount. The early-return branch for reduced motion
+  // relies on the same rAF callback (the flag just makes it a no-op), so there is
+  // exactly one setState site and it never runs synchronously in the effect body.
+  const [drawn, setDrawn] = useState(false)
+  useEffect(() => {
+    if (drawn) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const raf = requestAnimationFrame(() => setDrawn(!reduce))
+    return () => cancelAnimationFrame(raf)
+  }, [drawn])
   return (
     <div
       className="relative inline-flex items-center justify-center"
@@ -143,7 +156,8 @@ export function ScoreRing({
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circ}
-          strokeDashoffset={offset}
+          strokeDashoffset={drawn ? offset : circ}
+          style={{ transition: 'stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1)' }}
         />
       </svg>
       <div className="absolute flex flex-col items-center">

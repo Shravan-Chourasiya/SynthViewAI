@@ -19,6 +19,8 @@ import { Sparkline } from '@/components/charts'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Meter } from '@/components/ui/panel'
 import { DifficultyBadge, TypeBadge } from '@/components/interview-ui'
 import { api } from '@/lib/api'
 import { fmtDate, fmtMinutes } from '@/lib/format'
@@ -273,12 +275,7 @@ export function InterviewReportPage() {
                         {c.value}%
                       </span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${c.value}%` }}
-                      />
-                    </div>
+                    <Meter value={c.value} />
                   </div>
                 ))
               ) : (
@@ -418,7 +415,19 @@ export function InterviewReportPage() {
           </summary>
           <div className="border-t border-border p-5 pt-4">
             {history === null ? (
-              <p className="text-sm text-muted-foreground">Loading history…</p>
+              // Skeleton shaped like the event rows it becomes, so expanding the
+              // section does not change height when the data lands.
+              <div className="flex flex-col gap-3" aria-busy="true">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <Skeleton className="h-4 w-44" />
+                      <Skeleton className="h-3 w-72" />
+                    </div>
+                    <Skeleton className="h-2.5 w-20" />
+                  </div>
+                ))}
+              </div>
             ) : history.length ? (
               <ol className="flex flex-col gap-3">
                 {history.map((event) => (

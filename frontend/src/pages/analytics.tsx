@@ -21,7 +21,10 @@ import {
   YAxis,
 } from 'recharts'
 import { AppShell } from '@/components/app-shell'
+import { PageHeader } from '@/components/page-header'
 import { buttonVariants } from '@/components/ui/button'
+import { Meter } from '@/components/ui/panel'
+import { CountUp } from '@/components/ui/count-up'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -96,8 +99,10 @@ function StatCard({
           <Icon className="size-3.5" />
         </span>
       </div>
-      <p className="mt-3 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
-      <p className="mt-1 font-mono text-[11px] text-muted-foreground">{hint}</p>
+      <p className="mt-3 text-2xl font-semibold tabular-nums tracking-tight">
+        <CountUp value={typeof value === 'number' ? value : null} />
+      </p>
+      <p className="mt-1 font-mono text-[11px] tabular-nums text-muted-foreground">{hint}</p>
     </div>
   )
 }
@@ -127,24 +132,16 @@ export function AnalyticsPage() {
   return (
     <AppShell title="Analytics">
       <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-primary ring-1 ring-primary/25">
-              <Activity className="size-3" />
-              Insights
-            </span>
-            <h1 className="mt-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Performance analytics
-            </h1>
-            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              How your sessions are trending, and which areas to work on next.
-            </p>
-          </div>
-          <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
-            <Sparkles className="size-4" />
-            Start new interview
-          </Link>
-        </header>
+        <PageHeader
+          title="Performance analytics"
+          lede="How your sessions are trending, and which areas to work on next."
+          actions={
+            <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
+              <Sparkles className="size-4" />
+              Start new interview
+            </Link>
+          }
+        />
 
         {loading && !userAnalytics ? (
           <div className="flex flex-col gap-6" aria-busy="true">
@@ -336,12 +333,7 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
         <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
         <p className="text-sm font-semibold tabular-nums">{value === null ? '—' : `${value}%`}</p>
       </div>
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <Meter value={pct} className="mt-3 h-1.5 w-full" />
     </div>
   )
 }

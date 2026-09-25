@@ -68,10 +68,16 @@ describe("app-level flows", () => {
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(useAuthStore.getState().status).toBe("authenticated"));
-    // The dashboard is a lazy route that then loads its interview list; with a
-    // completed interview seeded it shows the recent-interviews section.
+    // The dashboard is a lazy route that then loads its interview list. The lede
+    // line is unique to the dashboard and renders regardless of how many
+    // interviews the (stubbed) list returns — the greeting varies by time of day
+    // and the old "candidate dashboard" eyebrow label no longer exists.
     expect(
-      await screen.findByText(/candidate dashboard/i, undefined, { timeout: 5000 }),
+      await screen.findByText(
+        /every answer changes what the interviewer asks next/i,
+        undefined,
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(useAuthStore.getState().status).toBe("authenticated");
   });

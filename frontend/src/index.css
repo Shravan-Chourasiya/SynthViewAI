@@ -420,6 +420,12 @@
   33%      { transform: translate(20px, -15px) scale(1.05); }
   66%      { transform: translate(-15px, 10px) scale(0.97); }
 }
+/* List entrance: rows/stat cards rise in sequence via --stagger-i. Used where a
+   whole list previously appeared as one block (dashboard stats, recent list). */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 @keyframes auth-card-in {
   from { opacity: 0; transform: translateY(20px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -514,6 +520,13 @@
 .animate-auth-flip-in {
   animation: auth-flip-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+/* Sequenced list entrance — set --stagger-i (0, 1, 2…) on the element. Every
+   consumer shares one timing (420ms, the app's standard ease) so list motion is
+   identical everywhere instead of each page inventing its own. */
+.animate-rise-in {
+  animation: rise-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--stagger-i, 0) * 55ms);
+}
 .animate-focus-pulse {
   animation: focus-pulse 2.5s ease-in-out infinite;
 }
@@ -540,7 +553,8 @@
   .animate-ready-enter,
   .animate-draw-check path,
   .animate-shake-once,
-  .animate-row-reenter {
+  .animate-row-reenter,
+  .animate-rise-in {
     animation: none !important;
   }
   .animate-draw-check path {

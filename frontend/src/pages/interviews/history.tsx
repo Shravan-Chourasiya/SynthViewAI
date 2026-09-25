@@ -2,6 +2,8 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
+import { PageHeader } from '@/components/page-header'
+import { Panel } from '@/components/ui/panel'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -75,22 +77,18 @@ export function InterviewsPage() {
   return (
     <AppShell title="Interview History">
       <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Interview history
-            </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              Every session you've configured, taken, or resumed.
-            </p>
-          </div>
-          {all.length > 0 ? (
-            <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
-              <Plus className="size-4" />
-              New Interview
-            </Link>
-          ) : null}
-        </div>
+        <PageHeader
+          title="Interview history"
+          lede="Every session you've configured, taken, or resumed."
+          actions={
+            all.length > 0 ? (
+              <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
+                <Plus className="size-4" />
+                New Interview
+              </Link>
+            ) : null
+          }
+        />
 
         {/* filters */}
         <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-border bg-card p-3.5">
@@ -159,7 +157,7 @@ export function InterviewsPage() {
             </div>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <Panel flush>
             <div className="overflow-x-auto">
               <table className="w-full min-w-190 text-left">
                 <thead>
@@ -206,7 +204,7 @@ export function InterviewsPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </Panel>
         )}
       </div>
     </AppShell>

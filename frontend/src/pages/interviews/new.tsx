@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
+import { PageHeader } from '@/components/page-header'
+import { Meter } from '@/components/ui/panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -139,9 +141,44 @@ export function NewInterviewPage() {
   }
 
   return <AppShell title="New Interview"><div className="animate-slide-up mx-auto flex max-w-3xl flex-col gap-6">
-    <header><p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">New interview</p><h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">Configure your interview</h1><p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">The AI interviewer adapts to everything you set here. Review it all before entering the lobby.</p></header>
-    <ol className="flex flex-wrap items-center gap-y-2">{STEPS.map((label, index) => { const done = index < step; const active = index === step; return <li key={label} className="flex items-center">{index > 0 && <span aria-hidden="true" className={cn('mx-1.5 h-px w-5 sm:mx-2 sm:w-8', index <= step ? 'bg-primary/50' : 'bg-border')} />}<button type="button" onClick={() => done && setStep(index)} disabled={!done} aria-current={active ? 'step' : undefined} className={cn('flex items-center gap-2 rounded-full py-1 pl-1 transition-colors', done ? 'cursor-pointer pr-2' : 'pr-1', active && 'pr-3')}><span className={cn('flex size-7 items-center justify-center rounded-full font-mono text-[11px] font-semibold ring-1 transition-colors', done && 'bg-[var(--signal-strong)]/15 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30', active && 'bg-primary text-primary-foreground ring-primary', !done && !active && 'bg-secondary text-muted-foreground ring-border')}>{done ? <Check className="size-3.5" strokeWidth={3} /> : index + 1}</span>{(active || done) && <span className={cn('hidden font-mono text-[10px] uppercase tracking-wider md:inline', active ? 'text-foreground' : 'text-muted-foreground')}>{label}</span>}</button></li> })}</ol>
+    <PageHeader title="Configure your interview" lede="The AI interviewer adapts to everything you set here. Review it all before entering the lobby." />
+    {/* Stepper: dots + connected progress line instead of the previous seven
+        numbered mono circles. Seven bare numbers looked like data, not progress,
+        and they were styled differently from every other control in the app. The
+        Meter's width transition makes advancement itself the animation. */}
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">{STEPS[step]}</p>
+        <p className="font-mono text-[11px] tabular-nums text-muted-foreground">{step + 1} / {STEPS.length}</p>
+      </div>
+      <Meter value={((step + 1) / STEPS.length) * 100} className="h-1.5" />
+      <ol className="mt-1 flex flex-wrap items-center gap-1.5">
+        {STEPS.map((label, index) => {
+          const done = index < step
+          const active = index === step
+          return (
+            <li key={label}>
+              <button
+                type="button"
+                onClick={() => done && setStep(index)}
+                disabled={!done}
+                aria-current={active ? 'step' : undefined}
+                aria-label={`Go back to ${label}`}
+                title={label}
+                className={cn(
+                  'size-2.5 rounded-full transition-colors',
+                  done && 'cursor-pointer bg-primary/60 hover:bg-primary',
+                  active && 'scale-125 bg-primary',
+                  !done && !active && 'bg-border',
+                )}
+              />
+            </li>
+          )
+        })}
+      </ol>
+    </div>
     <div className="rounded-2xl border border-border bg-card p-6 sm:p-7">
+      <div key={step} className="animate-fade-in">
       {step === 0 && <RoleContext state={state} patch={patch} />}
       {step === 1 && <div className="flex flex-col gap-4"><OptionCards options={TYPE_OPTIONS} selected={state.type} onSelect={(type) => patch({ type })} /><div className="rounded-xl border border-dashed border-border bg-card/50 p-4"><p className="text-xs leading-relaxed text-muted-foreground">Coding rounds are not available yet — this build has no code execution environment, so every session is a writing-based behavioral, technical or mixed interview.</p></div></div>}
       {step === 2 && <OptionCards options={STYLE_OPTIONS} selected={state.interviewStyle} onSelect={(interviewStyle) => patch({ interviewStyle })} />}
@@ -149,6 +186,7 @@ export function NewInterviewPage() {
       {step === 4 && <Topics state={state} topicInput={topicInput} topicsFull={topicsFull} setTopicInput={setTopicInput} addTopic={addTopic} removeTopic={removeTopic} />}
       {step === 5 && <Ending state={state} patch={patch} />}
       {step === 6 && <Review state={state} />}
+      </div>
       <div className="mt-6 flex items-center justify-between border-t border-border pt-5"><Button variant="ghost" onClick={back} disabled={step === 0 || creating}><ArrowLeft className="size-4" />Back</Button><div className="flex items-center gap-3"><span className="font-mono text-[11px] text-muted-foreground">Step {step + 1} of {STEPS.length}</span>{step < STEPS.length - 1 ? <Button onClick={next}>Continue<ArrowRight className="size-4" /></Button> : <Button onClick={create} disabled={creating}>{creating ? <><Loader2 className="size-4 animate-spin" />Creating…</> : <>Create &amp; Enter Lobby<ArrowRight className="size-4" /></>}</Button>}</div></div>
     </div>
   </div></AppShell>
