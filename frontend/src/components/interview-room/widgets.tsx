@@ -188,19 +188,25 @@ export function VideoTile({
         </span>
       ) : null}
       
-      {cameraOn ? (
-        <>
-          <span className="flex size-14 items-center justify-center rounded-full bg-primary/15 text-lg font-semibold text-primary ring-1 ring-primary/30">
-            {ini}
-          </span>
-          <span className="mt-2 font-mono text-[10px] text-muted-foreground">Camera on</span>
-        </>
-      ) : (
-        <>
-          <VideoOff className="size-6 text-muted-foreground" />
-          <span className="mt-2 font-mono text-[10px] text-muted-foreground">Camera off</span>
-        </>
-      )}
+      {/* The camera state sits in the same layout slot either way, so a soft
+          cross-fade reads as a state change rather than content popping in.
+          animate-fade-in runs once per key change — keying by cameraOn restarts it
+          exactly when the state flips. */}
+      <div key={cameraOn ? 'on' : 'off'} className="animate-fade-in flex flex-col items-center">
+        {cameraOn ? (
+          <>
+            <span className="flex size-14 items-center justify-center rounded-full bg-primary/15 text-lg font-semibold text-primary ring-1 ring-primary/30">
+              {ini}
+            </span>
+            <span className="mt-2 font-mono text-[10px] text-muted-foreground">Camera on</span>
+          </>
+        ) : (
+          <>
+            <VideoOff className="size-6 text-muted-foreground" />
+            <span className="mt-2 font-mono text-[10px] text-muted-foreground">Camera off</span>
+          </>
+        )}
+      </div>
       <span className="absolute bottom-2.5 left-2.5 rounded-md bg-background/80 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
         You
       </span>

@@ -99,11 +99,25 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
       // answer. Only a genuinely new question is the arrival the busy state
       // waits for.
       const isRedelivery = state.currentQuestion?.id === currentQuestion.id;
+      if (isRedelivery) {
+        // Keep the existing question object rather than swapping in the freshly
+        // deserialised one. The payload says nothing new about the question, and
+        // replacing the reference re-renders every subscriber for it — which can
+        // restart an in-flight CSS transition (the question reveal, the answer
+        // panel fading in) for a redelivery that changed nothing. Only the two
+        // server-authoritative counters are worth writing, and when they already
+        // match, returning the untouched state object means zustand notifies no
+        // one at all.
+        return state.questionNumber === questionNumber && state.totalQuestions === totalQuestions
+          ? state
+          : { questionNumber, totalQuestions };
+      }
       return {
         currentQuestion,
         questionNumber,
         totalQuestions,
-        ...(isRedelivery ? {} : { lastEvaluation: null, aiStatus: "idle" as LiveAiStatus }),
+        lastEvaluation: null,
+        aiStatus: "idle" as LiveAiStatus,
       };
     }),
   setAiStatus: (aiStatus) => set({ aiStatus }),

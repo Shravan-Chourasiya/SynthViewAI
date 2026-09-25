@@ -41,8 +41,8 @@ export function QuestionPanel({
 
   return (
     <div className="flex h-full flex-col rounded-xl bg-card/30 p-1">
-      {/* meta */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* meta — fades with the rest of the card on question change instead of popping in */}
+      <div className="animate-fade-in flex flex-wrap items-center gap-2">
         {question.isFollowUp ? (
           <Badge variant="vague" dot>
             Adaptive follow-up
@@ -77,7 +77,7 @@ export function QuestionPanel({
       </div>
 
       {/* answer form (FR-15) */}
-      <div className="mt-5 flex flex-1 flex-col">
+      <div className="animate-fade-in mt-5 flex flex-1 flex-col" style={{ animationDelay: '0.1s' }}>
         <label
           htmlFor="answer"
           className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
