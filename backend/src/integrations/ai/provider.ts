@@ -15,12 +15,35 @@ import { PROVIDER_CONTEXT_WINDOWS } from "./context.manager.js";
 import { generatedQuestionSchema, aiEvaluateResultSchema } from "./ai.types.js";
 import type { GenerateQuestionInput, GeneratedQuestion, AiEvaluateResult } from "./ai.types.js";
 import type { InterviewerPromptResult, EvaluatorPromptResult } from "./prompts.js";
+import { getGroqClient, getMistralClient } from "./sdk-clients.js";
 
 // ── Retry config ──────────────────────────────────────────────────────────────
 
 const MAX_RETRIES_PER_PROVIDER = 2;
 const BASE_BACKOFF_MS = 300; // doubles each retry: 300 → 600
-const CALL_TIMEOUT_MS = 8_000;
+
+// ── Per-call timeouts ─────────────────────────────────────────────────────────
+// One timeout per operation shape rather than one for everything. They bound a
+// *hung* call, not a slow one: on expiry the attempt is abandoned and the next
+// retry/provider is tried, so a smaller number only ever shortens the worst case
+// a candidate waits mid-interview. Worst-case budget before the stub is reached
+// is (3 attempts × 2 providers × timeout) + backoff, so the timeout dominates it.
+//
+// Both values were chosen against the output-token budget, not guessed:
+//   - generate emits ≤512 tokens, which both providers answer well under this on
+//     their default models, so 6s leaves several times p95 of headroom while
+//     failing over 2s sooner than the previous shared 8s
+//   - evaluate emits up to 2048 tokens (score + sub-scores + feedback +
+//     strengths/weaknesses) and is the call whose truncation is visible to the
+//     candidate as a cut-off report, so it keeps the full 8s. Do NOT tighten this
+//     one without a p95 from the logs below.
+//
+// `[ai] model responded` now carries elapsedMs and `[ai] provider attempt failed`
+// carries elapsedMs + timeoutMs, so the real distribution is measurable per
+// provider and operation. Re-tune from that data: if generate p95 sits near 1s,
+// 4s is safe; if it approaches 5s, this is already too tight.
+const GENERATE_TIMEOUT_MS = 6_000;
+const EVALUATE_TIMEOUT_MS = 8_000;
 // Evaluator output is a single JSON object (score + 4 sub-scores + feedback +
 // strengths/weaknesses + detectionSignals). 1024 tokens truncated it
 // mid-generation, which surfaced as cut-off text in reports/exports.
@@ -218,8 +241,8 @@ const groqProvider: ModelProvider = {
   contextWindowTokens: PROVIDER_CONTEXT_WINDOWS.groq!,
   isReady: () => !!env.GROQ_API_KEY,
   generateQuestion: async (prompt, input) => {
-    const { default: Groq } = await import("groq-sdk");
-    const client = new Groq({ apiKey: env.GROQ_API_KEY });
+    // One client per process, not one per call — see sdk-clients.ts.
+    const client = await getGroqClient();
     const res = await client.chat.completions.create({
       model: env.GROQ_MODEL,
       messages: [
@@ -235,8 +258,7 @@ const groqProvider: ModelProvider = {
     return parseAndValidateQuestion(raw, input.config.interviewType);
   },
   evaluateAnswer: async (prompt) => {
-    const { default: Groq } = await import("groq-sdk");
-    const client = new Groq({ apiKey: env.GROQ_API_KEY });
+    const client = await getGroqClient();
     const res = await client.chat.completions.create({
       model: env.GROQ_MODEL,
       messages: [
@@ -260,8 +282,7 @@ const mistralProvider: ModelProvider = {
   contextWindowTokens: PROVIDER_CONTEXT_WINDOWS.mistral!,
   isReady: () => !!env.MISTRAL_API_KEY,
   generateQuestion: async (prompt, input) => {
-    const { Mistral } = await import("@mistralai/mistralai");
-    const client = new Mistral({ apiKey: env.MISTRAL_API_KEY });
+    const client = await getMistralClient();
     const res = await client.chat.complete({
       model: env.MISTRAL_MODEL,
       messages: [
@@ -277,8 +298,7 @@ const mistralProvider: ModelProvider = {
     return parseAndValidateQuestion(rawStr, input.config.interviewType);
   },
   evaluateAnswer: async (prompt) => {
-    const { Mistral } = await import("@mistralai/mistralai");
-    const client = new Mistral({ apiKey: env.MISTRAL_API_KEY });
+    const client = await getMistralClient();
     const res = await client.chat.complete({
       model: env.MISTRAL_MODEL,
       messages: [
@@ -414,15 +434,19 @@ async function runWithFallback<T>(
   fallback: () => T,
   interviewId: string,
   opName: string,
+  timeoutMs: number,
 ): Promise<T> {
   const ready = PROVIDERS.filter((p) => p.isReady());
 
   for (const provider of ready) {
     for (let attempt = 0; attempt <= MAX_RETRIES_PER_PROVIDER; attempt++) {
+      const startedAt = Date.now();
       try {
-        const response = await withTimeout(operation(provider), CALL_TIMEOUT_MS);
+        const response = await withTimeout(operation(provider), timeoutMs);
         // Log provider/model metadata only. Prompts and outputs may contain
         // candidate responses and must never be emitted to application logs.
+        // elapsedMs is what makes p50/p95 per provider+operation observable, and
+        // is the input to re-tuning the timeouts above.
         logger.info(
           {
             provider: provider.name,
@@ -430,6 +454,7 @@ async function runWithFallback<T>(
             attempt,
             interviewId,
             operation: opName,
+            elapsedMs: Date.now() - startedAt,
           },
           "[ai] model responded",
         );
@@ -437,7 +462,17 @@ async function runWithFallback<T>(
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         logger.warn(
-          { provider: provider.name, attempt, reason, interviewId, op: opName },
+          {
+            provider: provider.name,
+            attempt,
+            reason,
+            interviewId,
+            op: opName,
+            elapsedMs: Date.now() - startedAt,
+            // Surfaced only when the call ran out of time, so a hung provider is
+            // distinguishable in the logs from one that answered with an error.
+            ...(reason === "PROVIDER_TIMEOUT" ? { timeoutMs } : {}),
+          },
           "[ai] provider attempt failed",
         );
         // Auth/config errors are permanent — skip remaining retries for this provider
@@ -480,6 +515,7 @@ export async function callGenerateWithFallback(
     () => fallbackQuestion(input),
     input.interviewId,
     "generate",
+    GENERATE_TIMEOUT_MS,
   );
 }
 
@@ -492,6 +528,7 @@ export async function callEvaluateWithFallback(
     fallbackEvaluation,
     interviewId,
     "evaluate",
+    EVALUATE_TIMEOUT_MS,
   );
 }
 

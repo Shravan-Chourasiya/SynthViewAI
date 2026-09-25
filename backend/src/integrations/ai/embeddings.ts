@@ -15,15 +15,22 @@
 import { env } from "../../config/env.js";
 import { logger } from "../../utils/logger.js";
 import { withTimeout } from "./provider.js";
+import { getMistralClient } from "./sdk-clients.js";
 import type { EmbedTexts } from "./similarity.js";
 
 /**
- * Deliberately tighter than the generation timeout (8s in provider.ts): this is an
+ * Deliberately tighter than the generation timeout (6s in provider.ts): this is an
  * optional quality check running *before* a question is accepted, so it must never
  * dominate a turn that the candidate is waiting on. Exceeding it costs accuracy on
  * one question, not a stuck interview.
+ *
+ * A batched mistral-embed request is a few hundred milliseconds in practice, so 2s
+ * already leaves several times p95 of headroom; the point of the bound is that a
+ * hung connection cannot hold the repetition guard for longer than the guard is
+ * worth. The elapsed time is logged on success and on failure, so this can be
+ * re-tuned from real numbers rather than by feel.
  */
-export const EMBED_TIMEOUT_MS = 2_500;
+export const EMBED_TIMEOUT_MS = 2_000;
 
 /** Upper bound on inputs per request — MAX_COMPARED_QUESTIONS plus the candidate. */
 const MAX_BATCH = 32;
@@ -54,9 +61,11 @@ export const embedTexts: EmbedTexts = async (texts) => {
   const vectors: (number[] | null)[] = texts.map(() => null);
   const batch = texts.slice(0, MAX_BATCH);
 
+  const startedAt = Date.now();
   try {
-    const { Mistral } = await import("@mistralai/mistralai");
-    const client = new Mistral({ apiKey });
+    // Shared with the Mistral chat provider — one client per process rather than
+    // one per embedding batch. See sdk-clients.ts.
+    const client = await getMistralClient();
     const response = await withTimeout(
       client.embeddings.create({ model: env.MISTRAL_EMBED_MODEL, inputs: batch }),
       EMBED_TIMEOUT_MS,
@@ -71,7 +80,12 @@ export const embedTexts: EmbedTexts = async (texts) => {
     const embedded = vectors.filter((vector) => vector !== null).length;
     // Counts only — question text is interviewer output and is never logged here.
     logger.info(
-      { model: env.MISTRAL_EMBED_MODEL, requested: batch.length, embedded },
+      {
+        model: env.MISTRAL_EMBED_MODEL,
+        requested: batch.length,
+        embedded,
+        elapsedMs: Date.now() - startedAt,
+      },
       "[ai] question embeddings computed",
     );
     return vectors;
@@ -80,6 +94,10 @@ export const embedTexts: EmbedTexts = async (texts) => {
       {
         reason: err instanceof Error ? err.message : String(err),
         requested: batch.length,
+        elapsedMs: Date.now() - startedAt,
+        ...(err instanceof Error && err.message === "PROVIDER_TIMEOUT"
+          ? { timeoutMs: EMBED_TIMEOUT_MS }
+          : {}),
       },
       "[ai] embedding request failed — repetition checks fall back to lexical similarity",
     );
