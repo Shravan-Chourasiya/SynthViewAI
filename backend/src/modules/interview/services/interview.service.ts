@@ -50,7 +50,7 @@ import {
   sendInterviewCancelledMail,
   sendInterviewReminderMail,
   sendPausedInterviewReminderMail,
-} from "../../../services/nodemailer.service.js";
+} from "../../../services/mail.service.js";
 import {
   blacklistToken,
   isTokenBlacklisted,
@@ -771,22 +771,29 @@ export async function cancelInterviewService(authreq: AuthenticatedRequest, inte
 export async function generateInterviewReportService(interviewId: string): Promise<void> {
   const db = getPgDb();
 
-  // ── Fetch all answers with their evaluation data ──────────────────────────
-  const answers = await db
-    .select({
-      id: interviewAnswersTable.id,
-      answerData: interviewAnswersTable.answerData,
-      answerState: interviewAnswersTable.answerState,
-      evaluationData: interviewAnswersTable.evaluationData,
-    })
-    .from(interviewAnswersTable)
-    .where(eq(interviewAnswersTable.interviewId, interviewId));
-
-  // ── Fetch question states for counts ─────────────────────────────────────
-  const questions = await db
-    .select({ questionState: interviewQuestionsTable.questionState })
-    .from(interviewQuestionsTable)
-    .where(eq(interviewQuestionsTable.interviewId, interviewId));
+  // ── Fetch everything the aggregation needs, concurrently ──────────────────
+  // Three independent reads with no dependency on each other's results. The
+  // report is a full-page load after the interview, so its latency is directly
+  // user-visible; issuing the reads together removes two serial round-trips.
+  const [answers, questions, interview] = await Promise.all([
+    // Every answer with its evaluation data
+    db
+      .select({
+        id: interviewAnswersTable.id,
+        answerData: interviewAnswersTable.answerData,
+        answerState: interviewAnswersTable.answerState,
+        evaluationData: interviewAnswersTable.evaluationData,
+      })
+      .from(interviewAnswersTable)
+      .where(eq(interviewAnswersTable.interviewId, interviewId)),
+    // Question states, for the answered/skipped counts
+    db
+      .select({ questionState: interviewQuestionsTable.questionState })
+      .from(interviewQuestionsTable)
+      .where(eq(interviewQuestionsTable.interviewId, interviewId)),
+    // Interview duration stamp
+    fetchInterviewById(interviewId),
+  ]);
 
   const questionsAnswered = questions.filter(
     (q) => q.questionState === "ANSWERED" || q.questionState === "EVALUATED",
@@ -821,8 +828,6 @@ export async function generateInterviewReportService(interviewId: string): Promi
     .filter(Boolean)
     .join(" ");
 
-  // ── Fetch interview duration ──────────────────────────────────────────────
-  const interview = await fetchInterviewById(interviewId);
   const totalDuration = interview?.interviewDuration ?? 0;
 
   // ── Upsert — ON CONFLICT DO NOTHING enforces idempotency ─────────────────
@@ -1281,12 +1286,22 @@ export async function submitAnswerService(
   const db = getPgDb();
   const now = new Date();
 
-  // ── Duplicate guard — one answer per question, ever ───────────────────────
-  const [existing] = await db
-    .select({ id: interviewAnswersTable.id })
-    .from(interviewAnswersTable)
-    .where(eq(interviewAnswersTable.questionId, payload.questionId))
-    .limit(1);
+  // ── Duplicate guard + delivery timestamp ──────────────────────────────────
+  // Two independent single-row reads issued together. The duplicate guard still
+  // decides the outcome (an already-persisted answer is returned untouched), but
+  // it no longer costs a second serial round-trip before the writes below.
+  const [[existing], [deliveredQuestion]] = await Promise.all([
+    db
+      .select({ id: interviewAnswersTable.id })
+      .from(interviewAnswersTable)
+      .where(eq(interviewAnswersTable.questionId, payload.questionId))
+      .limit(1),
+    db
+      .select({ createdAt: interviewQuestionsTable.createdAt })
+      .from(interviewQuestionsTable)
+      .where(eq(interviewQuestionsTable.id, payload.questionId))
+      .limit(1),
+  ]);
   if (existing) return existing; // idempotent — return the already-persisted answer
 
   const isEmpty = payload.answerData.trim().length === 0;
@@ -1296,37 +1311,39 @@ export async function submitAnswerService(
     return skipQuestionInternal(db, interviewId, payload.questionId, now, "SKIPPED");
   }
 
-  const [deliveredQuestion] = await db
-    .select({ createdAt: interviewQuestionsTable.createdAt })
-    .from(interviewQuestionsTable)
-    .where(eq(interviewQuestionsTable.id, payload.questionId))
-    .limit(1);
   const timeTakenSeconds = deliveredQuestion
     ? Math.max(0, Math.round((now.getTime() - deliveredQuestion.createdAt.getTime()) / 1000))
     : null;
 
-  // Bump lastActivityAt on every real answer submission
-  await db
-    .update(interviewsTable)
-    .set({ lastActivityAt: now })
-    .where(eq(interviewsTable.id, interviewId));
-
-  await db
-    .update(interviewQuestionsTable)
-    .set({ questionState: "ANSWERED" })
-    .where(eq(interviewQuestionsTable.id, payload.questionId));
-
-  const [answer] = await db
-    .insert(interviewAnswersTable)
-    .values({
-      interviewId,
-      questionId: payload.questionId,
-      answerData: payload.answerData,
-      answerType: payload.answerType,
-      answeredAt: now,
-      timeTakenSeconds,
-    })
-    .returning();
+  // ── Three writes with no ordering dependency ──────────────────────────────
+  // Different tables, and the answer row's foreign keys reference rows that
+  // already exist, so nothing here can observe a half-written state. They are
+  // also *all* required before the evaluation pipeline starts — that pipeline
+  // derives the adaptive decision from question history, which reads
+  // questionState — so running them concurrently removes two serial round-trips
+  // from the gap between "answer submitted" and "AI started evaluating".
+  const [, , [answer]] = await Promise.all([
+    // Bump lastActivityAt on every real answer submission
+    db
+      .update(interviewsTable)
+      .set({ lastActivityAt: now })
+      .where(eq(interviewsTable.id, interviewId)),
+    db
+      .update(interviewQuestionsTable)
+      .set({ questionState: "ANSWERED" })
+      .where(eq(interviewQuestionsTable.id, payload.questionId)),
+    db
+      .insert(interviewAnswersTable)
+      .values({
+        interviewId,
+        questionId: payload.questionId,
+        answerData: payload.answerData,
+        answerType: payload.answerType,
+        answeredAt: now,
+        timeTakenSeconds,
+      })
+      .returning(),
+  ]);
 
   // ── Evaluation pipeline ───────────────────────────────────────────────────
   // Run async — errors are logged but never propagate to the caller so the
@@ -1365,28 +1382,33 @@ export async function submitAnswerService(
         answerType: payload.answerType,
       });
 
-      // ── Step 2: Persist evaluation to answer row ──────────────────────────
-      await db
-        .update(interviewAnswersTable)
-        .set({
-          evaluationData: {
-            score: evalResult.score,
-            correctness: evalResult.correctness,
-            relevance: evalResult.relevance,
-            clarity: evalResult.clarity,
-            technicalDepth: evalResult.technicalDepth,
-            feedback: evalResult.feedback,
-            strengths: evalResult.strengths,
-            weaknesses: evalResult.weaknesses,
-          },
-          answerState: "EVALUATED",
-        })
-        .where(eq(interviewAnswersTable.id, answer!.id));
-
-      await db
-        .update(interviewQuestionsTable)
-        .set({ questionState: "EVALUATED" })
-        .where(eq(interviewQuestionsTable.id, payload.questionId));
+      // ── Step 2: Persist the evaluation to both rows ───────────────────────
+      // Two independent UPDATEs on different tables. Step 4 below reads question
+      // state back, so both still have to be committed before this pipeline
+      // continues — but they do not have to be sequential to each other, which
+      // saves a round-trip on the path the candidate is waiting on.
+      await Promise.all([
+        db
+          .update(interviewAnswersTable)
+          .set({
+            evaluationData: {
+              score: evalResult.score,
+              correctness: evalResult.correctness,
+              relevance: evalResult.relevance,
+              clarity: evalResult.clarity,
+              technicalDepth: evalResult.technicalDepth,
+              feedback: evalResult.feedback,
+              strengths: evalResult.strengths,
+              weaknesses: evalResult.weaknesses,
+            },
+            answerState: "EVALUATED",
+          })
+          .where(eq(interviewAnswersTable.id, answer!.id)),
+        db
+          .update(interviewQuestionsTable)
+          .set({ questionState: "EVALUATED" })
+          .where(eq(interviewQuestionsTable.id, payload.questionId)),
+      ]);
 
       const emitEvaluationFeedback = (shouldAdvance: boolean) => {
         io?.to(`interview:${interviewId}`).emit("evaluation:feedback", {
@@ -1669,15 +1691,19 @@ export async function requestNextQuestionService(
 // Called by the evaluation pipeline once an answer has been scored
 export async function markQuestionEvaluatedService(questionId: string, answerId: string) {
   const db = getPgDb();
-  await db
-    .update(interviewQuestionsTable)
-    .set({ questionState: "EVALUATED" })
-    .where(eq(interviewQuestionsTable.id, questionId));
-  const [answer] = await db
-    .update(interviewAnswersTable)
-    .set({ answerState: "EVALUATED" })
-    .where(eq(interviewAnswersTable.id, answerId))
-    .returning();
+  // Two independent UPDATEs on different tables — no ordering dependency, so they
+  // go out together instead of one after the other.
+  const [, [answer]] = await Promise.all([
+    db
+      .update(interviewQuestionsTable)
+      .set({ questionState: "EVALUATED" })
+      .where(eq(interviewQuestionsTable.id, questionId)),
+    db
+      .update(interviewAnswersTable)
+      .set({ answerState: "EVALUATED" })
+      .where(eq(interviewAnswersTable.id, answerId))
+      .returning(),
+  ]);
   return answer;
 }
 

@@ -17,13 +17,31 @@ function createInstance(): PgSingleton {
   const poolConfig: PoolConfig = {
     connectionString: env.POSTGRES_URI,
     ssl: { rejectUnauthorized: true },
-    max: 5,
+    // Concurrency, not throughput. Every query in this app is short and indexed,
+    // so 5 connections is plenty for total load — but it is a hard ceiling on how
+    // many requests can be *in flight*, and one interview turn is a chain of 6–10
+    // sequential queries. A handful of candidates answering at the same moment was
+    // therefore enough to queue behind the pool while the AI pipeline — the part
+    // the candidate actually waits on — was still idle.
+    //
+    // 20 gives that headroom without approaching a managed instance's
+    // max_connections (Render's smallest Postgres allows 22–100 depending on plan,
+    // and the connection string is frequently pointed at a pooled endpoint), so
+    // POSTGRES_POOL_MAX exists for deployments with a different ceiling.
+    max: env.POSTGRES_POOL_MAX,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 15_000,
   };
 
   const pool = new Pool(poolConfig);
-  const db = drizzle({ client: pool, logger: true });
+  // Drizzle's query logger JSON-serialises every statement and its parameters and
+  // writes it synchronously to stdout — per query, in production too, where nobody
+  // reads it. It is a development aid, so it is enabled only outside production.
+  const logQueries = env.NODE_ENV !== "production";
+  const db = drizzle({ client: pool, logger: logQueries });
+  if (!logQueries) {
+    logger.debug({ max: poolConfig.max }, "PostgreSQL pool ready (query logging off)");
+  }
   return { pool, db };
 }
 

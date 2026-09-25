@@ -100,6 +100,14 @@ services:
       # "Internal Database URL".
       - key: POSTGRES_URI
         sync: false
+      # POSTGRES_POOL_MAX is omitted: schema default 20. It is a concurrency
+      # ceiling, not a load setting — raise it if many candidates answer at the
+      # same instant, but keep it clear of the instance's max_connections (a
+      # Render Postgres allows 22–100 depending on plan, and the connection
+      # string is often a *pooled* endpoint whose own limit applies first).
+      #
+      # Drizzle's per-query logger is disabled automatically when NODE_ENV is
+      # `production`, which this file sets — no flag needed.
 
       # ── Redis ────────────────────────────────────────────────────────────────
       # REDIS_URI is required by the schema (validated as a URL). REDIS_HOST /

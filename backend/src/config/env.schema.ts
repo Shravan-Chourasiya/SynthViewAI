@@ -6,6 +6,11 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   POSTGRES_URI: z.string().url(),
+  // Upper bound on concurrent Postgres connections held by the pool. One interview
+  // turn is a chain of short sequential queries, so this is a concurrency ceiling
+  // rather than a load limit — raise it when more candidates are answering at the
+  // same moment, and keep it clear of the server's own max_connections.
+  POSTGRES_POOL_MAX: z.coerce.number().int().positive().max(200).default(20),
   REDIS_URI: z.string().url(),
   JWT_SECRET: z.string().min(64).max(512),
   CORS_ORIGIN: z
