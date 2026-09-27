@@ -8,6 +8,7 @@ interface CorsOptions {
   credentials: boolean;
   methods: string[];
   allowedHeaders: string[];
+  exposedHeaders: string[];
 }
 const allowedOrigins = env.CORS_ORIGIN;
 
@@ -35,4 +36,10 @@ export const corsOptions: CorsOptions = {
   credentials: true, // required if you're sending cookies cross-origin
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"],
+  // The API echoes the caller's CSRF cookie in this header (see
+  // middlewares/csrf.middleware.ts). Cross-site, `document.cookie` cannot read
+  // that cookie, so the SPA has no other way to learn the token — and browsers
+  // hide non-simple response headers unless they are exposed here. Only origins
+  // allowed by `origin` above can read it, so an attacker page still cannot.
+  exposedHeaders: ["X-CSRF-Token"],
 };

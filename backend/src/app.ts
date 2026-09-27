@@ -13,7 +13,7 @@ import { createAuthRouter } from "./routes/auth.routes.js";
 import getPgDb from "./db/postgres.init.js";
 import { config } from "dotenv";
 import { corsOptions } from "./constants/cors.js";
-import { csrfTokenMiddleware } from "./middlewares/csrf.middleware.js";
+import { csrfTokenEcho, csrfTokenMiddleware } from "./middlewares/csrf.middleware.js";
 import { sql } from "drizzle-orm";
 import { redisClient } from "./config/redis.init.js";
 import { readinessCheck } from "./utils/ready.js";
@@ -27,6 +27,16 @@ import { createContactRouter } from "./routes/contact.routes.js";
 config();
 const app = express();
 
+// Render terminates TLS at its edge and forwards the request to this process over
+// loopback, so without this every `req.ip` is the proxy's own address (`::1`).
+// That single fact used to appear in the "new sign-in" alert email as the client
+// IP, and it also collapses every rate-limit bucket into one global counter.
+// One hop is exactly right here: the edge is the only proxy in front of the app.
+// It stays unset in development, where requests arrive directly from the browser.
+if (env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 //****************************************** Database Connection ******************************************//
 const dbConn = getPgDb();
 
@@ -36,6 +46,7 @@ app.use(cors(corsOptions));
 app.use(compression());
 app.use(express.json({ limit: "184kb" }));
 app.use(cookieParser());
+app.use(csrfTokenEcho);
 app.use(express.urlencoded({ extended: true, limit: "184kb" }));
 app.use(requestIdMiddleware);
 app.use(requestLogger);

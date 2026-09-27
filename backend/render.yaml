@@ -140,6 +140,12 @@ services:
       # *.onrender.com) — see the cookie findings in the deployment report.
       - key: COOKIE_DOMAIN
         sync: false
+      # COOKIE_SAME_SITE is omitted on purpose. In production the code defaults to
+      # `none` (with `Secure`), which is the policy unrelated frontend/API hosts
+      # require — a `lax` cookie is dropped by the browser from the cross-site
+      # login response, leaving `/usr/me` unauthenticated. Set it to `lax` only
+      # when both apps share one registrable domain.
+
 
       # ── Email (Brevo SMTP relay) ─────────────────────────────────────────────
       # Every one of these is REQUIRED by env.schema.ts. Missing any of them

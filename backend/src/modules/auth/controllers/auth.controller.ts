@@ -63,6 +63,13 @@ function setAuthCookies(
     httpOnly: false,
     maxAge: COOKIE_MAX_AGE.DEVICE_ID,
   });
+  // The CSRF token is rotated on every login and refresh, while `csrfTokenEcho`
+  // has already published the *previous* cookie value on this response — so the
+  // fresh value has to replace it here. Cross-site clients rely on this header:
+  // they cannot read the csrf cookie out of `document.cookie` (`SameSite=None`
+  // cookie owned by the API origin) and would otherwise send a stale token and
+  // get a 403 from csrfTokenMiddleware on their next mutating request.
+  res.setHeader("X-CSRF-Token", csrfToken);
 }
 
 function clearAuthCookies(res: Response): void {

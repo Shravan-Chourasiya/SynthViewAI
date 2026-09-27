@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Link, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { ErrorState } from '@/components/error-state'
@@ -6,6 +6,7 @@ import { AuthBootstrap, RequireAuth, RequireAdmin } from '@/components/require-a
 import { buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/lib/stores/auth.store'
+import { startHealthCheck } from '@/lib/health-check'
 import { useTheme } from '@/components/theme-provider'
 import { AuthPage } from '@/pages/auth/auth'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,12 @@ function ThemedToaster() {
 }
 
 export default function App() {
+  // Silent backend keep-alive/health poll. Interval is
+  // VITE_HEALTH_CHECK_INTERVAL_SECONDS (seconds; 0 disables it), and the effect
+  // cleanup stops the timer on unmount — including the extra mount/unmount pair
+  // StrictMode runs in development.
+  useEffect(startHealthCheck, [])
+
   return (
     <AuthBootstrap>
       <ThemedToaster />

@@ -61,33 +61,59 @@ export const COOKIE_MAX_AGE = {
 const cookieDomain = process.env.COOKIE_DOMAIN?.trim();
 const domainAttr = cookieDomain ? { domain: cookieDomain } : {};
 
+// ── SameSite policy ───────────────────────────────────────────────────────────
+// The deployed frontend (*.vercel.app) and the API (*.onrender.com) are different
+// sites, so every auth cookie rides a cross-site request. Browsers drop a
+// `SameSite=Lax` cookie from a cross-site response outright — login answers 200,
+// `Set-Cookie` goes out for all four cookies, and the browser keeps none of them,
+// so the very next `GET /usr/me` arrives with no session and 401s. That is the
+// exact "correct credentials → invalid credentials" loop in production.
+//
+// `SameSite=None` is the mode that works across unrelated origins, and browsers
+// reject it unless the cookie is also `Secure` — hence why the two are derived
+// together below. Same-site (`lax`) is the stronger setting, so deployments where
+// frontend and API share one registrable domain should set COOKIE_SAME_SITE=lax
+// (or COOKIE_DOMAIN to share the cookie across subdomains).
+function parseSameSite(raw: string | undefined): "lax" | "strict" | "none" | undefined {
+  const value = raw?.trim().toLowerCase();
+  if (value === "lax" || value === "strict" || value === "none") return value;
+  if (value) {
+    // Fail loud: a typo would silently fall back to a policy that breaks login.
+    throw new Error(`COOKIE_SAME_SITE must be one of lax|strict|none, received "${raw}"`);
+  }
+  return undefined;
+}
+
+const cookieSameSite: "lax" | "strict" | "none" =
+  parseSameSite(process.env.COOKIE_SAME_SITE) ??
+  (process.env.NODE_ENV === "production" ? "none" : "lax");
+const secureCookie = process.env.NODE_ENV !== "development" || cookieSameSite === "none";
+
+const cookieAttrs = {
+  secure: secureCookie,
+  sameSite: cookieSameSite,
+  ...domainAttr,
+};
+
 export const COOKIE_CONFIG = {
   ACCESS: {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.ACCESS,
-    ...domainAttr,
+    ...cookieAttrs,
   },
   REFRESH: {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.REFRESH,
-    ...domainAttr,
+    ...cookieAttrs,
   },
   DEVICE_ID: {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.DEVICE_ID,
-    ...domainAttr,
+    ...cookieAttrs,
   },
   CSRF: {
     httpOnly: false,
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "lax" as const,
     maxAge: COOKIE_MAX_AGE.REFRESH,
-    ...domainAttr,
+    ...cookieAttrs,
   },
 };

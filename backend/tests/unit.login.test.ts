@@ -72,6 +72,11 @@ describe("loginController", () => {
     mockResponse = {
       cookie: vi.fn(),
       clearCookie: vi.fn(),
+      // `setAuthCookies` publishes the fresh CSRF token as a response header
+      // (cross-site clients cannot read the csrf cookie itself), so the mock
+      // needs `setHeader` or the controller's catch block swallows a
+      // "res.setHeader is not a function" TypeError.
+      setHeader: vi.fn(),
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     };

@@ -26,6 +26,14 @@ type AuthExpiredCallback = () => void;
 let onAuthExpired: AuthExpiredCallback | undefined;
 let refreshInFlight: Promise<void> | null = null;
 
+// The CSRF token as published by the API on the last login/refresh response.
+// Deployed, the frontend (*.vercel.app) and the API (*.onrender.com) are
+// different sites: the csrf cookie is owned by the API origin, so
+// `document.cookie` on this origin cannot read it and the request interceptor
+// has nothing to copy into `X-CSRF-Token`. The API therefore echoes the token in
+// an exposed response header, and this is where it is remembered for the tab.
+let csrfTokenFromResponse: string | null = null;
+
 export function setOnAuthExpired(callback: AuthExpiredCallback): void {
   onAuthExpired = callback;
 }
@@ -35,6 +43,18 @@ function getCookie(name: string): string | null {
     .split("; ")
     .find((cookie) => cookie.startsWith(`${name}=`));
   return entry ? decodeURIComponent(entry.slice(name.length + 1)) : null;
+}
+
+/** Keep the last token the API handed back (login and refresh both send one). */
+function rememberCsrfToken(headers: unknown): void {
+  const raw = (headers as Record<string, unknown> | undefined)?.["x-csrf-token"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value === "string" && value) csrfTokenFromResponse = value;
+}
+
+/** Same-origin reads the cookie; cross-site falls back to the echoed token. */
+function currentCsrfToken(): string | null {
+  return getCookie("csrf_token") ?? csrfTokenFromResponse;
 }
 
 function isUnsafe(method?: string): boolean {
@@ -89,14 +109,17 @@ const refreshClient = axios.create({
 
 axiosInstance.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (isUnsafe(config.method)) {
-    const csrf = getCookie("csrf_token");
+    const csrf = currentCsrfToken();
     if (csrf) config.headers.set("X-CSRF-Token", csrf);
   }
   return config;
 });
 
 axiosInstance.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    rememberCsrfToken(response.headers);
+    return response;
+  },
   async (error: AxiosError) => {
     const config = error.config as RetryableConfig | undefined;
     if (error.response?.status === 401 && config && !config._retry && canRefresh(config.url)) {
@@ -105,7 +128,9 @@ axiosInstance.interceptors.response.use(
         if (!refreshInFlight) {
           refreshInFlight = refreshClient
             .post(ENDPOINTS.auth.refresh)
-            .then(() => undefined)
+            // Refresh rotates the CSRF token; capture the new one or every
+            // mutating request after a silent refresh would 403.
+            .then((response) => rememberCsrfToken(response.headers))
             .finally(() => {
               refreshInFlight = null;
             });

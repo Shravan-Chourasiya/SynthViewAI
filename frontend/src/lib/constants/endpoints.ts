@@ -3,6 +3,14 @@
 // Nothing in the codebase may hardcode a path string outside this file.
 
 export const ENDPOINTS = {
+  // Root-level probes. These are mounted on the server root, *not* behind the API
+  // version prefix, so callers join them with `env.apiBaseUrl` instead of
+  // HTTP_BASE_URL: `GET /ready` pings Postgres and Redis and answers 503 with a
+  // per-dependency `checks` map when either is unreachable.
+  system: {
+    health: "/health",
+    ready: "/ready",
+  },
   auth: {
     register: "/auth/register",
     verifyOtp: "/auth/verify-otp",
