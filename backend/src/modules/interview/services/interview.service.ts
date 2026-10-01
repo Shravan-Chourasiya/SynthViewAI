@@ -532,6 +532,16 @@ export async function generateAndDeliverQuestionService(
   }
 
   // ── Persist question row ──────────────────────────────────────────────────
+  // The difficulty is recorded on the row because it is otherwise only held in
+  // the Redis session context, which expires shortly after the interview ends —
+  // leaving "which difficulty was this question?" unanswerable for any session
+  // examined later. The hint is what the generator was actually told (the
+  // adaptive decision for this question); without one the difficulty in force is
+  // whatever the performance state settled on, which the wrap-up window may have
+  // held below the escalation the engine wanted.
+  const questionDifficulty =
+    context.pendingAdaptationHint?.difficulty ?? context.performanceState.currentDifficulty;
+
   const [question] = await db
     .insert(interviewQuestionsTable)
     .values({
@@ -540,16 +550,32 @@ export async function generateAndDeliverQuestionService(
       questionTitle: generated.questionTitle,
       questionDescription: generated.questionDescription ?? undefined,
       questionType: generated.questionType,
+      questionDifficulty,
       questionState: "PENDING",
     })
     .returning();
 
   // ── Update context with new currentQuestionId ─────────────────────────────
+  // The pending adaptation hint has now been applied (either baked into the
+  // consumed lookahead or passed to the synchronous generation above), so it is
+  // consumed here — leaving it in place would make the *following* question
+  // replay a decision that no longer applies to it.
+  const contextAfterGeneration: InterviewContext = { ...context };
+  delete contextAfterGeneration.pendingAdaptationHint;
+
   const updatedContext: InterviewContext = {
-    ...context,
+    ...contextAfterGeneration,
     questionState: {
       ...context.questionState,
       currentQuestionId: question!.id,
+      // `totalQuestions` starts as the duration/5 display estimate
+      // (startInterviewService). A real session routinely outgrows it — which is
+      // how a candidate ends up looking at "Q6 of 3", a label the client renders
+      // verbatim. The estimate may grow, never contradict the question on screen.
+      totalQuestions:
+        context.questionState.totalQuestions === null
+          ? null
+          : Math.max(context.questionState.totalQuestions, sequenceNumber),
     },
   };
   await writeInterviewContext(updatedContext, context.config.durationMinutes);
@@ -563,7 +589,7 @@ export async function generateAndDeliverQuestionService(
       interviewId,
       questionId: question!.id,
       sequenceNumber,
-      totalQuestions: context.questionState.totalQuestions,
+      totalQuestions: updatedContext.questionState.totalQuestions,
       questionTitle: generated.questionTitle,
       ...(generated.questionDescription
         ? { questionDescription: generated.questionDescription }
@@ -669,6 +695,90 @@ export async function pauseInterviewService(authreq: AuthenticatedRequest, inter
 export async function resumeInterviewService(authreq: AuthenticatedRequest, interviewId: string) {
   const interview = await resolveInterview(authreq, interviewId);
   return transitionInterview(interviewId, interview.interviewStatus, "INPROGRESS");
+}
+
+// ── Duration extension ("add more time") ──────────────────────────────────────
+// The duration ceiling is enforced in two independent places, and both read
+// context.config.durationMinutes:
+//   - the adaptive engine (computeAdaptation) terminates at the deadline
+//   - generateAndDeliverQuestionService refuses to generate past it
+// so extending the session is a single number — but it has to move in every
+// place that enforces it, including interviews.interviewDuration, which the
+// overdue-interview job compares against interviewStartedAt to time the session
+// out from underneath the candidate.
+//
+// `timerStartedAt` never moves: the clock keeps running, so the new ceiling is
+// "minutes already elapsed + the extension". The client derives its countdown as
+// durationMinutes - elapsed since timerStartedAt, so this keeps that derivation
+// correct with no extra arithmetic on either side.
+const MIN_EXTENSION_MINUTES = 1;
+const MAX_EXTENSION_MINUTES = 60;
+const DEFAULT_EXTENSION_MINUTES = 5;
+
+export interface DurationExtension {
+  timerStartedAt: string;
+  durationMinutes: number;
+  extraMinutes: number;
+  totalQuestions: number | null;
+}
+
+export async function extendInterviewTimeService(
+  interviewId: string,
+  requestedExtraMinutes: number,
+): Promise<DurationExtension | null> {
+  const context = await readInterviewContext(interviewId);
+  const interview = await fetchInterviewById(interviewId);
+  // No context means the session was never really running; a non-INPROGRESS
+  // interview means it already ended under the candidate. Both are reported to
+  // the caller as "nothing to extend" rather than silently extending a session
+  // that the client only thinks is live.
+  if (!context || interview?.interviewStatus !== "INPROGRESS") return null;
+
+  const requested = Math.round(requestedExtraMinutes);
+  const extraMinutes = Number.isFinite(requested)
+    ? Math.min(MAX_EXTENSION_MINUTES, Math.max(MIN_EXTENSION_MINUTES, requested))
+    : DEFAULT_EXTENSION_MINUTES;
+
+  const elapsedMinutes = elapsedMinutesSince(context.timerStartedAt);
+  const durationMinutes = Math.ceil(elapsedMinutes) + extraMinutes;
+
+  // Keep the question estimate honest. The client renders "Qn of total" from
+  // this number, and the estimate (duration/5) is routinely passed by the real
+  // session — which is how a label like "Q6 of 3" became possible. Extending
+  // adds questions in practice, so the total must never sit below the question
+  // the candidate is looking at, nor below the questions the new window affords.
+  const totalQuestions =
+    context.questionState.totalQuestions === null
+      ? null
+      : Math.max(
+          context.questionState.totalQuestions,
+          context.questionState.currentIndex + 1,
+          Math.ceil(durationMinutes / 5),
+        );
+
+  await writeInterviewContext(
+    {
+      ...context,
+      config: { ...context.config, durationMinutes },
+      questionState: { ...context.questionState, totalQuestions },
+    },
+    durationMinutes,
+  );
+
+  const db = getPgDb();
+  await db
+    .update(interviewsTable)
+    .set({ interviewDuration: durationMinutes, lastActivityAt: new Date() })
+    .where(
+      and(eq(interviewsTable.id, interviewId), eq(interviewsTable.interviewStatus, "INPROGRESS")),
+    );
+
+  logger.info(
+    { interviewId, elapsedMinutes: Math.floor(elapsedMinutes), extraMinutes, durationMinutes },
+    "[interview] duration extended",
+  );
+
+  return { timerStartedAt: context.timerStartedAt, durationMinutes, extraMinutes, totalQuestions };
 }
 
 // ── Shared skip/timeout helper ────────────────────────────────────────────────
@@ -1488,6 +1598,18 @@ export async function submitAnswerService(
         ...context,
         performanceState: updatedPerfState,
         adaptationHistory: [...context.adaptationHistory, decision],
+        // Persist the decision so the *synchronous* generation path can honour it
+        // too. The lookahead pre-warm gets this hint directly, but the cache can
+        // miss (TTL, restart, a failed pre-warm, a discarded lookahead) — and on
+        // that path the hint was previously dropped on the floor.
+        //
+        // Without it the router falls back to its no-hint default
+        // (graph.ts routerNode → mode "follow_up", and prompts.ts then sends
+        // "Generate a natural follow-up to the previous question" with no score
+        // or difficulty signal), which is exactly how two consecutive questions
+        // came back as near-duplicates of each other instead of being
+        // differentiated by the previous answer's evaluation.
+        pendingAdaptationHint: decision.hint,
       };
       await writeInterviewContext(updatedContext, context.config.durationMinutes);
 

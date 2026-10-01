@@ -11,6 +11,7 @@ import {
   VideoOff,
   Wifi,
   WifiOff,
+  Loader2,
   Maximize2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -304,6 +305,186 @@ function ControlButton({
     >
       {active ? <IconOn className="size-4.5" /> : <IconOff className="size-4.5" />}
     </button>
+  )
+}
+
+/* ---------------- duration-ended dialog (FR-25) ---------------- */
+
+/** Quick-pick extensions. Anything else is typed into the custom field. */
+const EXTRA_TIME_OPTIONS = [5, 10, 15] as const
+const MIN_EXTRA_MINUTES = 1
+const MAX_EXTRA_MINUTES = 60
+
+// The duration-ended prompt is deliberately not dismissible by backdrop click or
+// Escape: the session is paused behind it and this dialog is the only choice.
+const ignoreDialogClose = () => undefined
+
+/**
+ * Shown the moment the configured duration runs out. The room is paused behind
+ * this dialog, so it is the only way forward: extend the session, or end it.
+ * The copy names the duration that just ended — the candidate is being asked to
+ * decide on a concrete number, not a vague "more time?".
+ */
+export function TimeUpDialog({
+  open,
+  durationMinutes,
+  socketError,
+  onExtend,
+  onEnd,
+}: {
+  open: boolean
+  durationMinutes: number
+  /** The live socket's current error, used to surface a refused extension. */
+  socketError?: string | null
+  onExtend: (extraMinutes: number) => void
+  onEnd: () => void
+}) {
+  if (!open) return null
+  // Mounted only while the prompt is up: its pending/error state dies with it, so
+  // a stale "waiting for confirmation" can never leak into the next expiry.
+  return <TimeUpPanel durationMinutes={durationMinutes} socketError={socketError} onExtend={onExtend} onEnd={onEnd} />
+}
+
+function TimeUpPanel({
+  durationMinutes,
+  socketError,
+  onExtend,
+  onEnd,
+}: {
+  durationMinutes: number
+  socketError?: string | null
+  onExtend: (extraMinutes: number) => void
+  onEnd: () => void
+}) {
+  const [selected, setSelected] = React.useState<number>(10)
+  const [custom, setCustom] = React.useState('')
+  // Non-null while an extension is in flight; it carries the socket error that
+  // was already on screen when the attempt started.
+  const [attempt, setAttempt] = React.useState<{ errorAtStart: string | null } | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const timeoutRef = React.useRef<number | null>(null)
+
+  React.useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
+    },
+    [],
+  )
+
+  const pending = attempt !== null
+  // The extension is a request with no ack of its own, so a refusal only shows up
+  // as a new websocket error; holding the message that was already on screen keeps
+  // an older one from reading as a rejection of this attempt.
+  const refusal =
+    attempt && socketError && socketError !== attempt.errorAtStart ? socketError : null
+
+  const requestExtension = (extraMinutes: number) => {
+    setError(null)
+    setAttempt({ errorAtStart: socketError ?? null })
+    onExtend(extraMinutes)
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => {
+      setAttempt(null)
+      setError('No confirmation from the server. Try again, or end the interview.')
+    }, 8000)
+  }
+
+  const customValue = Number.parseInt(custom, 10)
+  const customValid =
+    custom.trim() !== '' &&
+    Number.isFinite(customValue) &&
+    customValue >= MIN_EXTRA_MINUTES &&
+    customValue <= MAX_EXTRA_MINUTES
+  const extraMinutes = customValid ? customValue : selected
+
+  return (
+    <Dialog open onClose={ignoreDialogClose} className="max-w-md">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-(--signal-vague)/10 ring-1 ring-(--signal-vague)/30">
+            <AlertTriangle className="size-4 text-signal-vague" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Your time is up</h2>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              The session is paused
+            </p>
+          </div>
+        </div>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Your interview duration ({durationMinutes} min) has ended. Would you like to
+          continue with extra time, or end the interview here? Your current question is
+          still waiting — nothing has been submitted or skipped.
+        </p>
+
+        <div className="rounded-xl border border-border bg-background/60 p-3">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            Add more time
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {EXTRA_TIME_OPTIONS.map((minutes) => {
+              const active = !customValid && selected === minutes
+              return (
+                <button
+                  key={minutes}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setCustom('')
+                    setSelected(minutes)
+                  }}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 font-mono text-xs transition-colors',
+                    active
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
+                  )}
+                >
+                  +{minutes} min
+                </button>
+              )
+            })}
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-mono text-[10px] uppercase tracking-wider">Custom</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={MIN_EXTRA_MINUTES}
+                max={MAX_EXTRA_MINUTES}
+                value={custom}
+                onChange={(event) => setCustom(event.target.value)}
+                aria-label="Custom extra minutes"
+                placeholder={`${MIN_EXTRA_MINUTES}-${MAX_EXTRA_MINUTES}`}
+                className="w-16 rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-xs text-foreground outline-none focus-visible:border-primary/50"
+              />
+              <span>min</span>
+            </label>
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            The clock restarts at {extraMinutes} min and you resume the same question, at
+            the same count — no question is skipped.
+          </p>
+        </div>
+
+        {error || refusal ? (
+          <p role="alert" className="flex items-start gap-2 rounded-lg border border-(--signal-weak)/30 bg-(--signal-weak)/5 px-3 py-2 text-xs leading-relaxed text-signal-weak">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            {error ?? refusal}
+          </p>
+        ) : null}
+
+        <div className="mt-1 flex flex-wrap justify-end gap-2">
+          <Button variant="destructive" onClick={onEnd} disabled={pending}>
+            <PhoneOff className="size-4" />
+            End interview
+          </Button>
+          <Button onClick={() => requestExtension(extraMinutes)} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            {pending ? 'Extending…' : 'Add more time & continue'}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 

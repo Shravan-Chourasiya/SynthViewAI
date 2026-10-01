@@ -56,6 +56,13 @@ export interface CancelPayload extends WsBase {
   interviewId: string;
 }
 
+// Sent when the candidate picks "add more time" in the duration-ended prompt.
+export interface ExtendTimePayload extends WsBase {
+  event: "interview:extend_time";
+  interviewId: string;
+  extraMinutes: number;
+}
+
 // ── Server → Client payloads ──────────────────────────────────────────────────
 
 export interface JoinedPayload extends WsBase {
@@ -128,6 +135,15 @@ export interface TimerExpiredPayload extends WsBase {
   event: "timer:expired";
   interviewId: string;
   expiredAt: string;
+}
+
+export interface TimerExtendedPayload extends WsBase {
+  event: "interview:timer_extended";
+  interviewId: string;
+  timerStartedAt: string;
+  durationMinutes: number;
+  extraMinutes: number;
+  totalQuestions: number | null;
 }
 
 export interface HeartbeatPingPayload extends WsBase {

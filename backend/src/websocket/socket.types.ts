@@ -112,6 +112,14 @@ export interface EndInterviewPayload extends BasePayload {
   interviewId: string;
 }
 
+// Candidate chose "add more time" in the duration-ended prompt. The server is
+// authoritative for the ceiling, so the extension must be applied there too.
+export interface ExtendInterviewTimePayload extends BasePayload {
+  event: "interview:extend_time";
+  interviewId: string;
+  extraMinutes: number;
+}
+
 export interface ClientToServerEvents {
   "interview:join": (payload: JoinInterviewPayload) => void;
   "interview:leave": (payload: LeaveInterviewPayload) => void;
@@ -121,6 +129,7 @@ export interface ClientToServerEvents {
   "question:next": (payload: RequestNextQuestionPayload) => void;
   "interview:cancel": (payload: CancelInterviewPayload) => void;
   "interview:end": (payload: EndInterviewPayload) => void;
+  "interview:extend_time": (payload: ExtendInterviewTimePayload) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,6 +238,19 @@ export interface TimerExpiredPayload extends BasePayload {
   expiredAt: string; // ISO-8601
 }
 
+// Emitted after an accepted extension so every client tab can restart its
+// countdown against the new ceiling. `durationMinutes` is minutes since
+// `timerStartedAt`, so the client re-derives remaining time the same way it does
+// from interview:joined — no separate math per client.
+export interface InterviewTimerExtendedPayload extends BasePayload {
+  event: "interview:timer_extended";
+  interviewId: string;
+  timerStartedAt: string; // ISO-8601 — unchanged, the clock keeps running
+  durationMinutes: number; // new ceiling, measured from timerStartedAt
+  extraMinutes: number;
+  totalQuestions: number | null;
+}
+
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
 // Server-initiated application-level ping; client must respond with heartbeat:ack
 export interface HeartbeatPingPayload extends BasePayload {
@@ -251,6 +273,7 @@ export interface ServerToClientEvents {
   "evaluation:feedback": (payload: EvaluationFeedbackPayload) => void;
   // Timer
   "timer:expired": (payload: TimerExpiredPayload) => void;
+  "interview:timer_extended": (payload: InterviewTimerExtendedPayload) => void;
   // Heartbeat
   "heartbeat:ping": (payload: HeartbeatPingPayload) => void;
   // Errors — always on this dedicated event name, never mixed into the stream

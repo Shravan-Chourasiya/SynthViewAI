@@ -601,4 +601,207 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       expect(useLiveInterviewStore.getState().currentQuestion?.id).toBe('q-2');
     });
   });
+
+  describe('duration expiry pause', () => {
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+
+    /** Join a session whose configured window has already elapsed. */
+    const joinExpired = (durationMinutes = 15, startedMinutesAgo = 16) => ({
+      interviewId: mockInterviewId,
+      timerStartedAt: new Date(Date.now() - startedMinutesAgo * 60 * 1000).toISOString(),
+      durationMinutes,
+      answeredQuestionIds: [],
+    });
+
+    const nextQuestionEmissions = () =>
+      capturedSocket.emittedEvents.filter(
+        (event: { event: string }) => event.event === SOCKET_EVENTS.client.nextQuestion,
+      );
+
+    it('pauses instead of advancing when the duration runs out', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.joined, joinExpired());
+      await settle();
+
+      // The countdown derives from the server start time, so an already-spent
+      // window pauses the room on the very first tick.
+      const state = useLiveInterviewStore.getState();
+      expect(state.timeExpired).toBe(true);
+      expect(state.remainingSeconds).toBe(0);
+
+      // Nothing may be asked for past this point: this is the path that used to
+      // hand the candidate a fresh question (and bump the counter with it)
+      // after the timer had already read 00:00.
+      capturedSocket.clearEmittedEvents();
+      act(() => {
+        result.current.requestNextQuestion();
+      });
+      expect(nextQuestionEmissions()).toHaveLength(0);
+    });
+
+    it('keeps a paused room paused even while the last answer is being scored', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.joined, joinExpired());
+      await settle();
+      capturedSocket.clearEmittedEvents();
+
+      // An answer must not slip out of a stale handler either.
+      act(() => {
+        result.current.submitAnswer('q-1', 'Submitted after the deadline.', 'TEXT');
+      });
+      expect(
+        capturedSocket.emittedEvents.filter(
+          (event: { event: string }) => event.event === SOCKET_EVENTS.client.answerSubmit,
+        ),
+      ).toHaveLength(0);
+
+      // The evaluation of whatever was already in flight still lands, but it
+      // must not trigger the next question.
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.evaluationFeedback, {
+        interviewId: mockInterviewId,
+        questionId: 'q-1',
+        answerId: 'answer-1',
+        shouldAdvance: true,
+        score: 72,
+        correctness: 70,
+        relevance: 74,
+        clarity: 76,
+        technicalDepth: 68,
+        feedback: 'Solid answer.',
+        strengths: ['Structure'],
+        weaknesses: ['Depth'],
+        timestamp: new Date().toISOString(),
+      });
+      await settle();
+
+      expect(nextQuestionEmissions()).toHaveLength(0);
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('idle');
+      expect(useLiveInterviewStore.getState().timeExpired).toBe(true);
+    });
+
+    it('emits the chosen extension and resumes on the server confirmation', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      const joined = joinExpired();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.joined, joined);
+      await settle();
+      expect(useLiveInterviewStore.getState().timeExpired).toBe(true);
+
+      capturedSocket.clearEmittedEvents();
+      act(() => {
+        result.current.extendTime(10);
+      });
+
+      const extendEvents = capturedSocket.emittedEvents.filter(
+        (event: { event: string }) => event.event === SOCKET_EVENTS.client.extendTime,
+      );
+      expect(extendEvents).toHaveLength(1);
+      expect(extendEvents[0].data).toMatchObject({
+        eventVersion: 1,
+        event: SOCKET_EVENTS.client.extendTime,
+        interviewId: mockInterviewId,
+        extraMinutes: 10,
+      });
+
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.timerExtended, {
+        interviewId: mockInterviewId,
+        timerStartedAt: joined.timerStartedAt,
+        durationMinutes: 25,
+        extraMinutes: 10,
+        totalQuestions: 6,
+      });
+      await settle();
+
+      const state = useLiveInterviewStore.getState();
+      expect(state.timeExpired).toBe(false);
+      expect(state.totalQuestions).toBe(6);
+      // 16 minutes spent of the new 25-minute ceiling.
+      expect(state.remainingSeconds).toBeGreaterThan(0);
+      expect(state.aiStatus).toBe('idle');
+
+      // The question on screen was never answered, so resuming it IS the resume:
+      // nothing is fetched and the counter does not move.
+      expect(nextQuestionEmissions()).toHaveLength(0);
+      expect(useLiveInterviewStore.getState().questionNumber).toBe(0);
+    });
+
+    it('completes the swallowed advance once the extension is confirmed', async () => {
+      const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
+      await settle();
+
+      capturedSocket.simulateConnect();
+      const joined = joinExpired();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.joined, joined);
+      await settle();
+      capturedSocket.clearEmittedEvents();
+
+      // The answer was already being scored when the window closed.
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.evaluationFeedback, {
+        interviewId: mockInterviewId,
+        questionId: 'q-1',
+        answerId: 'answer-1',
+        shouldAdvance: true,
+        score: 81,
+        correctness: 80,
+        relevance: 82,
+        clarity: 84,
+        technicalDepth: 78,
+        feedback: 'Strong answer.',
+        strengths: ['Depth'],
+        weaknesses: [],
+        timestamp: new Date().toISOString(),
+      });
+      await settle();
+
+      expect(nextQuestionEmissions()).toHaveLength(0);
+      // Owed, not dropped.
+      expect(useLiveInterviewStore.getState().pendingAdvance).toBe(true);
+
+      act(() => {
+        result.current.extendTime(5);
+      });
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.timerExtended, {
+        interviewId: mockInterviewId,
+        timerStartedAt: joined.timerStartedAt,
+        durationMinutes: 21,
+        extraMinutes: 5,
+        totalQuestions: 6,
+      });
+      await settle();
+
+      // The already-evaluated question must not come back: the extension picks up
+      // where the scored answer left off.
+      expect(nextQuestionEmissions()).toHaveLength(1);
+      expect(useLiveInterviewStore.getState().pendingAdvance).toBe(false);
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('generating');
+
+      capturedSocket.simulateServerEvent(
+        SOCKET_EVENTS.server.questionDelivered,
+        {
+          interviewId: mockInterviewId,
+          questionId: 'q-2',
+          sequenceNumber: 2,
+          totalQuestions: 6,
+          questionType: 'TECHNICAL' as const,
+          questionTitle: 'Explain database indexing',
+          questionDescription: 'Cover the trade-offs.',
+          deliveredAt: new Date().toISOString(),
+          timeoutSeconds: 300,
+        },
+      );
+      await settle();
+
+      // A genuinely new question is the only thing allowed to move the counter.
+      expect(useLiveInterviewStore.getState().questionNumber).toBe(2);
+      expect(useLiveInterviewStore.getState().aiStatus).toBe('idle');
+    });
+  });
 });

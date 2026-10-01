@@ -18,6 +18,20 @@ export type LiveInterviewState = {
   timerStartedAt: string | null;
   durationMinutes: number | null;
   remainingSeconds: number;
+  /**
+   * True from the moment the configured duration runs out. The room pauses on
+   * this: no fetch, no generation, no question advance, and no submit — the
+   * candidate is asked whether to extend or end. Cleared only by an accepted
+   * extension (or by a session reset).
+   */
+  timeExpired: boolean;
+  /**
+   * A scored answer was waiting to advance when the duration ran out. The pause
+   * swallowed that advance on purpose; this records that it is still owed, so an
+   * accepted extension fetches the next question instead of re-opening a
+   * question the server has already evaluated.
+   */
+  pendingAdvance: boolean;
   currentQuestion: Question | null;
   questionNumber: number;
   totalQuestions: number | null;
@@ -50,12 +64,30 @@ export type LiveInterviewState = {
   applyEvaluation: (evaluation: Evaluation) => void;
   markAnswered: (questionId: string) => void;
   setRemainingSeconds: (remainingSeconds: number) => void;
+  setTimeExpired: (timeExpired: boolean) => void;
+  setPendingAdvance: (pendingAdvance: boolean) => void;
+  /** Applies an accepted "add more time" from the server. */
+  applyTimerExtended: (payload: {
+    timerStartedAt: string;
+    durationMinutes: number;
+    totalQuestions: number | null;
+  }) => void;
   appendTranscript: (entry: string) => void;
   setError: (error: string | null) => void;
   setMediaStream: (mediaStream: MediaStream | null) => void;
   clearMediaStream: () => void;
   reset: () => void;
 };
+
+// The countdown is always derived from the server-authoritative start time, never
+// accumulated locally — a local tick that drifts or pauses with the tab would
+// show time that the session does not have. Returns 0 once the ceiling is passed.
+export function remainingSecondsFor(timerStartedAt: string, durationMinutes: number): number {
+  const startedMs = Date.parse(timerStartedAt);
+  if (!Number.isFinite(startedMs)) return durationMinutes * 60;
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+  return Math.max(0, durationMinutes * 60 - elapsedSeconds);
+}
 
 const initialState = {
   interviewId: null,
@@ -64,6 +96,8 @@ const initialState = {
   timerStartedAt: null,
   durationMinutes: null,
   remainingSeconds: 0,
+  timeExpired: false,
+  pendingAdvance: false,
   currentQuestion: null,
   questionNumber: 0,
   totalQuestions: null,
@@ -85,7 +119,11 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
       interviewId,
       timerStartedAt,
       durationMinutes,
-      remainingSeconds: durationMinutes * 60,
+      // A join can be a resume of a session that is already part-way through, so
+      // the first painted timer must be the real remaining time — the 1 s tick
+      // would otherwise show a full duration for a moment on every reconnect.
+      remainingSeconds: remainingSecondsFor(timerStartedAt, durationMinutes),
+      timeExpired: false,
       answeredQuestionIds,
       answeredCount: answeredQuestionIds.length,
     }),
@@ -126,6 +164,26 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
     ? state
     : { answeredQuestionIds: [...state.answeredQuestionIds, questionId], answeredCount: state.answeredCount + 1 }),
   setRemainingSeconds: (remainingSeconds) => set({ remainingSeconds }),
+  setTimeExpired: (timeExpired) => set({ timeExpired }),
+  setPendingAdvance: (pendingAdvance) => set({ pendingAdvance }),
+  applyTimerExtended: ({ timerStartedAt, durationMinutes, totalQuestions }) =>
+    set((state) => ({
+      timerStartedAt,
+      durationMinutes,
+      remainingSeconds: remainingSecondsFor(timerStartedAt, durationMinutes),
+      // The extension is the only thing that un-pauses the room, and the new
+      // total may have grown (see extendInterviewTimeService) so the "Qn of
+      // total" label stays true for the questions the new window affords.
+      timeExpired: false,
+      pendingAdvance: false,
+      ...(totalQuestions !== null ? { totalQuestions } : {}),
+      // Nothing is being generated while paused, so there is no in-flight work
+      // for the busy state to describe once the candidate is cleared to answer.
+      aiStatus:
+        state.interviewStatus === "INPROGRESS" || state.interviewStatus === null
+          ? ("idle" as LiveAiStatus)
+          : state.aiStatus,
+    })),
   appendTranscript: (entry) =>
     set((state) => ({ transcript: [...state.transcript, entry] })),
   setError: (error) => set({ error }),

@@ -14,6 +14,7 @@ export const SOCKET_EVENTS = {
     nextQuestion: "question:next",
     cancel: "interview:cancel",
     end: "interview:end",
+    extendTime: "interview:extend_time",
   },
   /** Events emitted by the server → client */
   server: {
@@ -25,6 +26,7 @@ export const SOCKET_EVENTS = {
     aiStatus: "ai:status",
     evaluationFeedback: "evaluation:feedback",
     timerExpired: "timer:expired",
+    timerExtended: "interview:timer_extended",
     heartbeatPing: "heartbeat:ping",
     error: "ws:error",
   },

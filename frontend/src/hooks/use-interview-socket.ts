@@ -3,6 +3,7 @@ import type { Socket } from "socket.io-client";
 import { useAuthStore } from "@/lib/stores/auth.store";
 import {
   useLiveInterviewStore,
+  remainingSecondsFor,
   type LiveConnectionState,
 } from "@/lib/stores/live-interview.store";
 import { createInterviewSocket } from "@/lib/socket/interview-socket";
@@ -16,6 +17,7 @@ import type {
   QuestionDeliveredPayload,
   StateChangePayload,
   TimerExpiredPayload,
+  TimerExtendedPayload,
   WsErrorPayload,
 } from "@/lib/types/ws";
 import type { Evaluation, Question } from "@/lib/types";
@@ -31,6 +33,8 @@ type SocketHookResult = {
   requestNextQuestion: () => void;
   cancelInterview: () => void;
   endInterview: () => void;
+  /** Ask the server to move the duration ceiling forward ("add more time"). */
+  extendTime: (extraMinutes: number) => void;
 };
 
 const WS_ERROR_MESSAGES: Record<WsErrorPayload["code"], string> = {
@@ -107,6 +111,10 @@ export function useInterviewSocket(
   // and keeps the websocket payload consistent.
   const requestNextQuestion = useCallback(() => {
     if (!interviewId) return;
+    // The duration is spent: the room is paused on the end-of-duration prompt
+    // and asking for another question here is exactly what used to hand the
+    // candidate a fresh question past 00:00 (and advance the counter with it).
+    if (store.getState().timeExpired) return;
     socketRef.current?.emit(SOCKET_EVENTS.client.nextQuestion, {
       interviewId,
       eventVersion: EVENT_VERSION,
@@ -213,20 +221,48 @@ export function useInterviewSocket(
       }
     });
 
+    // One tick implementation for the whole session. It reads the ceiling from
+    // the store on every tick rather than closing over the join payload, so an
+    // accepted extension takes effect without rebuilding the interval — and it
+    // stops itself at 00:00 instead of ticking against a finished session.
+    const startTimer = (timerStartedAt: string, durationMinutes: number) => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      const tick = () => {
+        const state = store.getState();
+        const remaining = remainingSecondsFor(
+          state.timerStartedAt ?? timerStartedAt,
+          state.durationMinutes ?? durationMinutes,
+        );
+        state.setRemainingSeconds(remaining);
+        if (remaining > 0) return;
+        // Duration spent: stop counting and pause the room. Nothing is fetched
+        // and nothing is generated from here — the candidate decides whether to
+        // extend or to end.
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = null;
+        if (!store.getState().timeExpired) store.getState().setTimeExpired(true);
+      };
+      tick();
+      timerRef.current = setInterval(tick, 1000);
+    };
     socket.on(SOCKET_EVENTS.server.joined, (payload: JoinedPayload) => {
       store.getState().applyJoined(payload);
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        const elapsed = Math.max(
-          0,
-          Math.floor((Date.now() - Date.parse(payload.timerStartedAt)) / 1000),
-        );
-        store
-          .getState()
-          .setRemainingSeconds(
-            Math.max(0, payload.durationMinutes * 60 - elapsed),
-          );
-      }, 1000);
+      startTimer(payload.timerStartedAt, payload.durationMinutes);
+    });
+    socket.on(SOCKET_EVENTS.server.timerExtended, (payload: TimerExtendedPayload) => {
+      const owedAdvance = store.getState().pendingAdvance;
+      store.getState().applyTimerExtended(payload);
+      startTimer(payload.timerStartedAt, payload.durationMinutes);
+      // The timer ran out while the last answer was still being scored, so the
+      // advance it triggered was swallowed by the pause. Resuming the *same*
+      // question is only correct while that question is still open — here it has
+      // already been evaluated, and re-opening it would invite a second answer
+      // for the same question. The extension pays the owed advance instead.
+      if (owedAdvance && !store.getState().timeExpired) {
+        store.getState().setPendingAdvance(false);
+        store.getState().setAiStatus("generating");
+        requestNextQuestion();
+      }
     });
     socket.on(SOCKET_EVENTS.server.left, (_payload: LeftPayload) => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -262,7 +298,17 @@ export function useInterviewSocket(
         store.getState().applyEvaluation(evaluationFromPayload(payload));
         // Evaluation feedback is the canonical advancement signal. Keying by
         // question id makes duplicate websocket deliveries harmless.
-        if (payload.shouldAdvance !== false) {
+        //
+        // A paused room never advances: the answer that was in flight when the
+        // timer ran out is scored and stored, but the next question is not
+        // requested until the candidate says how to continue.
+        if (payload.shouldAdvance !== false && store.getState().timeExpired) {
+          // Paused: the answer is scored and stored, but the room does not move.
+          // The advance is recorded rather than dropped, so an accepted extension
+          // can complete it (see the timer_extended handler below).
+          store.getState().setPendingAdvance(true);
+          store.getState().setAiStatus("idle");
+        } else if (payload.shouldAdvance !== false) {
           // Stay busy ("generating") until question:delivered arrives, which is
           // what clears this status. Dropping to "idle" here re-enabled the
           // submit button and hid the spinner while the server was still
@@ -279,11 +325,15 @@ export function useInterviewSocket(
         }
       },
     );
-    socket.on(
-      SOCKET_EVENTS.server.timerExpired,
-      (_payload: TimerExpiredPayload) =>
-        store.getState().setRemainingSeconds(0),
-    );
+    socket.on(SOCKET_EVENTS.server.timerExpired, (_payload: TimerExpiredPayload) => {
+      // Server-side confirmation of the deadline (the maintenance job emits it).
+      // Same pause as the local tick — the prompt is driven by timeExpired, so
+      // both paths land on the identical state.
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+      store.getState().setRemainingSeconds(0);
+      store.getState().setTimeExpired(true);
+    });
     socket.on(SOCKET_EVENTS.server.heartbeatPing, () =>
       socket.emit(SOCKET_EVENTS.client.heartbeatAck, {
         eventVersion: EVENT_VERSION,
@@ -341,6 +391,9 @@ export function useInterviewSocket(
       answerType: "TEXT" | "AUDIO" | "VIDEO" = "TEXT",
     ) => {
       if (!interviewId) return;
+      // Transport-level guard for the paused state: the room disables the button
+      // too, but a submit must never slip through from a stale handler.
+      if (store.getState().timeExpired) return;
       store.getState().appendTranscript(answerData);
       store.getState().setAiStatus("evaluating");
       emit(SOCKET_EVENTS.client.answerSubmit, {
@@ -365,11 +418,20 @@ export function useInterviewSocket(
     if (interviewId) emit(SOCKET_EVENTS.client.end, { interviewId });
   }, [emit, interviewId]);
 
+  const extendTime = useCallback(
+    (extraMinutes: number) => {
+      if (!interviewId) return;
+      emit(SOCKET_EVENTS.client.extendTime, { interviewId, extraMinutes });
+    },
+    [emit, interviewId],
+  );
+
   return {
     connectionState,
     submitAnswer,
     requestNextQuestion,
     cancelInterview,
     endInterview,
+    extendTime,
   };
 }

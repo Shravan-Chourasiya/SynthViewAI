@@ -26,6 +26,7 @@ import {
   generateAndDeliverQuestionService,
   requestNextQuestionService,
   pauseInterviewService,
+  extendInterviewTimeService,
 } from "../modules/interview/services/interview.service.js";
 import { readInterviewContext } from "../modules/interview/services/interview.context.service.js";
 import { logger } from "../utils/logger.js";
@@ -388,6 +389,48 @@ export function registerInterviewGateway(io: IoServer): void {
         } catch (err) {
           const code = toWsErrorCode(err);
           socket.emit("ws:error", wsError(code, `End failed: ${code}`, interviewId));
+        }
+      })();
+    });
+
+    // ── interview:extend_time ───────────────────────────────────────────────
+    // The candidate's answer to the duration-ended prompt. The client pauses
+    // itself at 00:00 and sends nothing else until it hears back, so this is the
+    // only path that can move the ceiling — and the ceiling has to move on the
+    // server too, or the very next question request would complete the interview.
+    socket.on("interview:extend_time", (payload) => {
+      void (async () => {
+        const { interviewId, extraMinutes } = payload;
+        try {
+          await assertInterviewAccess(socket, interviewId);
+          const extension = await extendInterviewTimeService(interviewId, extraMinutes);
+          if (!extension) {
+            socket.emit(
+              "ws:error",
+              wsError(
+                "INTERVIEW_INVALID_STATE",
+                "This interview has already ended and can no longer be extended",
+                interviewId,
+              ),
+            );
+            return;
+          }
+          io.to(INTERVIEW_ROOM(interviewId)).emit("interview:timer_extended", {
+            eventVersion: EVENT_VERSION,
+            event: "interview:timer_extended",
+            interviewId,
+            timerStartedAt: extension.timerStartedAt,
+            durationMinutes: extension.durationMinutes,
+            extraMinutes: extension.extraMinutes,
+            totalQuestions: extension.totalQuestions,
+          });
+          logger.info(
+            { socketId: socket.id, interviewId, extraMinutes: extension.extraMinutes },
+            "[ws] interview duration extended",
+          );
+        } catch (err) {
+          const code = toWsErrorCode(err);
+          socket.emit("ws:error", wsError(code, `Extend time failed: ${code}`, interviewId));
         }
       })();
     });

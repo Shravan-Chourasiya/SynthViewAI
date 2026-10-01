@@ -8,6 +8,7 @@ import {
   ConnectionIndicator,
   EndInterviewDialog,
   InterviewTimer,
+  TimeUpDialog,
   VideoTile,
 } from '@/components/interview-room/widgets'
 import { buttonVariants } from '@/components/ui/button'
@@ -19,6 +20,10 @@ import { useLiveInterviewStore } from '@/lib/stores/live-interview.store'
 import type { Interview } from '@/lib/types'
 import type { AIState, ConnectionState } from '@/components/interview-room/widgets'
 import { cn } from '@/lib/utils'
+
+// The Session notes panel is a placeholder awaiting its own redesign. The copy is
+// kept here (not deleted) but rendered nowhere until that work lands.
+const SHOW_SESSION_NOTES = false
 
 export function LiveRoomPage() {
   const { id } = useParams()
@@ -35,6 +40,7 @@ export function LiveRoomPage() {
   const mediaStream = useLiveInterviewStore((s) => s.mediaStream)
   const clearMediaStream = useLiveInterviewStore((s) => s.clearMediaStream)
   const setMediaStream = useLiveInterviewStore((s) => s.setMediaStream)
+  const timeExpired = useLiveInterviewStore((s) => s.timeExpired)
   const [interview, setInterview] = useState<Interview | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [ended, setEnded] = useState(false)
@@ -48,7 +54,7 @@ export function LiveRoomPage() {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
   const screenVideoRef = useRef<HTMLVideoElement>(null); // Ref for screen video element
   const [endOpen, setEndOpen] = useState(false)
-  const { submitAnswer, endInterview } = useInterviewSocket(interview?.id)
+  const { submitAnswer, endInterview, extendTime } = useInterviewSocket(interview?.id)
 
   const conn = connectionState as ConnectionState
   const ai = aiStatus === 'thinking' ? 'preparing' : aiStatus === 'generating' ? 'adapting' : aiStatus === 'evaluating' ? 'evaluating' : aiStatus === 'idle' ? 'idle' : 'ready' as AIState
@@ -146,11 +152,16 @@ export function LiveRoomPage() {
   }
 
   useEffect(() => {
-    if (interviewStatus === 'CANCELLED' && interview) {
+    if (!interview) return
+    // Every terminal state has to take the candidate somewhere. TIMED_OUT and
+    // ABANDONED are reachable while this room is open — the maintenance sweep
+    // times out a session whose wall-clock window has passed — and a room that
+    // navigated for CANCELLED/COMPLETED only was left sitting on a dead session.
+    if (interviewStatus === 'CANCELLED' || interviewStatus === 'TIMED_OUT' || interviewStatus === 'ABANDONED' || interviewStatus === 'EXPIRED') {
       clearMediaStream()
       navigate(`/interviews/${interview.id}`, { replace: true })
     }
-    if (interviewStatus === 'COMPLETED' && interview) {
+    if (interviewStatus === 'COMPLETED') {
       clearMediaStream()
       navigate(`/interviews/${interview.id}/completed`, { replace: true })
     }
@@ -269,16 +280,18 @@ export function LiveRoomPage() {
                 <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: '0%' }} />
               </div>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Session notes
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                The interviewer adapts after every answer — strong responses raise
-                difficulty, and vague ones trigger follow-ups. Your next question is
-                prepared while the current answer is evaluated.
-              </p>
-            </div>
+            {SHOW_SESSION_NOTES ? (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Session notes
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  The interviewer adapts after every answer — strong responses raise
+                  difficulty, and vague ones trigger follow-ups. Your next question is
+                  prepared while the current answer is evaluated.
+                </p>
+              </div>
+            ) : null}
           </aside>
         </div>
 
@@ -342,6 +355,7 @@ export function LiveRoomPage() {
                 index={qIndex}
                 total={qTotal}
                 busy={busy}
+                paused={timeExpired}
                 onSubmit={(text) => submitAnswer(question.id, text)}
               />
             </div>
@@ -389,13 +403,18 @@ export function LiveRoomPage() {
                 Q{qIndex}/{qTotal ?? '…'}
               </p>
             </div>
+            {/* One semantic for both the bar and the label: how far into the
+                session the candidate is, counting the question on screen. They
+                used to disagree — the label counted the current question (Q3/3)
+                while the bar counted only completed ones (2/3), so the last
+                question of a three-question interview showed a two-thirds bar
+                next to a 3/3 label. The server keeps the total at or above the
+                current position, so this can never exceed 100%. */}
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
               <div
                 className="h-full rounded-full bg-primary transition-[width] duration-500"
                 style={{
-                  width: qTotal
-                    ? `${((qIndex - 1) / qTotal) * 100}%`
-                    : '0%',
+                  width: qTotal ? `${Math.min(100, (qIndex / qTotal) * 100)}%` : '0%',
                 }}
               />
             </div>
@@ -407,16 +426,18 @@ export function LiveRoomPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              Session notes
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              The interviewer adapts after every answer — strong responses raise
-              difficulty, and vague ones trigger follow-ups. Your next question is
-              prepared while the current answer is evaluated.
-            </p>
-          </div>
+          {SHOW_SESSION_NOTES ? (
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Session notes
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                The interviewer adapts after every answer — strong responses raise
+                difficulty, and vague ones trigger follow-ups. Your next question is
+                prepared while the current answer is evaluated.
+              </p>
+            </div>
+          ) : null}
         </aside>
       </div>
 
@@ -436,6 +457,18 @@ export function LiveRoomPage() {
         answeredCount={answeredCount}
         onClose={() => setEndOpen(false)}
         onConfirm={() => { setEndOpen(false); endInterview() }}
+      />
+
+      {/* Rendered inside the room rather than as its own screen: the room stays
+          mounted, so the prompt appears the instant the timer reaches 00:00 —
+          no unmount, no blank frame, and the question the candidate was on is
+          still on screen behind it. */}
+      <TimeUpDialog
+        open={timeExpired}
+        durationMinutes={interview.durationMin}
+        socketError={socketError}
+        onExtend={extendTime}
+        onEnd={endInterview}
       />
     </div>
   )

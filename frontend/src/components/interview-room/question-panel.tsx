@@ -10,6 +10,7 @@ export function QuestionPanel({
   index,
   total,
   busy,
+  paused = false,
   onSubmit,
 }: {
   question: Question
@@ -17,13 +18,19 @@ export function QuestionPanel({
   /** `null` when the total number of questions isn't known yet. */
   total: number | null
   busy: boolean
+  /**
+   * The session's duration ran out and the candidate has not decided yet. The
+   * panel stays on screen (a question they can still read) but accepts nothing —
+   * this is not the same state as busy, which means work is already in flight.
+   */
+  paused?: boolean
   onSubmit: (text: string) => void
 }) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const submit = () => {
-    if (!text.trim() || busy) return
+    if (!text.trim() || busy || paused) return
     onSubmit(text)
   }
 
@@ -96,9 +103,11 @@ export function QuestionPanel({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {text.trim()
-                ? `${text.trim().split(/\s+/).length} words`
-                : 'Structured, specific answers score higher'}
+              {paused
+                ? 'Paused — decide how to continue'
+                : text.trim()
+                  ? `${text.trim().split(/\s+/).length} words`
+                  : 'Structured, specific answers score higher'}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -106,14 +115,14 @@ export function QuestionPanel({
               variant="ghost"
               size="sm"
               onClick={() => setText('')}
-              disabled={!text || busy}
+              disabled={!text || busy || paused}
             >
               <Eraser className="size-3.5" />
               Clear
             </Button>
-            <Button size="sm" onClick={submit} disabled={!text.trim() || busy}>
-              {busy ? 'Sending…' : 'Submit answer'}
-              {!busy ? <ArrowRight className="size-3.5" /> : null}
+            <Button size="sm" onClick={submit} disabled={!text.trim() || busy || paused}>
+              {paused ? 'Paused' : busy ? 'Sending…' : 'Submit answer'}
+              {!busy && !paused ? <ArrowRight className="size-3.5" /> : null}
             </Button>
           </div>
         </div>

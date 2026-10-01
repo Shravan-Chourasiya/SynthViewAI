@@ -70,20 +70,76 @@ describe('live-interview.store', () => {
   describe('applyJoined', () => {
     it('should update state when joining an interview', () => {
       const { applyJoined } = useLiveInterviewStore.getState();
+      const timerStartedAt = new Date().toISOString();
       applyJoined({
         interviewId: 'interview-123',
-        timerStartedAt: '2023-01-01T10:00:00Z',
+        timerStartedAt,
         durationMinutes: 30,
         answeredQuestionIds: ['q1', 'q2']
       });
 
       const state = useLiveInterviewStore.getState();
       expect(state.interviewId).toBe('interview-123');
-      expect(state.timerStartedAt).toBe('2023-01-01T10:00:00Z');
+      expect(state.timerStartedAt).toBe(timerStartedAt);
       expect(state.durationMinutes).toBe(30);
       expect(state.remainingSeconds).toBe(1800); // 30 minutes in seconds
+      expect(state.timeExpired).toBe(false);
       expect(state.answeredQuestionIds).toEqual(['q1', 'q2']);
       expect(state.answeredCount).toBe(2);
+    });
+
+    it('derives the countdown for a session that is already under way', () => {
+      // A join can be a reconnect or a resume, so the first painted timer has to
+      // be the real remaining time rather than a full window.
+      const { applyJoined } = useLiveInterviewStore.getState();
+      applyJoined({
+        interviewId: 'interview-123',
+        timerStartedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+        durationMinutes: 30,
+        answeredQuestionIds: [],
+      });
+
+      const remaining = useLiveInterviewStore.getState().remainingSeconds;
+      expect(remaining).toBeGreaterThanOrEqual(1499);
+      expect(remaining).toBeLessThanOrEqual(1500);
+    });
+  });
+
+  describe('duration pause (setTimeExpired)', () => {
+    it('marks the session as paused', () => {
+      useLiveInterviewStore.getState().setTimeExpired(true);
+      expect(useLiveInterviewStore.getState().timeExpired).toBe(true);
+    });
+  });
+
+  describe('applyTimerExtended', () => {
+    it('restarts the countdown against the new ceiling and resumes the room', () => {
+      const timerStartedAt = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      useLiveInterviewStore.setState({
+        timerStartedAt,
+        durationMinutes: 15,
+        remainingSeconds: 0,
+        totalQuestions: 3,
+        timeExpired: true,
+        interviewStatus: 'INPROGRESS',
+        aiStatus: 'generating',
+      });
+
+      useLiveInterviewStore.getState().applyTimerExtended({
+        timerStartedAt,
+        durationMinutes: 25,
+        totalQuestions: 6,
+      });
+
+      const state = useLiveInterviewStore.getState();
+      expect(state.timeExpired).toBe(false);
+      expect(state.durationMinutes).toBe(25);
+      // 15 of the 25 minutes are already spent, so ~10 remain.
+      expect(state.remainingSeconds).toBeGreaterThanOrEqual(599);
+      expect(state.remainingSeconds).toBeLessThanOrEqual(600);
+      // The extension adds questions in practice, so the label must grow with it.
+      expect(state.totalQuestions).toBe(6);
+      expect(state.aiStatus).toBe('idle');
     });
   });
 
