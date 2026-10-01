@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { StatusCodes } from "http-status-codes";
 import { env } from "./config/env.js";
-import { requestLogger } from "./utils/logger.js";
+import { logger, requestLogger } from "./utils/logger.js";
 import { requestIdMiddleware } from "./middlewares/requestId.middleware.js";
 import { ErrorCodes } from "./constants/errorCodes.js";
 import { errorHandler } from "./middlewares/errorHandler.middleware.js";
@@ -77,6 +77,29 @@ app.get("/ping", (_req, res) => {
 
 app.get("/ready", async (req, res) => {
   const { statusCode, checks, healthy } = await readinessCheck(dbConn, redisClient);
+
+  // Its own log line, on purpose. pino-http already records the request, but that
+  // line is indistinguishable from any other GET and carries no result: a probe
+  // whose dependencies are down differs from a healthy one only in the status
+  // code, and a 2xx probe is invisible entirely when LOG_LEVEL is above `info`.
+  // This is one greppable entry per probe that names the caller and the actual
+  // per-dependency outcome, so "is anything reaching the API?" is answerable from
+  // the log alone. `source` is supplied by the caller (the frontend keep-alive
+  // sends `?source=keepalive`) and defaults to `direct` for curl, Render's own
+  // checks and uptime monitors.
+  logger.info(
+    {
+      event: "health.probe",
+      source: typeof req.query.source === "string" ? req.query.source : "direct",
+      statusCode,
+      healthy,
+      checks,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"],
+    },
+    "[health] readiness probe",
+  );
+
   res.status(statusCode).json({ status: healthy ? "OK" : "DEGRADED", checks });
 });
 

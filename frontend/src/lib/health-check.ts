@@ -18,8 +18,16 @@ import { env } from "./env";
  * session (no cookies, no CSRF header, no axios interceptors — which also means
  * a 401/503 here can never trigger the token-refresh flow).
  *
+ * The query marker exists so the *server* log can name the caller: the backend
+ * logs a `health.probe` line per probe, and without it a browser keep-alive is
+ * indistinguishable from Render's own checks or a manual curl. A simple GET with
+ * a query string stays a CORS "simple request" — adding a header instead would
+ * buy the same thing at the cost of an OPTIONS preflight per poll.
+ *
  * @returns stop function — cancels the pending timer. Safe to call twice.
  */
+export const HEALTH_PROBE_SOURCE = "keepalive";
+
 export function startHealthCheck(): () => void {
   const intervalSeconds = env.healthCheckIntervalSeconds;
   // `typeof fetch` guard: the poll is best-effort by design, so a host without
@@ -30,7 +38,7 @@ export function startHealthCheck(): () => void {
     };
   }
 
-  const url = `${env.apiBaseUrl}${ENDPOINTS.system.ready}`;
+  const url = `${env.apiBaseUrl}${ENDPOINTS.system.ready}?source=${HEALTH_PROBE_SOURCE}`;
   const REQUEST_TIMEOUT_MS = 10_000;
   let stopped = false;
 
@@ -53,6 +61,17 @@ export function startHealthCheck(): () => void {
     }
   };
 
+  // Coming back to a backgrounded tab is exactly when the instance is most likely
+  // asleep: browsers throttle timers in background tabs (a 120 s interval can
+  // drift far past that) and discard them outright under memory pressure. Probing
+  // on return warms the API before the first click rather than during it, which is
+  // the whole point of the poll.
+  const onVisibilityChange = () => {
+    if (!stopped && document.visibilityState === "visible") void ping();
+  };
+  const listensForVisibility = typeof document !== "undefined";
+  if (listensForVisibility) document.addEventListener("visibilitychange", onVisibilityChange);
+
   void ping();
   const timer = setInterval(() => {
     if (!stopped) void ping();
@@ -61,5 +80,8 @@ export function startHealthCheck(): () => void {
   return () => {
     stopped = true;
     clearInterval(timer);
+    if (listensForVisibility) {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
   };
 }
