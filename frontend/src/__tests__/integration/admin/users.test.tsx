@@ -19,7 +19,6 @@ vi.mock('@/lib/services/admin.service', () => ({
     suspendUser: vi.fn().mockResolvedValue(undefined),
     reinstateUser: vi.fn().mockResolvedValue(undefined),
     getInterviews: vi.fn().mockResolvedValue({ interviews: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getInterviewById: vi.fn().mockResolvedValue(null),
     getOverviewStats: vi.fn().mockResolvedValue({
       totalUsers: 0,
       totalInterviews: 0,

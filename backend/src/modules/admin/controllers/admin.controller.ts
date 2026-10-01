@@ -11,6 +11,10 @@ import {
   getInterviewDetail,
   getOverviewStats,
 } from "../services/admin.service.js";
+import { getAdminInterviewMetrics } from "../services/interview-metrics.service.js";
+import { AppError } from "../../../utils/AppError.js";
+import { ErrorCodes } from "../../../constants/errorCodes.js";
+import { StatusCodes } from "http-status-codes";
 import type { SuccessResponse } from "../../../types/response.js";
 import type { AuthenticatedRequest } from "../../../types/request.js";
 
@@ -187,7 +191,8 @@ export const listInterviewsController = async (
 ): Promise<void> => {
   try {
     // Use validated query data if available, otherwise fall back to original query
-    const { page, limit, search, status, userId, sortBy, sortOrder } = getValidatedQuery(req);
+    const { page, limit, search, status, userId, jobRole, company, from, to, sortBy, sortOrder } =
+      getValidatedQuery(req);
 
     const result = await listInterviews({
       page: page ? parseInt(page as string, 10) : 1,
@@ -198,6 +203,11 @@ export const listInterviewsController = async (
       ...(search ? { search: search as string } : {}),
       ...(status ? { status: status as string } : {}),
       ...(userId ? { userId: userId as string } : {}),
+      ...(jobRole ? { jobRole: jobRole as string } : {}),
+      ...(company ? { company: company as string } : {}),
+      // Already `Date | undefined` — the schema parses the range bounds.
+      ...(from instanceof Date ? { from } : {}),
+      ...(to instanceof Date ? { to } : {}),
       ...(sortBy ? { sortBy: sortBy as string } : {}),
       ...(sortOrder ? { sortOrder: sortOrder as "asc" | "desc" } : {}),
     });
@@ -236,6 +246,63 @@ export const getInterviewDetailController = async (
       statusCode: 200,
       message: "Interview retrieved successfully",
       data: interview,
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /admin/interviews/:id/metrics
+ *
+ * Scores and structure for one session, for admin eyes. No answers, no
+ * transcripts, no candidate identity — the service builds a server-side
+ * projection rather than filtering a full session client-side, so the withheld
+ * fields never reach this process, let alone the response. See
+ * interview-metrics.service.ts for the contract.
+ *
+ * Gated at `admin` and up by the router: this is the endpoint that exposes how
+ * candidates performed, so it is deliberately narrower than the rest of the
+ * admin area. Every call is written to the audit trail before it returns.
+ */
+export const getInterviewMetricsController = async (
+  req: Request<{ id: string }>,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    // `requireAuth` has already attached `auth`; intersect it with the typed
+    // request so the actor is read without an `any` cast (same shape as
+    // `updateUserRoleController` below).
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    // Belt-and-braces for the type system and for any future reordering of the
+    // middleware chain: an unauthenticated request never reaches the service,
+    // so nothing is ever written to the audit log on its behalf.
+    if (!auth?.userId) {
+      throw new AppError(
+        "Authentication required",
+        StatusCodes.UNAUTHORIZED,
+        ErrorCodes.AUTH_UNAUTHORIZED,
+        { isOperational: true },
+      );
+    }
+
+    const metrics = await getAdminInterviewMetrics({
+      interviewId: req.params.id,
+      adminId: auth.userId,
+      adminRole: auth.userRole,
+      // `trust proxy` is on in production, so this is the real client address
+      // rather than the load balancer's.
+      ip: req.ip ?? null,
+    });
+
+    const response: SuccessResponse = {
+      success: true,
+      statusCode: 200,
+      message: "Interview metrics retrieved successfully",
+      data: metrics,
     };
 
     res.status(200).json(response);

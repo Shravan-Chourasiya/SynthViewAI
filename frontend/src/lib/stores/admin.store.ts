@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { adminService, UserSummary, InterviewSummary, AdminOverviewStats, UserListFilter, InterviewListFilter, PaginatedResponse } from '../services/admin.service';
-
-/**
- * Shape of the single-interview detail payload. Derived from the service rather
- * than re-declared here, so the store can never drift from the API client.
- */
-type InterviewDetail = Awaited<ReturnType<typeof adminService.getInterviewById>>;
+import { adminService } from '../services/admin.service';
+import type {
+  UserSummary,
+  InterviewSummary,
+  AdminOverviewStats,
+  AdminInterviewMetrics,
+  UserListFilter,
+  InterviewListFilter,
+} from '../services/admin.service';
 
 interface AdminState {
   // Users state
@@ -29,9 +31,14 @@ interface AdminState {
     limit: number;
     totalPages: number;
   };
-  selectedInterview: InterviewDetail | null;
   interviewsLoading: boolean;
   interviewsError: string | null;
+
+  // Interview metrics state (admin report — scores only, no answers)
+  interviewMetrics: AdminInterviewMetrics | null;
+  metricsLoading: boolean;
+  metricsError: string | null;
+
   
   // Overview state
   overviewStats: AdminOverviewStats | null;
@@ -45,10 +52,10 @@ interface AdminState {
   suspendUser: (userId: string, reason?: string) => Promise<void>;
   reinstateUser: (userId: string) => Promise<void>;
   loadInterviews: (filter?: InterviewListFilter) => Promise<void>;
-  loadInterviewById: (id: string) => Promise<void>;
+  loadInterviewMetrics: (id: string) => Promise<void>;
   loadOverviewStats: (period?: string) => Promise<void>;
   resetSelectedUser: () => void;
-  resetSelectedInterview: () => void;
+  resetInterviewMetrics: () => void;
 }
 
 export const useAdminStore = create<AdminState>()(
@@ -72,9 +79,13 @@ export const useAdminStore = create<AdminState>()(
       limit: 10,
       totalPages: 0,
     },
-    selectedInterview: null,
     interviewsLoading: false,
     interviewsError: null,
+
+    interviewMetrics: null,
+    metricsLoading: false,
+    metricsError: null,
+
     
     overviewStats: null,
     overviewLoading: false,
@@ -183,19 +194,22 @@ export const useAdminStore = create<AdminState>()(
       }
     },
     
-    loadInterviewById: async (id: string) => {
-      set({ interviewsLoading: true, interviewsError: null });
+    loadInterviewMetrics: async (id: string) => {
+      // Clear the previous session's report first: a stale report left on screen
+      // while another loads is the one failure mode that could show the wrong
+      // session's scores under the right session's heading.
+      set({ metricsLoading: true, metricsError: null, interviewMetrics: null });
       try {
         // Service already unwraps the `{ success, data }` envelope
-        const interview = await adminService.getInterviewById(id);
-        set({ 
-          selectedInterview: interview,
-          interviewsLoading: false 
+        const metrics = await adminService.getInterviewMetrics(id);
+        set({
+          interviewMetrics: metrics,
+          metricsLoading: false,
         });
       } catch (error) {
-        set({ 
-          interviewsError: error instanceof Error ? error.message : 'Failed to load interview',
-          interviewsLoading: false 
+        set({
+          metricsError: error instanceof Error ? error.message : 'Failed to load interview metrics',
+          metricsLoading: false,
         });
       }
     },
@@ -218,6 +232,6 @@ export const useAdminStore = create<AdminState>()(
     },
     
     resetSelectedUser: () => set({ selectedUser: null }),
-    resetSelectedInterview: () => set({ selectedInterview: null }),
+    resetInterviewMetrics: () => set({ interviewMetrics: null, metricsError: null }),
   }))
 );

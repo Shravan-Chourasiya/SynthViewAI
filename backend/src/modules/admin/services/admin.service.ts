@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm";
 import { getPgDb } from "../../../db/postgres.init.js";
 import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
+import { candidateReference } from "./interview-metrics.service.js";
 import type { interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
 import { interviewsTable } from "../../interview/schemas/interview.schema.js";
 import { interviewResultsTable } from "../../interview/schemas/result.schema.js";
@@ -67,7 +68,21 @@ interface UserListFilter {
 interface InterviewListFilter {
   search?: string;
   status?: string;
+  /**
+   * Lookup keys, never returned. An admin may narrow the list by a raw user id
+   * or by email/name in `search` in order to *find* a session; the response
+   * carries only the anonymized candidate reference, so the lookup cannot be
+   * used to read an identity back out.
+   */
   userId?: string;
+  /** Job role from the session's configuration metadata (e.g. "Backend Engineer"). */
+  jobRole?: string;
+  /** Company the session was targeted at (either the catalogue entry or the free-text one). */
+  company?: string;
+  /** Inclusive lower bound on `createdAt`. */
+  from?: Date;
+  /** Exclusive upper bound on `createdAt`. */
+  to?: Date;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
 }
@@ -88,13 +103,25 @@ interface UserSummary {
   lastInterviewAt: Date | null;
 }
 
+/**
+ * A row of the admin interview list.
+ *
+ * Deliberately free of candidate identity: no name, no email, no raw user id.
+ * The owning user is represented by `candidateRef`, a salted hash that is stable
+ * across that person's sessions but reversible by nobody (see
+ * interview-metrics.service.ts for the derivation, which is shared so the list
+ * and the report can never disagree about who `C-…` is).
+ */
 interface InterviewSummary {
   id: string;
   title: string;
   status: string;
-  userId: string;
-  userName: string;
-  userEmail: string;
+  candidateRef: string;
+  /** Session configuration, useful for triage and shown as columns. Not candidate data. */
+  jobRole: string | null;
+  company: string | null;
+  difficulty: string | null;
+  durationMinutes: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -416,7 +443,8 @@ export async function listInterviews(
   totalPages: number;
 }> {
   const db = getPgDb();
-  const { page, limit, search, status, userId, sortBy, sortOrder } = options;
+  const { page, limit, search, status, userId, jobRole, company, from, to, sortBy, sortOrder } =
+    options;
 
   // Apply filters through one combined predicate: Drizzle's `.where()` replaces
   // the previous predicate, so separate calls silently dropped the status filter
@@ -443,6 +471,33 @@ export async function listInterviews(
   }
   if (userId) {
     interviewConditions.push(eq(interviewsTable.userId, userId));
+  }
+  if (jobRole) {
+    // Session configuration, stored in the metadata jsonb. Matched with ILIKE so
+    // "backend" finds "Backend Engineer" — an admin narrowing a list should not
+    // have to guess the exact casing the session was created with.
+    interviewConditions.push(
+      sql`${interviewsTable.interviewMetaData}->>'jobRole' ILIKE ${`%${escapeLikePattern(jobRole)}%`}`,
+    );
+  }
+  if (company) {
+    // `targetedCompanyOther` is the free-text company chosen when the session
+    // was not built for a catalogue entry; either one may be the answer.
+    const escapedCompany = escapeLikePattern(company);
+    interviewConditions.push(
+      or(
+        sql`${interviewsTable.interviewMetaData}->>'targetedCompany' ILIKE ${`%${escapedCompany}%`}`,
+        sql`${interviewsTable.interviewMetaData}->>'targetedCompanyOther' ILIKE ${`%${escapedCompany}%`}`,
+      )!,
+    );
+  }
+  if (from) {
+    interviewConditions.push(gte(interviewsTable.createdAt, from));
+  }
+  if (to) {
+    // Exclusive upper bound: the zod schema turns a date-only `to` into the start
+    // of the following day, so "up to the 5th" includes the 5th.
+    interviewConditions.push(lt(interviewsTable.createdAt, to));
   }
   // Apply sorting
   let sortCol: SQLWrapper;
@@ -486,13 +541,22 @@ export async function listInterviews(
       id: interviewsTable.id,
       title: interviewsTable.interviewTitle,
       status: interviewsTable.interviewStatus,
+      // Read for the reference hash only — never returned. This is the one
+      // identity field that crosses the boundary, and it is transformed in the
+      // same statement that would otherwise carry it out.
       userId: interviewsTable.userId,
-      userName: userFullNameSql().as("userName"),
-      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"), // Make sure email is never null
+      jobRole: sql<string | null>`(${interviewsTable.interviewMetaData}->>'jobRole')`,
+      company: sql<
+        string | null
+      >`COALESCE(${interviewsTable.interviewMetaData}->>'targetedCompany', ${interviewsTable.interviewMetaData}->>'targetedCompanyOther')`,
+      difficulty: interviewsTable.interviewDifficulty,
+      durationMinutes: interviewsTable.interviewDuration,
       createdAt: interviewsTable.createdAt,
       updatedAt: interviewsTable.updatedAt,
     })
     .from(interviewsTable)
+    // Still joined for the name/email search predicate above; no user column is
+    // projected into the result.
     .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id))
     .where(interviewConditions.length > 0 ? and(...interviewConditions) : undefined)
     .orderBy(sortDirection)
@@ -500,8 +564,16 @@ export async function listInterviews(
     .offset(offset);
 
   const interviews: InterviewSummary[] = rawInterviews.map((interview) => ({
-    ...interview,
-    userEmail: interview.userEmail || "",
+    id: interview.id,
+    title: interview.title,
+    status: interview.status,
+    candidateRef: candidateReference(interview.userId),
+    jobRole: interview.jobRole,
+    company: interview.company,
+    difficulty: interview.difficulty,
+    durationMinutes: interview.durationMinutes,
+    createdAt: interview.createdAt,
+    updatedAt: interview.updatedAt,
   }));
 
   const totalPages = Math.ceil(total / limit);
@@ -517,6 +589,15 @@ export async function listInterviews(
 
 /**
  * Get interview detail by ID
+ *
+ * Session metadata only. This used to return the owner's name and email, which
+ * is exactly the identity the admin interview area is not allowed to see — the
+ * owner is now represented by the same anonymized reference the list and the
+ * metrics report use. Scores live on `GET /admin/interviews/:id/metrics`; this
+ * endpoint is the lightweight metadata lookup.
+ *
+ * `interviewDescription` is deliberately not projected: it is free text written
+ * at creation time and may quote material the candidate provided.
  */
 export async function getInterviewDetail(interviewId: string) {
   const db = getPgDb();
@@ -525,11 +606,9 @@ export async function getInterviewDetail(interviewId: string) {
     .select({
       id: interviewsTable.id,
       title: interviewsTable.interviewTitle,
-      description: interviewsTable.interviewDescription,
       status: interviewsTable.interviewStatus,
+      // Read only to derive the anonymized reference below.
       userId: interviewsTable.userId,
-      userName: userFullNameSql().as("userName"),
-      userEmail: sql<string>`COALESCE(${usersTable.email}, '')`.as("userEmail"),
       createdAt: interviewsTable.createdAt,
       updatedAt: interviewsTable.updatedAt,
       scheduledAt: interviewsTable.interviewScheduledDate,
@@ -537,7 +616,6 @@ export async function getInterviewDetail(interviewId: string) {
       duration: interviewsTable.interviewDuration,
     })
     .from(interviewsTable)
-    .leftJoin(usersTable, eq(interviewsTable.userId, usersTable.id))
     .where(eq(interviewsTable.id, interviewId))
     .limit(1);
 
@@ -550,10 +628,10 @@ export async function getInterviewDetail(interviewId: string) {
     );
   }
 
-  const interview = result[0]!;
+  const { userId, ...interview } = result[0]!;
   return {
     ...interview,
-    userEmail: interview.userEmail || "",
+    candidateRef: candidateReference(userId),
   };
 }
 

@@ -30,6 +30,15 @@ export const ADMIN_AREA_MIN_ROLE: UserRole = 'moderator'
 /** Lowest role that may change another user's role. */
 export const ROLE_MANAGEMENT_MIN_ROLE: UserRole = 'admin'
 
+/**
+ * Lowest role that may read candidate performance data (scores and metrics).
+ *
+ * Mirrors `performanceInsights` in `backend/src/routes/admin.routes.ts`. It sits
+ * at the same rank as role management today, but it is a separate grant: a
+ * moderator can triage sessions, and still may not see how anyone scored.
+ */
+export const PERFORMANCE_INSIGHTS_MIN_ROLE: UserRole = 'admin'
+
 /** Roles that reach the admin area, most privileged first. */
 export const ADMIN_AREA_ROLES: readonly UserRole[] = [...USER_ROLES]
   .filter((role) => ROLE_RANK[role] >= ROLE_RANK[ADMIN_AREA_MIN_ROLE])
@@ -78,6 +87,11 @@ export function canAccessAdmin(role: string | null | undefined): boolean {
 /** True when the role may change other users' roles. */
 export function canManageRoles(role: string | null | undefined): boolean {
   return hasRoleAtLeast(role, ROLE_MANAGEMENT_MIN_ROLE)
+}
+
+/** True when the role may read candidate scores and performance metrics. */
+export function canViewPerformanceInsights(role: string | null | undefined): boolean {
+  return hasRoleAtLeast(role, PERFORMANCE_INSIGHTS_MIN_ROLE)
 }
 
 /**

@@ -47,6 +47,7 @@ const SharedReportPage = lazy(() => import('@/pages/interviews/shared-report'))
 const AdminOverviewPage = lazy(() => import('@/pages/admin/overview').then((m) => ({ default: m.AdminOverviewPage })))
 const AdminUsersPage = lazy(() => import('@/pages/admin/users').then((m) => ({ default: m.AdminUsersPage })))
 const AdminInterviewsPage = lazy(() => import('@/pages/admin/interviews').then((m) => ({ default: m.AdminInterviewsPage })))
+const AdminInterviewReportPage = lazy(() => import('@/pages/admin/interview-report').then((m) => ({ default: m.AdminInterviewReportPage })))
 
 /* -------------------------------------------------------------------------- */
 /*  Suspense fallbacks                                                        */
@@ -133,6 +134,8 @@ export default function App() {
         <Route path="/admin" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminOverviewPage /></Suspense></RequireAdmin>} />
         <Route path="/admin/users" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminUsersPage /></Suspense></RequireAdmin>} />
         <Route path="/admin/interviews" element={<RequireAdmin><Suspense fallback={<PageFallback />}><AdminInterviewsPage /></Suspense></RequireAdmin>} />
+        {/* Scores only, and admin-and-above: the moderator-level area gate is not enough for candidate performance data. */}
+        <Route path="/admin/interviews/:id/report" element={<RequireAdmin minRole="admin"><Suspense fallback={<PageFallback />}><AdminInterviewReportPage /></Suspense></RequireAdmin>} />
 
         <Route path="*" element={<NotFound />} />
       </Routes>

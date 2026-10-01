@@ -8,6 +8,7 @@ export default defineConfig({
     "./src/modules/auth/schemas/*.ts",
     "./src/modules/interview/schemas/*.ts",
     "./src/modules/notification/schemas/*.ts",
+    "./src/modules/admin/schemas/*.ts",
   ],
   out: "./src/db/migrations",
   dialect: "postgresql",

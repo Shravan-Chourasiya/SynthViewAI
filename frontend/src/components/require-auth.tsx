@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/lib/stores/auth.store";
-import { canAccessAdmin } from "@/lib/roles";
+import { ADMIN_AREA_MIN_ROLE, hasRoleAtLeast, type UserRole } from "@/lib/roles";
 
 // ── AuthBootstrap ─────────────────────────────────────────────────────────────
 // Mount once above the router. Calls bootstrap() exactly once per page load.
@@ -47,7 +47,19 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
 // ── RequireAdmin ───────────────────────────────────────────────────────────────
 // Wraps admin routes. Checks if user has admin privileges.
-export function RequireAdmin({ children }: { children: ReactNode }) {
+//
+// `minRole` raises the floor for the handful of admin routes that are narrower
+// than the admin area itself — the candidate performance report is admin-and-above
+// while the rest of the area admits moderators. It must mirror the gate on the
+// matching backend route (see frontend `lib/roles.ts`), otherwise the page would
+// render a shell that every request inside it fails to fill.
+export function RequireAdmin({
+  children,
+  minRole = ADMIN_AREA_MIN_ROLE,
+}: {
+  children: ReactNode
+  minRole?: UserRole
+}) {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
@@ -68,7 +80,7 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!canAccessAdmin(user?.userrole)) {
+  if (!hasRoleAtLeast(user?.userrole, minRole)) {
     return (
       <Navigate to="/dashboard" replace />
     );

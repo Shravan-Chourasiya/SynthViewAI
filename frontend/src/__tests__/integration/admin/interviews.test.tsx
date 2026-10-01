@@ -20,7 +20,6 @@ vi.mock('@/lib/services/admin.service', () => ({
     suspendUser: vi.fn().mockResolvedValue(undefined),
     reinstateUser: vi.fn().mockResolvedValue(undefined),
     getInterviews: vi.fn().mockResolvedValue({ interviews: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getInterviewById: vi.fn().mockResolvedValue(null),
     getOverviewStats: vi.fn().mockResolvedValue({
       totalUsers: 0,
       totalInterviews: 0,
@@ -120,15 +119,66 @@ describe('Admin Interviews Page', () => {
         expect.objectContaining({ status: undefined }),
       );
     });
+  });
 
-    fireEvent.change(screen.getByPlaceholderText(/filter by user id/i), {
-      target: { value: 'user-123' },
+  it('sends the role, company and date-range filters', async () => {
+    mockAuthUser('admin');
+    renderPage();
+
+    fireEvent.change(await screen.findByPlaceholderText(/filter by job role/i), {
+      target: { value: 'Backend Engineer' },
     });
+    fireEvent.change(screen.getByPlaceholderText(/filter by company/i), {
+      target: { value: 'stripe' },
+    });
+    fireEvent.change(screen.getByLabelText('Created from'), { target: { value: '2026-09-01' } });
+    fireEvent.change(screen.getByLabelText('Created to'), { target: { value: '2026-09-30' } });
 
     await waitFor(() => {
       expect(adminService.getInterviews).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'user-123' }),
+        expect.objectContaining({
+          jobRole: 'Backend Engineer',
+          company: 'stripe',
+          from: '2026-09-01',
+          to: '2026-09-30',
+        }),
       );
     });
+  });
+
+  it('links each row to the metrics report, never to the candidate interview page', async () => {
+    mockAuthUser('admin');
+    (adminService.getInterviews as unknown as vi.Mock).mockResolvedValue({
+      interviews: [
+        {
+          id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          title: 'Senior Backend Interview',
+          status: 'COMPLETED',
+          candidateRef: 'C-1A2B3C4D5E',
+          jobRole: 'Backend Engineer',
+          company: 'Stripe',
+          difficulty: 'HARD',
+          durationMinutes: 30,
+          createdAt: '2026-09-01T10:00:00.000Z',
+          updatedAt: '2026-09-01T10:31:00.000Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
+    });
+
+    renderPage();
+
+    // The anonymized reference is what identifies the candidate here.
+    expect(await screen.findByText('C-1A2B3C4D5E')).toBeInTheDocument();
+
+    const viewLink = screen.getByRole('link', { name: /view report/i });
+    expect(viewLink).toHaveAttribute(
+      'href',
+      '/admin/interviews/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/report',
+    );
+    expect(viewLink).not.toHaveAttribute('target', '_blank');
   });
 });

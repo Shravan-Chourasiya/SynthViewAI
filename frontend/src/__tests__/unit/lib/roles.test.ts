@@ -8,6 +8,7 @@ import {
   USER_ROLES,
   canAccessAdmin,
   canManageRoles,
+  canViewPerformanceInsights,
   getRoleRank,
   outranks,
 } from '@/lib/roles';
@@ -74,6 +75,21 @@ describe('outranks', () => {
     expect(outranks('owner', 'owner')).toBe(false);
     expect(outranks('admin', 'owner')).toBe(false);
     expect(outranks(undefined, 'user')).toBe(false);
+  });
+});
+
+describe('canViewPerformanceInsights', () => {
+  it('is true only for admin and owner', () => {
+    expect(canViewPerformanceInsights('owner')).toBe(true);
+    expect(canViewPerformanceInsights('admin')).toBe(true);
+    expect(canViewPerformanceInsights('moderator')).toBe(false);
+    expect(canViewPerformanceInsights('user')).toBe(false);
+    expect(canViewPerformanceInsights(undefined)).toBe(false);
+  });
+
+  it('is narrower than the admin area — a moderator is admitted there but not here', () => {
+    expect(canAccessAdmin('moderator')).toBe(true);
+    expect(canViewPerformanceInsights('moderator')).toBe(false);
   });
 });
 
