@@ -37,6 +37,29 @@ import {
 } from "../../../services/mail.service.js";
 
 /**
+ * Shared rank guard — reused by updateUserRole, suspendUser, reinstateUser.
+ * Throws 403 when the actor cannot act on the target (peer or superior).
+ * The owner is the apex and is always allowed.
+ */
+function assertActorOutranksOrIsOwner(
+  actor: { userrole: string },
+  target: { userrole: string },
+  action: string,
+): void {
+  const actorRank = getRoleRank(actor.userrole);
+  const targetRank = getRoleRank(target.userrole);
+  const actorIsOwner = actor.userrole === "owner";
+  if (targetRank >= actorRank && !actorIsOwner) {
+    throw new AppError(
+      `Cannot ${action} a user ranked at or above your own role (${target.userrole})`,
+      StatusCodes.FORBIDDEN,
+      ErrorCodes.AUTH_FORBIDDEN,
+      { isOperational: true },
+    );
+  }
+}
+
+/**
  * Escapes `%`, `_` and `\` so a user's search text is matched literally
  * inside an ILIKE pattern instead of acting as wildcards.
  */
@@ -129,7 +152,7 @@ interface InterviewSummary {
 /**
  * List users with pagination and filtering
  */
-export async function listUsers(options: PaginationOptions & Partial<UserListFilter>): Promise<{
+export async function listUsers(actorId: string, options: PaginationOptions & Partial<UserListFilter>): Promise<{
   users: UserSummary[];
   total: number;
   page: number;
@@ -139,15 +162,19 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
   const db = getPgDb();
   const { page, limit, search, role, sortBy, sortOrder } = options;
 
-  // Build the filter predicate first, then apply it inside ONE chained query.
-  // Drizzle's `.where()` *replaces* the previous predicate rather than ANDing
-  // with it, so chaining `.where()` twice silently dropped the search whenever a
-  // role filter was also active. Collecting the conditions up-front also lets
-  // Drizzle infer the selected row type, which is what the previous `as any`
-  // assertion on the query was suppressing.
+  const [actorRow] = await db.select({ userrole: usersTable.userrole }).from(usersTable).where(eq(usersTable.id, actorId)).limit(1);
+  const actorRank = getRoleRank(actorRow?.userrole);
+  // Moderators may only see user/moderator accounts — never admin or owner.
+  const visibilityCeiling =
+    actorRank < ROLE_RANK.admin
+      ? and(
+          sql`${usersTable.userrole} != 'admin'`,
+          sql`${usersTable.userrole} != 'owner'`,
+        )
+      : undefined;
+
   const userConditions: SQL<unknown>[] = [];
   if (search) {
-    // `username` is what the admin table renders, so it has to be searchable too.
     const escaped = escapeLikePattern(search);
     userConditions.push(
       or(
@@ -159,9 +186,10 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
     );
   }
   if (role) {
-    userConditions.push(
-      eq(usersTable.userrole, role as (typeof USER_ROLES)[number]),
-    );
+    userConditions.push(eq(usersTable.userrole, role as (typeof USER_ROLES)[number]));
+  }
+  if (visibilityCeiling) {
+    userConditions.push(visibilityCeiling);
   }
   // Apply sorting
   let sortCol: SQLWrapper;
@@ -244,11 +272,13 @@ export async function listUsers(options: PaginationOptions & Partial<UserListFil
 /**
  * Get a single user by ID with interview summary
  */
-export async function getUserById(userId: string): Promise<UserSummary> {
+export async function getUserById(userId: string, actorId: string): Promise<UserSummary> {
   const db = getPgDb();
 
-  const result = await db
-    .select({
+  const [[actorRow], result] = await Promise.all([
+    db.select({ userrole: usersTable.userrole }).from(usersTable).where(eq(usersTable.id, actorId)).limit(1),
+    db
+      .select({
       id: usersTable.id,
       email: usersTable.email,
       firstName: usersTable.firstName,
@@ -269,7 +299,8 @@ export async function getUserById(userId: string): Promise<UserSummary> {
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId))
-    .limit(1);
+    .limit(1),
+  ]);
 
   if (!result.length) {
     throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
@@ -278,6 +309,15 @@ export async function getUserById(userId: string): Promise<UserSummary> {
   }
 
   const user = result[0]!;
+  // Moderators cannot see admin/owner accounts — return 404 to avoid leaking existence.
+  const actorRank = getRoleRank(actorRow?.userrole);
+  const targetRank = getRoleRank(user.userrole);
+  if (actorRank < ROLE_RANK.admin && targetRank >= ROLE_RANK.admin) {
+    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
+      isOperational: true,
+    });
+  }
+
   return {
     ...user,
     firstName: user.firstName ?? "",
@@ -343,14 +383,7 @@ export async function updateUserRole(
   }
 
   // You cannot act on a peer or a superior — only the owner may touch owners.
-  if (targetRank >= actorRank && !actorIsOwner) {
-    throw new AppError(
-      `Cannot modify a user ranked at or above your own role (${targetUser.userrole})`,
-      StatusCodes.FORBIDDEN,
-      ErrorCodes.AUTH_FORBIDDEN,
-      { isOperational: true },
-    );
-  }
+  assertActorOutranksOrIsOwner(actorUser, targetUser, "modify");
 
   // You cannot grant a role at or above your own — only the owner may grant owner.
   if (requestedRank >= actorRank && !actorIsOwner) {
@@ -374,59 +407,50 @@ export async function updateUserRole(
  */
 export async function suspendUser(
   userId: string,
+  actorId: string,
   reason = "Administrative action",
 ): Promise<void> {
   const db = getPgDb();
 
-  const user = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  const [[target], [actor]] = await Promise.all([
+    db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.id, actorId)).limit(1),
+  ]);
 
-  if (!user.length) {
-    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
-      isOperational: true,
-    });
-  }
+  if (!target) throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, { isOperational: true });
+  if (!actor) throw new AppError("Actor not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, { isOperational: true });
+
+  assertActorOutranksOrIsOwner(actor, target, "suspend");
 
   await db
     .update(usersTable)
-    .set({
-      accountStatus: "suspended",
-      updatedAt: new Date(),
-    })
+    .set({ accountStatus: "suspended", updatedAt: new Date() })
     .where(eq(usersTable.id, userId));
 
-  // Best-effort notification — the suspension has already been applied, so a
-  // failing email must not roll it back.
-  const suspended = user[0];
-  if (suspended) {
-    sendInBackground("account suspended", () =>
-      sendAccountSuspendedMail(suspended.email, {
-        reason,
-        suspendedAt: new Date(),
-      }),
-    );
-  }
+  sendInBackground("account suspended", () =>
+    sendAccountSuspendedMail(target.email, { reason, suspendedAt: new Date() }),
+  );
 }
 
 /**
  * Reinstate a suspended user
  */
-export async function reinstateUser(userId: string): Promise<void> {
+export async function reinstateUser(userId: string, actorId: string): Promise<void> {
   const db = getPgDb();
 
-  const user = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  const [[target], [actor]] = await Promise.all([
+    db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.id, actorId)).limit(1),
+  ]);
 
-  if (!user.length) {
-    throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, {
-      isOperational: true,
-    });
-  }
+  if (!target) throw new AppError("User not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, { isOperational: true });
+  if (!actor) throw new AppError("Actor not found", StatusCodes.NOT_FOUND, ErrorCodes.RESOURCE_NOT_FOUND, { isOperational: true });
+
+  assertActorOutranksOrIsOwner(actor, target, "reinstate");
 
   await db
     .update(usersTable)
-    .set({
-      accountStatus: "active",
-      updatedAt: new Date(),
-    })
+    .set({ accountStatus: "active", updatedAt: new Date() })
     .where(eq(usersTable.id, userId));
 }
 

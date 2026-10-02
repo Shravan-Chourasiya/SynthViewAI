@@ -137,13 +137,12 @@ describe('Admin Shared Components', () => {
 
   describe('AdminHeader', () => {
     it('renders header with title and description', () => {
+      mockAuthStore({ user: mockAdminUser, isAuthenticated: true, isLoading: false });
+
       render(
         <ThemeProvider>
           <MemoryRouter initialEntries={['/admin']}>
-            <AdminHeader 
-              title="Test Title" 
-              description="Test Description" 
-            />
+            <AdminHeader title="Test Title" description="Test Description" />
           </MemoryRouter>
         </ThemeProvider>
       );
@@ -153,19 +152,47 @@ describe('Admin Shared Components', () => {
       expect(screen.getByText('Admin area')).toBeInTheDocument();
     });
 
-    it('highlights active navigation link', () => {
+    it('shows "Admin area" eyebrow for admin role (Fix 3)', () => {
+      mockAuthStore({ user: { ...mockAdminUser, userrole: 'admin' }, isAuthenticated: true, isLoading: false });
+
       render(
         <ThemeProvider>
           <MemoryRouter initialEntries={['/admin']}>
-            <AdminHeader 
-              title="Test Title" 
-              description="Test Description" 
-            />
+            <AdminHeader title="T" description="D" />
           </MemoryRouter>
         </ThemeProvider>
       );
 
-      // Check that the "Overview" link is marked as active
+      expect(screen.getByText('Admin area')).toBeInTheDocument();
+      expect(screen.queryByText('Moderator area')).not.toBeInTheDocument();
+    });
+
+    it('shows "Moderator area" eyebrow for moderator role (Fix 3)', () => {
+      mockAuthStore({ user: { ...mockAdminUser, userrole: 'moderator' }, isAuthenticated: true, isLoading: false });
+
+      render(
+        <ThemeProvider>
+          <MemoryRouter initialEntries={['/admin']}>
+            <AdminHeader title="T" description="D" />
+          </MemoryRouter>
+        </ThemeProvider>
+      );
+
+      expect(screen.getByText('Moderator area')).toBeInTheDocument();
+      expect(screen.queryByText('Admin area')).not.toBeInTheDocument();
+    });
+
+    it('highlights active navigation link', () => {
+      mockAuthStore({ user: mockAdminUser, isAuthenticated: true, isLoading: false });
+
+      render(
+        <ThemeProvider>
+          <MemoryRouter initialEntries={['/admin']}>
+            <AdminHeader title="Test Title" description="Test Description" />
+          </MemoryRouter>
+        </ThemeProvider>
+      );
+
       const overviewLink = screen.getByRole('link', { name: 'Overview' });
       expect(overviewLink).toHaveAttribute('aria-current', 'page');
     });

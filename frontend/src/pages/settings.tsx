@@ -1,19 +1,17 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { CheckCircle2, ChevronDown, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { CheckCircle2, Loader2, Monitor } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/lib/stores/auth.store'
 import { usePreferencesStore } from '@/lib/stores/preferences.store'
 import type { Difficulty, EndingCriteria, ExperienceLevel, InterviewStyle, InterviewType } from '@/lib/types'
 import { notifyError, notifySuccess } from '@/lib/notify'
-
-const selectCls =
-  'h-10 w-full appearance-none rounded-md border border-input bg-transparent pl-3 pr-9 text-base shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring'
 
 // Options for the saved interview defaults. Kept in sync with the New Interview
 // wizard (pages/interviews/new.tsx) so a saved default is always selectable there.
@@ -32,14 +30,13 @@ const ENDING_OPTIONS: { value: EndingCriteria; label: string }[] = [
   { value: 'QUESTION_COUNT', label: 'By question count' },
 ]
 
+// Radix Select forbids empty-string item values — use a sentinel for "no device chosen".
+const AUTO_SELECT_SENTINEL = '__auto__'
+
 export function SettingsPage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
 
-  /* preferences
-   * Draft state is seeded from the persisted store and committed on save, so the
-   * "Save preferences" button stays the single explicit write. These values are
-   * re-applied by the New Interview wizard and the interview lobby. */
   const interviewDefaults = usePreferencesStore((s) => s.interviewDefaults)
   const mediaPreferences = usePreferencesStore((s) => s.media)
   const preferAdaptiveFollowUps = usePreferencesStore((s) => s.preferAdaptiveFollowUps)
@@ -64,9 +61,6 @@ export function SettingsPage() {
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([])
   const [prefsSaved, setPrefsSaved] = useState(false)
 
-  // Enumerate available input devices for the preference dropdowns. Device
-  // labels stay blank until the candidate has granted access once; the
-  // fallback labels below keep the options distinguishable either way.
   useEffect(() => {
     navigator.mediaDevices?.enumerateDevices?.()
       ?.then((devices) => {
@@ -76,12 +70,8 @@ export function SettingsPage() {
       ?.catch(() => {})
   }, [])
 
-  /* danger */
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  // Commits the draft to the persisted preferences store. Unlike the previous
-  // implementation this is a real write — the saved values are what the New
-  // Interview wizard and the interview lobby read back.
   const savePrefs = () => {
     setInterviewDefaults({
       type: defaultType,
@@ -101,8 +91,6 @@ export function SettingsPage() {
     setPreferAdaptiveFollowUps(followUps)
     setPrefsSaved(true)
     notifySuccess('Preferences saved successfully!')
-    
-    // Reset the prefsSaved flag after 3 seconds so the message disappears
     setTimeout(() => setPrefsSaved(false), 3000)
   }
 
@@ -133,88 +121,57 @@ export function SettingsPage() {
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="type">Default interview type</Label>
-              <SelectShell>
-                <select id="type" className={selectCls} value={defaultType} onChange={(e) => setDefaultType(e.target.value as InterviewType)}>
-                  {TYPE_OPTIONS.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={defaultType} onValueChange={(v) => setDefaultType(v as InterviewType)}>
+                <SelectTrigger id="type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TYPE_OPTIONS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="difficulty">Default difficulty</Label>
-              <SelectShell>
-                <select
-                  id="difficulty"
-                  className={selectCls}
-                  value={defaultDifficulty}
-                  onChange={(e) => setDefaultDifficulty(e.target.value as Difficulty)}
-                >
-                  {DIFFICULTY_OPTIONS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={defaultDifficulty} onValueChange={(v) => setDefaultDifficulty(v as Difficulty)}>
+                <SelectTrigger id="difficulty"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DIFFICULTY_OPTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="experience">Default experience level</Label>
-              <SelectShell>
-                <select
-                  id="experience"
-                  className={selectCls}
-                  value={defaultExperience}
-                  onChange={(e) => setDefaultExperience(e.target.value as ExperienceLevel)}
-                >
-                  {EXPERIENCE_OPTIONS.map((x) => (
-                    <option key={x} value={x}>{x}</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={defaultExperience} onValueChange={(v) => setDefaultExperience(v as ExperienceLevel)}>
+                <SelectTrigger id="experience"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {EXPERIENCE_OPTIONS.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="style">Default interview style</Label>
-              <SelectShell>
-                <select
-                  id="style"
-                  className={selectCls}
-                  value={defaultStyle}
-                  onChange={(e) => setDefaultStyle(e.target.value as InterviewStyle)}
-                >
-                  {STYLE_OPTIONS.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={defaultStyle} onValueChange={(v) => setDefaultStyle(v as InterviewStyle)}>
+                <SelectTrigger id="style"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STYLE_OPTIONS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="duration">Default duration</Label>
-              <SelectShell>
-                <select
-                  id="duration"
-                  className={selectCls}
-                  value={defaultDuration}
-                  onChange={(e) => setDefaultDuration(Number(e.target.value))}
-                >
-                  {DURATION_OPTIONS.map((m) => (
-                    <option key={m} value={m}>{m} minutes</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={String(defaultDuration)} onValueChange={(v) => setDefaultDuration(Number(v))}>
+                <SelectTrigger id="duration"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DURATION_OPTIONS.map((m) => <SelectItem key={m} value={String(m)}>{m} minutes</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="ending">End interview</Label>
-              <SelectShell>
-                <select
-                  id="ending"
-                  className={selectCls}
-                  value={defaultEnding}
-                  onChange={(e) => setDefaultEnding(e.target.value as EndingCriteria)}
-                >
-                  {ENDING_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </SelectShell>
+              <Select value={defaultEnding} onValueChange={(v) => setDefaultEnding(v as EndingCriteria)}>
+                <SelectTrigger id="ending"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ENDING_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="question-count">Default question count</Label>
@@ -256,7 +213,7 @@ export function SettingsPage() {
             backend caps follow-up depth with its own fixed limit.
           </p>
 
-          {/* Device + lobby prompt preferences — applied on every interview lobby */}
+          {/* Device + lobby prompt preferences */}
           <h3 className="mt-6 text-sm font-semibold">Device &amp; permissions</h3>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             The interview lobby requests camera, microphone and screen access
@@ -265,35 +222,33 @@ export function SettingsPage() {
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="preferredCamera">Default camera</Label>
-              <SelectShell>
-                <select
-                  id="preferredCamera"
-                  className={selectCls}
-                  value={preferredCameraId ?? ''}
-                  onChange={(e) => setPreferredCameraId(e.target.value || null)}
-                >
-                  <option value="">Auto-select</option>
-                  {cameraDevices.map((d, index) => (
-                    <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${index + 1}`}</option>
+              <Select
+                value={preferredCameraId ?? AUTO_SELECT_SENTINEL}
+                onValueChange={(v) => setPreferredCameraId(v === AUTO_SELECT_SENTINEL ? null : v)}
+              >
+                <SelectTrigger id="preferredCamera"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_SELECT_SENTINEL}>Auto-select</SelectItem>
+                  {cameraDevices.map((d, i) => (
+                    <SelectItem key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</SelectItem>
                   ))}
-                </select>
-              </SelectShell>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="preferredMic">Default microphone</Label>
-              <SelectShell>
-                <select
-                  id="preferredMic"
-                  className={selectCls}
-                  value={preferredMicId ?? ''}
-                  onChange={(e) => setPreferredMicId(e.target.value || null)}
-                >
-                  <option value="">Auto-select</option>
-                  {micDevices.map((d, index) => (
-                    <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${index + 1}`}</option>
+              <Select
+                value={preferredMicId ?? AUTO_SELECT_SENTINEL}
+                onValueChange={(v) => setPreferredMicId(v === AUTO_SELECT_SENTINEL ? null : v)}
+              >
+                <SelectTrigger id="preferredMic"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_SELECT_SENTINEL}>Auto-select</SelectItem>
+                  {micDevices.map((d, i) => (
+                    <SelectItem key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</SelectItem>
                   ))}
-                </select>
-              </SelectShell>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-sm text-muted-foreground">
@@ -316,6 +271,23 @@ export function SettingsPage() {
             <Button variant="outline" onClick={savePrefs}>
               Save preferences
             </Button>
+          </div>
+        </section>
+
+        {/* security — active sessions */}
+        <section className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="text-sm font-semibold">Security</h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Review and revoke devices currently signed in to your account.
+          </p>
+          <div className="mt-4">
+            <Link
+              to="/settings/sessions"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Monitor className="size-3.5" />
+              Active sessions
+            </Link>
           </div>
         </section>
 
@@ -344,24 +316,15 @@ export function SettingsPage() {
         onConfirm={() => {
           api.deleteAccount()
             .then(() => {
-              notifySuccess('Account deleted successfully!');
-              logout();
-              navigate('/');
+              notifySuccess('Account deleted successfully!')
+              logout()
+              navigate('/')
             })
             .catch(error => {
-              notifyError(error instanceof Error ? error.message : 'Unable to delete account. Please try again.');
-            });
+              notifyError(error instanceof Error ? error.message : 'Unable to delete account. Please try again.')
+            })
         }}
       />
     </AppShell>
-  )
-}
-
-function SelectShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative">
-      {children}
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-    </div>
   )
 }

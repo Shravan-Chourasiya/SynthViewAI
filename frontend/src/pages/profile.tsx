@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { CheckCircle2, Loader2, Monitor } from 'lucide-react'
+import { CheckCircle2, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -220,13 +219,6 @@ export function ProfilePage() {
                   'Update password'
                 )}
               </Button>
-              <Link
-                to="/settings/sessions"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Monitor className="size-3.5" />
-                Active sessions
-              </Link>
             </div>
           </form>
         </section>

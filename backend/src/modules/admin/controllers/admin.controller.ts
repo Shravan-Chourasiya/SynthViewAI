@@ -41,7 +41,8 @@ export const listUsersController = async (
     // Use validated query data if available, otherwise fall back to original query
     const { page, limit, search, role, sortBy, sortOrder } = getValidatedQuery(req);
 
-    const result = await listUsers({
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    const result = await listUsers(auth.userId, {
       page: page ? parseInt(page as string, 10) : 1,
       limit: limit ? parseInt(limit as string, 10) : 10,
       // Optional fields are spread conditionally: `exactOptionalPropertyTypes`
@@ -76,8 +77,8 @@ export const getUserController = async (
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
-
-    const user = await getUserById(userId);
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    const user = await getUserById(userId, auth.userId);
 
     const response: SuccessResponse = {
       success: true,
@@ -137,8 +138,8 @@ export const suspendUserController = async (
   try {
     const { id: userId } = req.params;
     const { reason } = req.body;
-
-    await suspendUser(userId, reason);
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    await suspendUser(userId, auth.userId, reason);
 
     const response: SuccessResponse = {
       success: true,
@@ -164,8 +165,8 @@ export const reinstateUserController = async (
 ): Promise<void> => {
   try {
     const { id: userId } = req.params;
-
-    await reinstateUser(userId);
+    const { auth } = req as typeof req & AuthenticatedRequest;
+    await reinstateUser(userId, auth.userId);
 
     const response: SuccessResponse = {
       success: true,

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, ConfirmDialog } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ui/dialog';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { useAuthStore } from '@/lib/stores/auth.store';
 import { ROLE_LABELS, ROLE_RANK, USER_ROLES, canManageRoles, getRoleRank, outranks } from '@/lib/roles';
@@ -40,6 +40,7 @@ export function AdminUsersPage() {
   const isOwner = getRoleRank(actorRole) >= ROLE_RANK.owner;
   const canManage = canManageRoles(actorRole);
   const canEditRow = (targetRole: string) => isOwner || outranks(actorRole, targetRole);
+  const canSuspendRow = (targetRole: string) => isOwner || outranks(actorRole, targetRole);
   const assignableRoles = USER_ROLES.filter((role) => isOwner || outranks(actorRole, role));
 
   useEffect(() => {
@@ -124,9 +125,9 @@ export function AdminUsersPage() {
                   <SelectContent>
                     <SelectItem value="ALL">All Roles</SelectItem>
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="moderator">Moderator</SelectItem>
-                    <SelectItem value="owner">Owner</SelectItem>
+                    {canManage && <SelectItem value="admin">Admin</SelectItem>}
+                    {canManage && <SelectItem value="owner">Owner</SelectItem>}
                   </SelectContent>
                   </Select>
                 </div>
@@ -210,13 +211,15 @@ export function AdminUsersPage() {
                           {new Date(user.createdAt).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          <Button 
-                            variant={user.accountStatus === 'suspended' ? "outline" : "default"} 
-                            size="sm"
-                            onClick={() => setShowSuspendDialog({open: true, user})}
-                          >
-                            {user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
-                          </Button>
+                          {canSuspendRow(user.userrole) && (
+                            <Button
+                              variant={user.accountStatus === 'suspended' ? "outline" : "default"}
+                              size="sm"
+                              onClick={() => setShowSuspendDialog({open: true, user})}
+                            >
+                              {user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -280,25 +283,22 @@ export function AdminUsersPage() {
         </div>
       </AdminGate>
       
-      {/* Separate Dialog for Suspend/Reinstate Confirmation */}
-      <Dialog
-        open={showSuspendDialog.open}
-        onClose={() => setShowSuspendDialog({open: false, user: null})}
-      >
-        {showSuspendDialog.user && (
-          <ConfirmDialog
-            open={showSuspendDialog.open}
-            title={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate User' : 'Suspend User'}
-            description={showSuspendDialog.user.accountStatus === 'suspended' 
-              ? `Are you sure you want to reinstate ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?` 
-              : `Are you sure you want to suspend ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?`}
-            confirmLabel={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
-            destructive={showSuspendDialog.user.accountStatus !== 'suspended'}
-            onConfirm={() => handleSuspendUser(showSuspendDialog.user!.id)}
-            onClose={() => setShowSuspendDialog({open: false, user: null})}
-          />
-        )}
-      </Dialog>
+      {/* ConfirmDialog already renders its own portal/overlay — do not wrap it in
+          another <Dialog>, or you get two stacked backdrops and the outer one
+          eats clicks meant for the inner dialog's buttons. */}
+      {showSuspendDialog.user && (
+        <ConfirmDialog
+          open={showSuspendDialog.open}
+          title={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate User' : 'Suspend User'}
+          description={showSuspendDialog.user.accountStatus === 'suspended'
+            ? `Are you sure you want to reinstate ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?`
+            : `Are you sure you want to suspend ${showSuspendDialog.user.firstName} ${showSuspendDialog.user.lastName}?`}
+          confirmLabel={showSuspendDialog.user.accountStatus === 'suspended' ? 'Reinstate' : 'Suspend'}
+          destructive={showSuspendDialog.user.accountStatus !== 'suspended'}
+          onConfirm={() => handleSuspendUser(showSuspendDialog.user!.id)}
+          onClose={() => setShowSuspendDialog({open: false, user: null})}
+        />
+      )}
     </AppShell>
   );
 }

@@ -3,8 +3,24 @@ import { Link, useLocation } from 'react-router-dom'
 import { Shield } from 'lucide-react'
 import { ErrorState } from '@/components/error-state'
 import { useAuthStore } from '@/lib/stores/auth.store'
-import { canAccessAdmin } from '@/lib/roles'
+import { canAccessAdmin, getRoleRank, ROLE_RANK } from '@/lib/roles'
 import { cn } from '@/lib/utils'
+
+/** "Admin" for admin/owner actors, "Moderator" for moderator actors. */
+function useAreaLabel(): 'Admin' | 'Moderator' {
+  const role = useAuthStore((s) => s.user?.userrole)
+  return getRoleRank(role) >= ROLE_RANK.admin ? 'Admin' : 'Moderator'
+}
+
+export function useAdminCopy(page: 'users' | 'interviews' | 'overview') {
+  const areaLabel = useAreaLabel()
+  const copy = {
+    users: { title: 'User Management', description: 'Manage user accounts, roles, and access' },
+    interviews: { title: 'Interview Oversight', description: 'Monitor and review interview sessions' },
+    overview: { title: `${areaLabel} Overview`, description: 'Platform statistics and activity summary' },
+  }
+  return copy[page]
+}
 
 export function AdminGate({ children }: { children: ReactNode }) {
   const user = useAuthStore((s) => s.user)
@@ -42,12 +58,13 @@ const ADMIN_LINKS = [
 
 export function AdminHeader({ title, description }: { title: string; description: string }) {
   const { pathname } = useLocation()
+  const areaLabel = useAreaLabel()
   return (
     <header className="flex flex-col gap-4">
       <div>
         <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-primary ring-1 ring-primary/25">
           <Shield className="size-3" />
-          Admin area
+          {areaLabel} area
         </span>
         <h1 className="mt-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
         <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">

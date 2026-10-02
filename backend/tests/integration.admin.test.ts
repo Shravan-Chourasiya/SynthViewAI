@@ -1,160 +1,187 @@
 /**
- * Integration tests for admin functionality
+ * integration.admin.test.ts
+ * Admin role-visibility and suspend/reinstate rank-enforcement tests.
+ * Uses real Postgres + Redis testcontainers; AI provider is not involved.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import request from "supertest";
-import app from "../src/app.js";
-import { getPgDb } from "../src/db/postgres.init.js";
-import { usersTable, userRoleEnum } from "../src/modules/auth/schemas/user.schema.js";
-import { interviewsTable } from "../src/modules/interview/schemas/interview.schema.js";
-import { eq, sql } from "drizzle-orm";
-import { hash } from "bcrypt";
-import { resetDb } from "./helpers/containers.js";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import supertest from "supertest";
+import bcrypt from "bcrypt";
+import { randomUUID } from "crypto";
+import { setup, teardown, resetDb, resetRedis, getContainers } from "./helpers/containers.js";
+import { usersTable } from "../src/modules/auth/schemas/user.schema.js";
 
-describe("Admin Integration Tests", () => {
-  let adminUser: any;
-  let regularUser: any;
-  let interview: any;
+let request: ReturnType<typeof supertest>;
+const API = "/v1";
 
-  beforeAll(async () => {
-    // Reset database
-    await resetDb();
-    
-    // Create test users
-    const db = getPgDb();
-    
-    // Create admin user
-    const hashedPassword = await hash("TestPassword123!", 12);
-    const [createdAdmin] = await db
-      .insert(usersTable)
-      .values({
-        email: "admin@test.com",
-        password: hashedPassword,
-        firstName: "Admin",
-        lastName: "User",
-        userrole: "admin",
-        isVerified: true,
-        accountStatus: "active",
-      })
-      .returning();
-    
-    adminUser = createdAdmin;
-    
-    // Create regular user
-    const [createdRegular] = await db
-      .insert(usersTable)
-      .values({
-        email: "user@test.com",
-        password: hashedPassword,
-        firstName: "Regular",
-        lastName: "User",
-        userrole: "user",
-        isVerified: true,
-        accountStatus: "active",
-      })
-      .returning();
-    
-    regularUser = createdRegular;
-    
-    // Create a test interview for the regular user
-    const [createdInterview] = await db
-      .insert(interviewsTable)
-      .values({
-        userId: regularUser.id,
-        title: "Test Interview",
-        description: "A test interview for integration testing",
-        status: "COMPLETED",
-      })
-      .returning();
-    
-    interview = createdInterview;
-  });
+beforeAll(async () => {
+  const containers = await setup();
 
-  afterAll(async () => {
-    // Clean up
-    const db = getPgDb();
-    await db.delete(usersTable).where(
-      eq(usersTable.email, "admin@test.com")
-    );
-    await db.delete(usersTable).where(
-      eq(usersTable.email, "user@test.com")
-    );
-  });
+  vi.doMock("../src/db/postgres.init.js", () => ({
+    default: () => containers.db,
+    getPgDb: () => containers.db,
+    getPgPool: () => containers.pool,
+  }));
+  vi.doMock("../src/config/redis.init.js", () => ({ redisClient: containers.redis }));
+  vi.doMock("../src/config/env.js", () => ({
+    env: {
+      NODE_ENV: "test",
+      PORT: 4002,
+      API_VERSION: "v1",
+      JWT_SECRET: "a".repeat(64),
+      CORS_ORIGIN: ["http://localhost:3000"],
+      COOKIE_DOMAIN: undefined,
+      LOG_LEVEL: "silent",
+      APP_VERSION: "1.0.0",
+    },
+  }));
 
-  describe("Admin Access Control", () => {
-    it("should return 403 when non-admin tries to access admin routes", async () => {
-      // First login as regular user to get auth token
-      const loginRes = await request(app)
-        .post("/v1/auth/login")
-        .send({
-          email: "user@test.com",
-          password: "TestPassword123!",
-          deviceType: "desktop"
-        })
-        .expect(200);
+  const { default: app } = await import("../src/app.js");
+  request = supertest(app);
+}, 120_000);
 
-      // Extract token from cookies if needed, or use session-based auth
-      // For this test, we'll simulate the auth middleware behavior
-      
-      const res = await request(app)
-        .get("/v1/admin/users")
-        .set("Cookie", loginRes.headers["set-cookie"])
-        .expect(403);
+afterAll(async () => { await teardown(); });
+beforeEach(async () => { await resetDb(); await resetRedis(); });
 
-      expect(res.body.message).toContain("Access denied");
-    });
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-    it("should allow admin to access admin routes", async () => {
-      // This test would require proper session/token setup
-      // For now, we'll test the middleware logic separately
-      expect(true).toBe(true); // Placeholder - actual test requires auth setup
-    });
-  });
+function extractCookie(header: string[] | string, name: string): string | null {
+  const arr = Array.isArray(header) ? header : [header];
+  for (const line of arr) {
+    const m = line.match(new RegExp(`${name}=([^;]+)`));
+    if (m) return m[1]!;
+  }
+  return null;
+}
 
-  describe("User Management", () => {
-    it("should list users with pagination", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
+async function seedUser(role: "user" | "moderator" | "admin" | "owner") {
+  const { db } = getContainers();
+  const hash = await bcrypt.hash("Password1", 1);
+  const email = `${role}-${randomUUID()}@example.com`;
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      email,
+      password: hash,
+      username: `${role}_${randomUUID().slice(0, 8)}`,
+      isVerified: true,
+      accountStatus: "active",
+      userrole: role,
+    })
+    .returning();
+  return user!;
+}
 
-    it("should get user by ID", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
+async function loginAs(email: string) {
+  const csrf = "csrf-" + randomUUID();
+  const res = await request
+    .post(`${API}/auth/login`)
+    .set("Cookie", `csrf_token=${csrf}`)
+    .set("x-csrf-token", csrf)
+    .send({ email, password: "Password1" });
+  expect(res.status).toBe(200);
+  const accessToken = extractCookie(res.headers["set-cookie"], "access_token")!;
+  const csrfToken = extractCookie(res.headers["set-cookie"], "csrf_token") ?? csrf;
+  return { accessToken, csrfToken };
+}
 
-    it("should update user role", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
+function authed(accessToken: string, csrfToken: string) {
+  return {
+    get: (url: string) =>
+      request
+        .get(url)
+        .set("Cookie", `access_token=${accessToken}; csrf_token=${csrfToken}`)
+        .set("x-csrf-token", csrfToken),
+    post: (url: string) =>
+      request
+        .post(url)
+        .set("Cookie", `access_token=${accessToken}; csrf_token=${csrfToken}`)
+        .set("x-csrf-token", csrfToken),
+  };
+}
 
-    it("should suspend and reinstate users", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
-  });
+// ── Fix 2: visibility and rank-enforcement tests ──────────────────────────────
 
-  describe("Interview Monitoring", () => {
-    it("should list interviews with pagination", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
+describe("Fix 2 — moderator visibility ceiling on GET /admin/users", () => {
+  it("moderator never receives admin or owner rows in unfiltered list", async () => {
+    const mod = await seedUser("moderator");
+    const admin = await seedUser("admin");
+    const owner = await seedUser("owner");
+    const tokens = await loginAs(mod.email);
 
-    it("should get interview detail", async () => {
-      // This would require a valid admin session
-      expect(true).toBe(true); // Placeholder
-    });
+    const res = await authed(tokens.accessToken, tokens.csrfToken).get(`${API}/admin/users`);
+    expect(res.status).toBe(200);
+
+    const users: { userrole: string }[] = res.body.data?.users ?? res.body.data ?? [];
+    const roles = users.map((u) => u.userrole);
+    expect(roles).not.toContain("admin");
+    expect(roles).not.toContain("owner");
+    // The admin and owner we seeded must not appear
+    const ids = users.map((u: { id: string }) => u.id);
+    expect(ids).not.toContain(admin.id);
+    expect(ids).not.toContain(owner.id);
   });
 });
 
-describe("RequireRole Middleware Tests", () => {
-  it("should allow access for authorized roles", () => {
-    // This would be tested in a unit test context
-    expect(true).toBe(true); // Placeholder
+describe("Fix 2 — moderator GET /admin/users/:id for an admin ID returns 404", () => {
+  it("moderator probing an admin ID gets 404, not 200", async () => {
+    const mod = await seedUser("moderator");
+    const admin = await seedUser("admin");
+    const tokens = await loginAs(mod.email);
+
+    const res = await authed(tokens.accessToken, tokens.csrfToken).get(
+      `${API}/admin/users/${admin.id}`,
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("Fix 2 — moderator POST /admin/users/:id/suspend on admin ID returns 403", () => {
+  it("moderator cannot suspend an admin", async () => {
+    const mod = await seedUser("moderator");
+    const admin = await seedUser("admin");
+    const tokens = await loginAs(mod.email);
+
+    const res = await authed(tokens.accessToken, tokens.csrfToken)
+      .post(`${API}/admin/users/${admin.id}/suspend`)
+      .send({ reason: "test" });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("Fix 2 — admin suspend rank enforcement", () => {
+  it("admin can suspend a moderator", async () => {
+    const admin = await seedUser("admin");
+    const mod = await seedUser("moderator");
+    const tokens = await loginAs(admin.email);
+
+    const res = await authed(tokens.accessToken, tokens.csrfToken)
+      .post(`${API}/admin/users/${mod.id}/suspend`)
+      .send({ reason: "test" });
+    expect(res.status).toBe(200);
   });
 
-  it("should deny access for unauthorized roles", () => {
-    // This would be tested in a unit test context
-    expect(true).toBe(true); // Placeholder
+  it("admin cannot suspend another admin (403)", async () => {
+    const admin1 = await seedUser("admin");
+    const admin2 = await seedUser("admin");
+    const tokens = await loginAs(admin1.email);
+
+    const res = await authed(tokens.accessToken, tokens.csrfToken)
+      .post(`${API}/admin/users/${admin2.id}/suspend`)
+      .send({ reason: "test" });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("Fix 2 — owner can suspend an admin", () => {
+  it("owner suspends admin successfully", async () => {
+    const owner = await seedUser("owner");
+    const admin = await seedUser("admin");
+    const tokens = await loginAs(owner.email);
+
+    const res = await authed(tokens.accessToken, tokens.csrfToken)
+      .post(`${API}/admin/users/${admin.id}/suspend`)
+      .send({ reason: "test" });
+    expect(res.status).toBe(200);
   });
 });
