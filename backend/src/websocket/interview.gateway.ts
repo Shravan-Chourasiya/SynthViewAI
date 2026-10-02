@@ -107,10 +107,10 @@ async function handleDisconnect(socket: IoSocket, io: IoServer): Promise<void> {
   if (!interviewId || !userId) return;
 
   const session = await getSocketSession(interviewId);
-  // Only the socket that owns the session starts the grace period.
-  // Duplicate disconnect events for the same socket are safe because
-  // setGracePeriod is idempotent (SET with EX resets the TTL).
-  if (session?.socketId !== socket.id) return;
+  // If the session is already gone (interview:leave cleaned it up before
+  // disconnect fired) the interview was already paused — nothing to do.
+  // If the session belongs to a different socket, also skip.
+  if (!session || session.socketId !== socket.id) return;
 
   logger.info(
     { socketId: socket.id, interviewId, userId },
@@ -231,12 +231,35 @@ export function registerInterviewGateway(io: IoServer): void {
     });
 
     // ── interview:leave ─────────────────────────────────────────────────────
+    // Voluntary leave (candidate navigates away). Pause the interview so it
+    // can be resumed later — this is the same transition the grace-period
+    // expiry takes, but triggered immediately rather than after 30 s.
+    // The session is deleted *after* the pause so handleDisconnect (which fires
+    // next) sees session === null and skips the redundant grace-period path.
     socket.on("interview:leave", (payload) => {
       void (async () => {
         const { interviewId } = payload;
         try {
-          // Ownership check — a socket must own the interview to leave it
           await assertInterviewOwnership(socket, interviewId);
+
+          // Pause if still INPROGRESS — best-effort, never block the leave
+          try {
+            const fakeAuthReq = { auth: { userId: socket.data.userId } } as Parameters<
+              typeof pauseInterviewService
+            >[0];
+            await pauseInterviewService(fakeAuthReq, interviewId);
+
+            const stateChange: InterviewStateChangePayload = {
+              eventVersion: EVENT_VERSION,
+              event: "interview:state_change",
+              interviewId,
+              status: "SCHEDULED",
+              timestamp: new Date().toISOString(),
+            };
+            io.to(INTERVIEW_ROOM(interviewId)).emit("interview:state_change", stateChange);
+          } catch {
+            // Already in a non-INPROGRESS state — nothing to pause
+          }
 
           const session = await getSocketSession(interviewId);
           if (session?.socketId === socket.id) await deleteSocketSession(interviewId);
