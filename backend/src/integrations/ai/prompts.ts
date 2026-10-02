@@ -21,6 +21,8 @@ export interface PromptStateContext {
   interviewType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
   interviewStyle: "MANGOS" | "FAANG" | "MAANG" | "STARTUP" | "CUSTOM" | "REGULAR";
   currentInput: GraphTurnInput | null;
+  /** Candidate experience level (e.g. "Entry", "Senior"). "unknown" is treated as absent. */
+  candidateExperience?: string;
 }
 
 // ── Interviewer prompts ───────────────────────────────────────────────────────
@@ -127,6 +129,10 @@ export function buildInterviewerPrompt(
   const role = state.jobRole ?? "a software engineer";
   const companyContext = state.targetedCompany ? ` Target company: ${state.targetedCompany}.` : "";
   const domainContext = state.domain ? ` Domain: ${state.domain}.` : "";
+  const experienceContext =
+    state.candidateExperience && state.candidateExperience !== "unknown"
+      ? ` Candidate experience level: ${state.candidateExperience}.`
+      : "";
   const skills =
     state.jobSkills.length > 0 ? state.jobSkills.join(", ") : "general software engineering";
   // Hint difficulty overrides state difficulty when the adaptive engine has decided
@@ -172,7 +178,7 @@ export function buildInterviewerPrompt(
   const systemPrompt = [
     `You are an AI interviewer conducting a ${style}-style ${type} interview.`,
     `Your sole responsibility in this turn is to generate the next interview question.`,
-    `The candidate is applying for the role of ${role}.${domainContext}${companyContext} Relevant skills: ${skills}. Difficulty: ${difficulty}.`,
+    `The candidate is applying for the role of ${role}.${domainContext}${companyContext}${experienceContext} Relevant skills: ${skills}. Difficulty: ${difficulty}.`,
     `Interaction rules:`,
     `  - Generate exactly ONE question that is appropriate for the current difficulty and interview type.`,
     `  - Never repeat a question that has already been asked in this session.`,
@@ -197,18 +203,30 @@ export function buildInterviewerPrompt(
     const last = trimmedHistory[trimmedHistory.length - 1];
     const lastTitle = last?.questionTitle ?? "the previous question";
     const lastScore = last?.score;
-    const performanceHint =
+    const lastExcerpt = last?.answerExcerpt;
+
+    const performanceDirective =
       lastScore !== null && lastScore !== undefined
         ? lastScore >= 70
-          ? "The candidate answered well — probe deeper or increase complexity."
+          ? "The candidate answered well — probe deeper into something specific they said, or increase complexity."
           : lastScore >= 40
-            ? "The candidate gave a partial answer — ask a follow-up to clarify or expand."
-            : "The candidate struggled — ask a simpler follow-up or a related foundational question."
+            ? "The candidate gave a partial answer — ask a follow-up that targets the specific gap in what they said."
+            : "The candidate struggled — ask a simpler, related follow-up grounded in what they attempted to say."
         : "Generate a natural follow-up to the previous question.";
-    userPrompt = `Previous question: "${lastTitle}"\n${performanceHint}${topicHintSection}${avoidSection}`;
+
+    const answeredSection = lastExcerpt
+      ? `\n\nThe candidate's actual answer was:\n"${lastExcerpt}"\n\nYour follow-up MUST reference something specific from this answer (a claim, a tool, a decision, a tradeoff they mentioned) — do not ask a generic follow-up that could apply to any candidate's answer to this question.`
+      : "";
+
+    userPrompt = `Previous question: "${lastTitle}"\n${performanceDirective}${answeredSection}${topicHintSection}${avoidSection}`;
   } else {
     // topic_change
-    userPrompt = `The current topic has been sufficiently covered. Generate a question on a DIFFERENT topic within ${type} interviewing for a ${role}.${topicHintSection}${historySection}${avoidSection}`;
+    const last = trimmedHistory[trimmedHistory.length - 1];
+    const lastExcerpt = last?.answerExcerpt;
+    const toneSection = lastExcerpt
+      ? `\n\nFor tone continuity, the candidate's last answer was:\n"${lastExcerpt}"`
+      : "";
+    userPrompt = `The current topic has been sufficiently covered. Generate a question on a DIFFERENT topic within ${type} interviewing for a ${role}.${topicHintSection}${toneSection}${historySection}${avoidSection}`;
   }
 
   return { systemPrompt, userPrompt, avoidTitles };

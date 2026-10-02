@@ -195,13 +195,15 @@ export async function createInterviewService(
         experience: interviewData.experience,
         isAdaptive: interviewData.isAdaptive,
         ...(interviewData.jobSkills?.length ? { jobSkills: interviewData.jobSkills } : {}),
-        ...(interviewData.targetedCompany
-          ? { targetedCompany: interviewData.targetedCompany }
+        ...(interviewData.targetedCompany || interviewData.targetedCompanyOther
+          ? {
+              targetedCompany:
+                interviewData.targetedCompany === "OTHER" || !interviewData.targetedCompany
+                  ? interviewData.targetedCompanyOther
+                  : interviewData.targetedCompany,
+            }
           : {}),
         maxFollowUps: interviewData.maxFollowUps,
-        ...(interviewData.targetedCompanyOther
-          ? { targetedCompanyOther: interviewData.targetedCompanyOther }
-          : {}),
         endingCriteria: interviewData.endingCriteria,
         ...(interviewData.endingCriteria === "QUESTION_COUNT" && interviewData.questionCount
           ? { questionCount: interviewData.questionCount }
@@ -595,6 +597,8 @@ export async function generateAndDeliverQuestionService(
         ? { questionDescription: generated.questionDescription }
         : {}),
       questionType: generated.questionType,
+      ...(generated.topic ? { topic: generated.topic } : {}),
+      isFollowUp: context.pendingAdaptationHint?.mode === "follow_up",
       deliveredAt: new Date().toISOString(),
       timeoutSeconds: Math.floor(QUESTION_TIMEOUT_MS / 1000),
     });
@@ -626,6 +630,7 @@ async function redeliverCurrentQuestion(context: InterviewContext, io: IoServer)
     questionTitle: question.questionTitle,
     ...(question.questionDescription ? { questionDescription: question.questionDescription } : {}),
     questionType: question.questionType,
+    isFollowUp: false,
     deliveredAt: new Date().toISOString(),
     timeoutSeconds: Math.floor(QUESTION_TIMEOUT_MS / 1000),
   });
@@ -1541,6 +1546,14 @@ export async function submitAnswerService(
       };
 
       // ── Step 3: Update performance state ─────────────────────────────────
+      const ANSWER_EXCERPT_MAX_CHARS = 300;
+      const excerptAnswer = (raw: string): string => {
+        const trimmed = raw.trim().replace(/\s+/g, " ");
+        return trimmed.length > ANSWER_EXCERPT_MAX_CHARS
+          ? trimmed.slice(0, ANSWER_EXCERPT_MAX_CHARS) + "\u2026"
+          : trimmed;
+      };
+
       const historyEntry = {
         questionId: payload.questionId,
         questionTitle: question.questionTitle,
@@ -1548,6 +1561,7 @@ export async function submitAnswerService(
         sequenceNumber: question.sequenceNumber,
         wasAnswered: true,
         score: evalResult.score,
+        answerExcerpt: excerptAnswer(payload.answerData),
       };
 
       const newPerfState = updatePerformanceState(

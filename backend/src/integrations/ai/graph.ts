@@ -229,10 +229,12 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
   // instead of being expected on the priorQuestions rows.
   const topicByTitle = new Map<string, string>();
   const embeddingByTitle = new Map<string, number[]>();
+  const answerExcerptByTitle = new Map<string, string>();
   for (const entry of state.questionHistory) {
     const title = normalizeTitle(entry.questionTitle);
     if (entry.topic) topicByTitle.set(title, entry.topic);
     if (entry.embedding?.length) embeddingByTitle.set(title, entry.embedding);
+    if (entry.answerExcerpt) answerExcerptByTitle.set(title, entry.answerExcerpt);
   }
 
   // Restart-safe history when the caller supplied it; otherwise fall back to the
@@ -243,12 +245,14 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
           const title = normalizeTitle(q.questionTitle);
           const topic = topicByTitle.get(title);
           const embedding = embeddingByTitle.get(title);
+          const answerExcerpt = answerExcerptByTitle.get(title);
           return {
             questionId: `prior-${index + 1}`,
             questionTitle: q.questionTitle,
             questionType: q.questionType,
             ...(topic ? { topic } : {}),
             ...(embedding ? { embedding } : {}),
+            ...(answerExcerpt ? { answerExcerpt } : {}),
             sequenceNumber: index + 1,
             wasAnswered: q.wasAnswered,
             score: null,
@@ -311,7 +315,13 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
     guardContext.comparisonHistory = [...sessionHistory, ...rejected];
   };
 
-  let prompt = buildInterviewerPrompt(state, mode, trimmedHistory, hint ?? null, sessionHistory);
+  let prompt = buildInterviewerPrompt(
+    { ...state, candidateExperience: state.candidateExperience },
+    mode,
+    trimmedHistory,
+    hint ?? null,
+    sessionHistory,
+  );
   let generated = await callGenerateWithFallback(prompt, input);
   let verdict = await assessQuestion(generated, guardContext);
 
@@ -327,7 +337,7 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
       recordRejection(generated, verdict);
       const extendedHistory: QuestionHistoryEntry[] = [...sessionHistory, ...rejected];
       prompt = buildInterviewerPrompt(
-        state,
+        { ...state, candidateExperience: state.candidateExperience },
         mode,
         trimHistory(extendedHistory, providerName),
         hint ?? null,

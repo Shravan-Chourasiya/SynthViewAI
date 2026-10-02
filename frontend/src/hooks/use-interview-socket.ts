@@ -53,24 +53,16 @@ function questionFromPayload(payload: QuestionDeliveredPayload): Question {
   return {
     id: payload.questionId,
     index: payload.sequenceNumber - 1,
-    kind:
-      payload.questionType === "MIXED"
-        ? "text"
-        : payload.questionType === "TECHNICAL"
-          ? "text"
-          : "text",
+    kind: "text",
     category:
-      payload.questionType === "BEHAVIORAL"
-        ? "Behavioral"
-        : payload.questionType === "TECHNICAL"
-          ? "Technical"
-          : "Mixed",
-    topic: payload.questionType,
+      payload.questionType === "BEHAVIORAL" ? "Behavioral"
+      : payload.questionType === "TECHNICAL" ? "Technical"
+      : "Mixed",
+    topic: payload.topic ?? payload.questionType,
     difficulty: "Medium",
     text: payload.questionTitle,
-    ...(payload.questionDescription
-      ? { starter: payload.questionDescription }
-      : {}),
+    isFollowUp: payload.isFollowUp ?? false,
+    ...(payload.questionDescription ? { starter: payload.questionDescription } : {}),
   };
 }
 

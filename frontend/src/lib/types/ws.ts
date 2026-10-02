@@ -101,6 +101,10 @@ export interface QuestionDeliveredPayload extends WsBase {
   questionTitle: string;
   questionDescription?: string | null;
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /** Short subdomain tag from the AI engine (e.g. "team-conflict", "url-shortener"). */
+  topic?: string;
+  /** True when the adaptive engine decided this is a follow-up to the previous question. */
+  isFollowUp?: boolean;
   deliveredAt: string;
   timeoutSeconds: number;
 }

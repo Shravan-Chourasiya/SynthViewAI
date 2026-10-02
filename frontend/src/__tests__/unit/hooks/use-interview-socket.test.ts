@@ -148,6 +148,53 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
     }
   });
 
+  it('questionFromPayload: maps topic and isFollowUp from payload (Fix 3)', async () => {
+    renderHook(() => useInterviewSocket(mockInterviewId));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+
+    if (capturedSocket) {
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, {
+        questionId: 'q-topic-1',
+        sequenceNumber: 2,
+        totalQuestions: 5,
+        questionType: 'BEHAVIORAL' as const,
+        questionTitle: 'Tell me about a conflict.',
+        topic: 'team-conflict',
+        isFollowUp: true,
+        deliveredAt: new Date().toISOString(),
+        timeoutSeconds: 300,
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const state = useLiveInterviewStore.getState();
+      expect(state.currentQuestion?.topic).toBe('team-conflict');
+      expect(state.currentQuestion?.isFollowUp).toBe(true);
+    }
+  });
+
+  it('questionFromPayload: falls back to questionType when topic is absent (Fix 3 backward compat)', async () => {
+    renderHook(() => useInterviewSocket(mockInterviewId));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+
+    if (capturedSocket) {
+      capturedSocket.simulateConnect();
+      capturedSocket.simulateServerEvent(SOCKET_EVENTS.server.questionDelivered, {
+        questionId: 'q-legacy-1',
+        sequenceNumber: 1,
+        totalQuestions: 5,
+        questionType: 'TECHNICAL' as const,
+        questionTitle: 'Explain indexing.',
+        // no topic, no isFollowUp — legacy payload shape
+        deliveredAt: new Date().toISOString(),
+        timeoutSeconds: 300,
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const state = useLiveInterviewStore.getState();
+      expect(state.currentQuestion?.topic).toBe('TECHNICAL');
+      expect(state.currentQuestion?.isFollowUp).toBe(false);
+    }
+  });
+
   it('should emit correct payload when submitAnswer is called', async () => {
     const { result } = renderHook(() => useInterviewSocket(mockInterviewId));
     

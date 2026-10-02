@@ -191,6 +191,10 @@ export interface QuestionDeliveredPayload extends BasePayload {
   questionTitle: string;
   questionDescription?: string;
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /** Short subdomain tag (e.g. "team-conflict", "url-shortener") from the AI engine. */
+  topic?: string;
+  /** True when the adaptive engine decided this question is a follow-up to the previous one. */
+  isFollowUp: boolean;
   // Client starts its own 5-min countdown from this timestamp
   deliveredAt: string; // ISO-8601
   timeoutSeconds: number; // always 300 (QUESTION_TIMEOUT_MS / 1000) for now

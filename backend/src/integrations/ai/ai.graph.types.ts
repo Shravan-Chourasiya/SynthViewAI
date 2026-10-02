@@ -28,6 +28,12 @@ export interface QuestionHistoryEntry {
   sequenceNumber: number;
   wasAnswered: boolean;
   score: number | null;
+  /**
+   * Truncated excerpt of the candidate's answer to this question, used by the
+   * interviewer prompt to generate a grounded follow-up. Not persisted to
+   * Postgres (same lifecycle as embedding/topic — session-scoped only).
+   */
+  answerExcerpt?: string;
 }
 
 /**

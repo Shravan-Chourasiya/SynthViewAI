@@ -502,7 +502,71 @@ describe("Provider — failure paths", () => {
   });
 });
 
-// ── Evaluator edge case signal tests ─────────────────────────────────────────
+// ── Fix 1: answerExcerpt threading into follow_up prompt ─────────────────────
+
+describe("Interviewer — answerExcerpt in follow_up prompt (Fix 1)", () => {
+  it("follow_up with answerExcerpt: userPrompt contains the excerpt and the MUST reference instruction", () => {
+    const history = [
+      makeHistoryEntry({
+        questionTitle: "Describe a time you resolved a conflict.",
+        score: 55,
+        answerExcerpt:
+          "I used active listening and scheduled a one-on-one to address the disagreement directly.",
+      }),
+    ];
+    const state = makeState();
+    const result = buildInterviewerPrompt(state, "follow_up", history);
+    expect(result.userPrompt).toContain(
+      "I used active listening and scheduled a one-on-one to address the disagreement directly.",
+    );
+    expect(result.userPrompt).toContain("MUST reference something specific");
+  });
+
+  it("follow_up without answerExcerpt: falls back to score-based hint, no MUST reference instruction", () => {
+    const history = [
+      makeHistoryEntry({
+        questionTitle: "Explain the event loop.",
+        score: 80,
+        // no answerExcerpt
+      }),
+    ];
+    const state = makeState();
+    const result = buildInterviewerPrompt(state, "follow_up", history);
+    expect(result.userPrompt).toContain("probe deeper");
+    expect(result.userPrompt).not.toContain("MUST reference something specific");
+  });
+
+  it("follow_up with null score and no excerpt: falls back to generic hint", () => {
+    const history = [makeHistoryEntry({ score: null })];
+    const state = makeState();
+    const result = buildInterviewerPrompt(state, "follow_up", history);
+    expect(result.userPrompt).toContain("Generate a natural follow-up");
+    expect(result.userPrompt).not.toContain("MUST reference something specific");
+  });
+});
+
+// ── Fix 2: candidateExperience in system prompt ───────────────────────────────
+
+describe("Interviewer — candidateExperience in system prompt (Fix 2)", () => {
+  it("includes experience clause when candidateExperience is a non-unknown value", () => {
+    const state = makeState({ candidateExperience: "Senior" });
+    const result = buildInterviewerPrompt(state, "initial", []);
+    expect(result.systemPrompt).toContain("Candidate experience level: Senior.");
+  });
+
+  it("omits experience clause when candidateExperience is 'unknown'", () => {
+    const state = makeState({ candidateExperience: "unknown" });
+    const result = buildInterviewerPrompt(state, "initial", []);
+    expect(result.systemPrompt).not.toContain("Candidate experience level");
+  });
+
+  it("omits experience clause when candidateExperience is absent", () => {
+    const state = makeState();
+    const result = buildInterviewerPrompt(state, "initial", []);
+    expect(result.systemPrompt).not.toContain("Candidate experience level");
+  });
+});
+
 // These test the signal classification logic directly (not via the full graph)
 // by replicating the evaluator's edge-case rules.
 

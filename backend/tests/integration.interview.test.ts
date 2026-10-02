@@ -169,6 +169,19 @@ describe("POST /interviews — creation", () => {
     expect(interview.interviewStatus).toBe("READY");
   });
 
+  it("merges companyOther into targetedCompany when companyChoice is OTHER (Fix 2)", async () => {
+    const tokens = await seedAndLogin();
+    const res = await authed(tokens.accessToken, tokens.csrfToken)
+      .post(`${API}/interviews`)
+      .send({
+        ...CREATE_INPUT,
+        targetedCompanyOther: "Acme Corp",
+      });
+    expect(res.status).toBe(200);
+    const interview = res.body.data as { interviewMetaData: { targetedCompany?: string } };
+    expect(interview.interviewMetaData.targetedCompany).toBe("Acme Corp");
+  });
+
   it("rejects unauthenticated creation with 401", async () => {
     const res = await request.post(`${API}/interviews`).send({ ...CREATE_INPUT });
     expect(res.status).toBe(401);
