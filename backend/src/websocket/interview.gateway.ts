@@ -58,6 +58,7 @@ const KNOWN_WS_ERROR_CODES = new Set<string>([
   "INTERVIEW_NOT_FOUND",
   "INTERVIEW_INVALID_STATE",
   "QUESTION_NOT_FOUND",
+  "QUESTION_NOT_COMPLETED",
   "ANSWER_REJECTED",
   "CONTEXT_MISSING",
   "INTERNAL_ERROR",
@@ -66,6 +67,10 @@ const KNOWN_WS_ERROR_CODES = new Set<string>([
 function toWsErrorCode(err: unknown): WsErrorCode {
   if (err instanceof Error && KNOWN_WS_ERROR_CODES.has(err.message)) {
     return err.message as WsErrorCode;
+  }
+  // AppError carries a stable errorCode — surface it if it maps to a known WS code
+  if (err instanceof Error && "errorCode" in err && KNOWN_WS_ERROR_CODES.has((err as { errorCode: string }).errorCode)) {
+    return (err as { errorCode: string }).errorCode as WsErrorCode;
   }
   return "INTERNAL_ERROR";
 }
@@ -225,7 +230,10 @@ export function registerInterviewGateway(io: IoServer): void {
         } catch (err) {
           const code = toWsErrorCode(err);
           socket.emit("ws:error", wsError(code, `Failed to join interview: ${code}`, interviewId));
-          logger.warn({ socketId: socket.id, interviewId, code }, "[ws] interview:join rejected");
+          logger.warn(
+            { err, socketId: socket.id, interviewId, code },
+            "[ws] interview:join rejected",
+          );
         }
       })();
     });

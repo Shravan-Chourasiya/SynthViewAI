@@ -68,14 +68,11 @@ services:
     # `/health`.
     healthCheckPath: /health
     #
-    # Recommended, currently commented out on purpose: apply pending Drizzle
-    # migrations before each deploy. Without it a schema change (like the
-    # interview-reminder columns) reaches production un-migrated and the affected
-    # queries fail at runtime with "column does not exist". prompt 3 scopes this
-    # file to build/start/health config only, so this is left as an opt-in — see
-    # the deployment report.
-    #
-    # preDeployCommand: npm run db:migrate
+    # Apply pending Drizzle migrations before the new process starts. The
+    # interview runtime writes schema fields that may not exist in an older
+    # production database, so serving traffic before migrations complete turns
+    # a valid interview join into a generic websocket INTERNAL_ERROR.
+    preDeployCommand: npm run db:migrate
     #
     envVars:
       # ── App ───────────────────────────────────────────────────────────────────

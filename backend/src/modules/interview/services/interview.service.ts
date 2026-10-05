@@ -491,6 +491,33 @@ export async function generateAndDeliverQuestionService(
   const db = getPgDb();
   const sequenceNumber = context.questionState.currentIndex + 1;
 
+  // ── Race guard: question row may already exist from a concurrent call ─────
+  // startInterviewService generates Q1 and writes context.currentQuestionId,
+  // but the client can send interview:join before that write lands. If a row
+  // for this sequenceNumber already exists, treat it as the current question
+  // and skip generation entirely.
+  const [existingQuestion] = await db
+    .select()
+    .from(interviewQuestionsTable)
+    .where(
+      and(
+        eq(interviewQuestionsTable.interviewId, interviewId),
+        eq(interviewQuestionsTable.sequenceNumber, sequenceNumber),
+      ),
+    )
+    .limit(1);
+
+  if (existingQuestion) {
+    // Heal the context so future calls hit the idempotency guard at the top
+    const healedContext: InterviewContext = {
+      ...context,
+      questionState: { ...context.questionState, currentQuestionId: existingQuestion.id },
+    };
+    await writeInterviewContext(healedContext, context.config.durationMinutes);
+    if (io) await redeliverCurrentQuestion(healedContext, io);
+    return;
+  }
+
   // ── Consume lookahead cache (populated by the previous answer submission) ─
   let generated = await consumeLookahead(interviewId);
 

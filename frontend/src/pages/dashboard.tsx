@@ -45,8 +45,16 @@ export function DashboardPage() {
   // and every store update re-renders with fresh numbers automatically.
   const data: DashData | null = useMemo(() => {
     if (interviewStatus === 'idle' || interviewStatus === 'loading') return null
-    const completed = interviews.filter((interview) => interview.status === 'COMPLETED')
-    const scores = completed.map((interview) => interview.score).filter((score): score is number => score !== null)
+    const completed = interviews
+      .filter((interview) => interview.status === 'COMPLETED')
+      .sort(
+        (a, b) =>
+          new Date(a.lastActivityAt || a.createdAt).getTime() -
+          new Date(b.lastActivityAt || b.createdAt).getTime(),
+      )
+    const scores = completed
+      .map((interview) => interview.score)
+      .filter((score): score is number => score !== null)
     const average = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0
     const categories = ['Behavioral', 'Technical', 'Coding', 'Mixed']
       .map((label) => {
@@ -71,7 +79,9 @@ export function DashboardPage() {
 
   useEffect(() => {
     // The store surfaces failures through `status`/`error`.
-    void fetchInterviews().catch(() => undefined)
+    // A completed interview can happen immediately before returning here.
+    // Bypass the short list cache so the trend reflects that new result.
+    void fetchInterviews({ force: true }).catch(() => undefined)
   }, [fetchInterviews])
 
   const firstName = (user?.firstName ?? user?.username ?? 'there').split(' ')[0]
