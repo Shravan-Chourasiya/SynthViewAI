@@ -84,7 +84,6 @@ export interface RecoverAccountVerifyRequest {
 }
 
 export interface UpdatePasswordRequest {
-  email: string;
   currentPassword: string;
   newPassword: string;
 }

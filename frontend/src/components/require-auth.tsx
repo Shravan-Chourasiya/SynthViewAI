@@ -24,11 +24,19 @@ export function AuthBootstrap({ children }: { children: ReactNode }) {
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
+  const bootstrap = useAuthStore((s) => s.bootstrap);
   const location = useLocation();
+
+  useEffect(() => {
+    if (status === "idle" || status === "unauthenticated") {
+      void bootstrap();
+    }
+  }, [bootstrap, status]);
 
   if (status === "idle" || status === "loading") {
     return (
-      <div className="flex min-h-screen flex-col gap-4 p-8">
+      <div className="flex min-h-screen flex-col gap-4 p-8" aria-live="polite">
         <Skeleton className="h-14 w-full rounded-xl" />
         <Skeleton className="h-64 w-full rounded-xl" />
         <Skeleton className="h-32 w-full rounded-xl" />
@@ -36,7 +44,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
-  if (status === "unauthenticated") {
+  if (status === "unauthenticated" || !user) {
     return (
       <Navigate to="/login" replace state={{ from: location.pathname }} />
     );

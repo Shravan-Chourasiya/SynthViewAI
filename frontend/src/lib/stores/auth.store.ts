@@ -30,6 +30,7 @@ interface AuthActions {
   register: (name: string, username: string, email: string, password: string) => Promise<void>;
   verifyOtp: (email: string, otp: string) => Promise<void>;
   logout: () => Promise<void>;
+  forceLogout: (message?: string) => void;
   _clear: () => void;
   setPendingEmail: (email: string | null) => void;
 }
@@ -38,8 +39,12 @@ interface AuthActions {
 
 export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
   // Wire the http.ts onAuthExpired callback once at store creation time.
-  // When a silent refresh fails anywhere in the app, this clears auth state.
-  setOnAuthExpired(() => get()._clear());
+  // When a silent refresh fails anywhere in the app, clear the store and send
+  // the user back to the login page so protected routes cannot keep rendering a
+  // stale authenticated state.
+  setOnAuthExpired(() => {
+    get().forceLogout("Your session expired. Please sign in again.");
+  });
 
   return {
     user: null,
@@ -58,13 +63,15 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
           const user = await authSvc.me();
           set({ user, status: "authenticated", error: null });
         } catch (error) {
+          const apiError = error instanceof ApiError ? error : undefined;
+          if (apiError?.status === 401 || apiError?.code === "AUTH_SESSION_EXPIRED") {
+            set({ user: null, status: "unauthenticated", error: null });
+            return;
+          }
           set({
             user: null,
             status: "unauthenticated",
-            error:
-              error instanceof ApiError && error.status !== 401
-                ? error.message
-                : null,
+            error: apiError ? apiError.message : null,
           });
         } finally {
           bootstrapRequest = null;
@@ -124,6 +131,18 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
         // Swallow — we clear state unconditionally below
       } finally {
         get()._clear();
+      }
+    },
+
+    forceLogout(message?: string) {
+      set({
+        user: null,
+        pendingEmail: null,
+        status: "unauthenticated",
+        error: message ?? null,
+      });
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
       }
     },
 

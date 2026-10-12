@@ -96,19 +96,27 @@ export function LobbyPage() {
   // for anything.
   const runChecks = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
     const runId = ++runRef.current
-    setRunning(true)
+    if (!quiet) setRunning(true)
     if (!quiet) setPermissionNotice(false)
     setMediaNoticeDismissed(false)
     clearMediaStream()
 
-    setChecks({
-      camera: { state: 'checking' },
-      microphone: { state: 'checking' },
-    })
+    // Quiet re-checks (permission change / focus) keep the existing settled
+    // state visible while re-probing — resetting to 'checking' causes a
+    // visible flash from 'ready' → 'checking' → 'ready' on every grant event.
+    if (!quiet) {
+      setChecks({
+        camera: { state: 'checking' },
+        microphone: { state: 'checking' },
+      })
+    }
 
     // Release anything left over from a previous run before asking again.
+    // Stop tracks first, then yield the microtask queue so the browser has a
+    // chance to mark the device as released before the next getUserMedia call.
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
     mediaStreamRef.current = null
+    if (quiet) await new Promise<void>((resolve) => setTimeout(resolve, 150))
 
     // Camera and microphone are requested on every lobby visit. getUserMedia is
     // the only way to raise the browser prompt, and once a decision has been
@@ -156,7 +164,7 @@ export function LobbyPage() {
         mediaStreamRef.current = stream
         setMediaStream(stream)
       }
-      setRunning(false)
+      if (!quiet) setRunning(false)
     }
   }, [clearMediaStream, setMediaStream, preferredCameraDeviceId, preferredMicDeviceId])
 
@@ -175,7 +183,13 @@ export function LobbyPage() {
   useEffect(() => {
     if (!interview || !navigator.permissions?.query) return
     const statuses: PermissionStatus[] = []
-    const onChange = () => void runChecks({ quiet: true })
+    const onChange = () => {
+      // Don't re-probe if everything is already healthy — Chrome fires 'change'
+      // spuriously on the first query resolution in some versions.
+      const current = checksRef.current
+      if (current.camera?.state === 'ready' && current.microphone?.state === 'ready') return
+      void runChecks({ quiet: true })
+    }
     const keys: CheckKey[] = ['camera', 'microphone']
     keys.forEach((key) => {
       navigator.permissions
