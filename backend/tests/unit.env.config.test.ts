@@ -136,4 +136,40 @@ describe("Environment Configuration Validation", () => {
 
     expect(() => envSchema.parse(env)).toThrow();
   });
+
+  // ── COOKIE_SAME_SITE ────────────────────────────────────────────────────────
+
+  it("should accept COOKIE_SAME_SITE=none", () => {
+    const env = validEnv();
+    env.COOKIE_SAME_SITE = "none";
+    const parsed = envSchema.parse(env);
+    expect(parsed.COOKIE_SAME_SITE).toBe("none");
+  });
+
+  it("should accept COOKIE_SAME_SITE=lax", () => {
+    const env = validEnv();
+    env.COOKIE_SAME_SITE = "lax";
+    const parsed = envSchema.parse(env);
+    expect(parsed.COOKIE_SAME_SITE).toBe("lax");
+  });
+
+  it("should accept COOKIE_SAME_SITE=strict", () => {
+    const env = validEnv();
+    env.COOKIE_SAME_SITE = "strict";
+    const parsed = envSchema.parse(env);
+    expect(parsed.COOKIE_SAME_SITE).toBe("strict");
+  });
+
+  it("should reject an invalid COOKIE_SAME_SITE value", () => {
+    const env = validEnv();
+    env.COOKIE_SAME_SITE = "always";
+    expect(() => envSchema.parse(env)).toThrow();
+  });
+
+  it("should allow COOKIE_SAME_SITE to be absent (production defaults to none)", () => {
+    const env = validEnv();
+    delete env.COOKIE_SAME_SITE;
+    const parsed = envSchema.parse(env);
+    expect(parsed.COOKIE_SAME_SITE).toBeUndefined();
+  });
 });

@@ -5,12 +5,21 @@
  * and error handling as mentioned in Priority 2 of the test suite plan.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Server, Socket } from "socket.io";
 import type { IncomingHttpHeaders } from "http";
 import { registerSocketAuth } from "../src/websocket/socket.auth.js";
 import { registerInterviewGateway } from "../src/websocket/interview.gateway.js";
 import * as interviewService from "../src/modules/interview/services/interview.service.js";
+import * as tokenUtil from "../src/utils/token.util.js";
+import * as registry from "../src/websocket/socket.registry.js";
+import * as contextService from "../src/modules/interview/services/interview.context.service.js";
+
+vi.mock("../src/utils/token.util.js", () => ({
+  verifyToken: vi.fn(),
+  isTokenBlacklisted: vi.fn(),
+  COOKIE_NAMES: { ACCESS: "access_token" },
+}));
 
 // Mock dependencies
 vi.mock("../src/config/redis.init.js", () => ({
@@ -169,6 +178,133 @@ describe("Websocket Functionality", () => {
       expect(socketEmit).toHaveBeenCalledWith(
         "ws:error",
         expect.objectContaining({ code: "AUTH_FORBIDDEN" }),
+      );
+    });
+  });
+
+  // ── Socket authentication ───────────────────────────────────────────────────────────────
+
+  describe("registerSocketAuth", () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    const makeSocket = (cookieHeader?: string) => {
+      const nextFn = vi.fn();
+      const socket = {
+        id: "sock-1",
+        data: {} as Record<string, unknown>,
+        handshake: { headers: { cookie: cookieHeader } as IncomingHttpHeaders },
+      };
+      return { socket, nextFn };
+    };
+
+    beforeEach(() => {
+      vi.mocked(tokenUtil.isTokenBlacklisted).mockResolvedValue(false);
+      vi.mocked(tokenUtil.verifyToken).mockReturnValue({
+        type: "access",
+        userId: "user-1",
+        sessionId: "session-1",
+      } as never);
+    });
+
+    it("calls next() with no error when a valid access_token cookie is present", async () => {
+      const { socket, nextFn } = makeSocket("access_token=valid.jwt.token");
+      let capturedMiddleware: ((socket: unknown, next: unknown) => void) | undefined;
+      const io = { use: (fn: (socket: unknown, next: unknown) => void) => { capturedMiddleware = fn; } } as unknown as Server;
+
+      registerSocketAuth(io);
+      capturedMiddleware!(socket, nextFn);
+      await flush();
+
+      expect(nextFn).toHaveBeenCalledWith(); // no error argument
+      expect(socket.data.userId).toBe("user-1");
+      expect(socket.data.sessionId).toBe("session-1");
+    });
+
+    it("calls next(Error) when the access_token cookie is missing", async () => {
+      const { socket, nextFn } = makeSocket(undefined);
+      let capturedMiddleware: ((socket: unknown, next: unknown) => void) | undefined;
+      const io = { use: (fn: (socket: unknown, next: unknown) => void) => { capturedMiddleware = fn; } } as unknown as Server;
+
+      registerSocketAuth(io);
+      capturedMiddleware!(socket, nextFn);
+      await flush();
+
+      expect(nextFn).toHaveBeenCalledWith(expect.any(Error));
+      const err = vi.mocked(nextFn).mock.calls[0]?.[0] as Error;
+      expect(err.message).toMatch(/AUTH_UNAUTHORIZED/);
+    });
+
+    it("calls next(Error) when the token is blacklisted", async () => {
+      vi.mocked(tokenUtil.isTokenBlacklisted).mockResolvedValue(true);
+      const { socket, nextFn } = makeSocket("access_token=revoked.jwt.token");
+      let capturedMiddleware: ((socket: unknown, next: unknown) => void) | undefined;
+      const io = { use: (fn: (socket: unknown, next: unknown) => void) => { capturedMiddleware = fn; } } as unknown as Server;
+
+      registerSocketAuth(io);
+      capturedMiddleware!(socket, nextFn);
+      await flush();
+
+      expect(nextFn).toHaveBeenCalledWith(expect.any(Error));
+      const err = vi.mocked(nextFn).mock.calls[0]?.[0] as Error;
+      expect(err.message).toMatch(/AUTH_SESSION_EXPIRED/);
+    });
+
+    it("calls next(Error) when verifyToken throws (expired/invalid token)", async () => {
+      vi.mocked(tokenUtil.verifyToken).mockImplementation(() => { throw new Error("jwt expired"); });
+      const { socket, nextFn } = makeSocket("access_token=expired.jwt.token");
+      let capturedMiddleware: ((socket: unknown, next: unknown) => void) | undefined;
+      const io = { use: (fn: (socket: unknown, next: unknown) => void) => { capturedMiddleware = fn; } } as unknown as Server;
+
+      registerSocketAuth(io);
+      capturedMiddleware!(socket, nextFn);
+      await flush();
+
+      expect(nextFn).toHaveBeenCalledWith(expect.any(Error));
+      const err = vi.mocked(nextFn).mock.calls[0]?.[0] as Error;
+      expect(err.message).toMatch(/AUTH_SESSION_EXPIRED/);
+    });
+  });
+
+  // ── QUESTION_NOT_COMPLETED gateway error ────────────────────────────────────────────
+
+  describe("question:next — QUESTION_NOT_COMPLETED", () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    it("emits QUESTION_NOT_COMPLETED when requestNextQuestionService throws it", async () => {
+      const socketEmit = vi.fn();
+      const socket = {
+        id: "socket-1",
+        data: { userId: "user-1" } as Record<string, unknown>,
+        emit: socketEmit,
+        join: vi.fn(),
+        leave: vi.fn(),
+        on: vi.fn(),
+      };
+      const handlers: Record<string, (payload: unknown) => void> = {};
+      socket.on = (event: string, handler: (payload: unknown) => void) => { handlers[event] = handler; return socket as never; };
+
+      const io = {
+        on: (_event: string, callback: (socket: unknown) => void) => callback(socket),
+        to: vi.fn(() => ({ emit: vi.fn() })),
+      } as unknown as Server;
+
+      vi.mocked(interviewService.fetchInterviewById).mockResolvedValue({
+        userId: "user-1",
+        interviewStatus: "INPROGRESS",
+      } as never);
+
+      const { AppError } = await import("../src/utils/AppError.js");
+      vi.mocked(interviewService.requestNextQuestionService).mockRejectedValue(
+        new AppError("Current question is not yet completed", 409, "QUESTION_NOT_COMPLETED", { isOperational: true }),
+      );
+
+      registerInterviewGateway(io);
+      handlers["question:next"]?.({ interviewId: "interview-1" });
+      await flush();
+
+      expect(socketEmit).toHaveBeenCalledWith(
+        "ws:error",
+        expect.objectContaining({ code: "QUESTION_NOT_COMPLETED" }),
       );
     });
   });
