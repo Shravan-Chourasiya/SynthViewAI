@@ -21,7 +21,7 @@ export class ApiError extends Error {
   }
 }
 
-type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _noRefresh?: boolean };
 type AuthExpiredCallback = () => void;
 let onAuthExpired: AuthExpiredCallback | undefined;
 let refreshInFlight: Promise<void> | null = null;
@@ -61,9 +61,13 @@ function isUnsafe(method?: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes((method ?? "GET").toUpperCase());
 }
 
-function canRefresh(url?: string): boolean {
-  const path = url ?? "";
-  return path !== ENDPOINTS.auth.refresh && !path.startsWith("/auth/");
+function canRefresh(config: RetryableConfig): boolean {
+  const path = config.url ?? "";
+  return (
+    path !== ENDPOINTS.auth.refresh &&
+    !path.startsWith("/auth/") &&
+    !(config as RetryableConfig & { _noRefresh?: boolean })._noRefresh
+  );
 }
 
 function toApiError(error: unknown): ApiError {
@@ -122,7 +126,7 @@ axiosInstance.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const config = error.config as RetryableConfig | undefined;
-    if (error.response?.status === 401 && config && !config._retry && canRefresh(config.url)) {
+    if (error.response?.status === 401 && config && !config._retry && canRefresh(config)) {
       config._retry = true;
       try {
         if (!refreshInFlight) {
@@ -148,6 +152,14 @@ axiosInstance.interceptors.response.use(
 
 export function httpGet<T>(path: string): Promise<T> {
   return axiosInstance.get(path).then(unwrap<T>);
+}
+
+/** Like httpGet but a 401 will NOT trigger a silent token refresh.
+ * Used by bootstrap so a missing session never causes a reload loop. */
+export function httpGetNoRefresh<T>(path: string): Promise<T> {
+  return axiosInstance
+    .get(path, { _noRefresh: true } as RetryableConfig)
+    .then(unwrap<T>);
 }
 
 export function httpPost<T>(path: string, body?: unknown): Promise<T> {

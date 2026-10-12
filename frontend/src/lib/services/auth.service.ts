@@ -1,4 +1,4 @@
-import { httpDelete, httpGet, httpPatch, httpPost } from "../http";
+import { httpDelete, httpGet, httpGetNoRefresh, httpPatch, httpPost } from "../http";
 import { ENDPOINTS } from "../constants/endpoints";
 import type {
   MeResponse,
@@ -49,7 +49,7 @@ export function logout(): Promise<void> {
 // ── Me ────────────────────────────────────────────────────────────────────────
 
 export function me(): Promise<MeResponse> {
-  return httpGet<MeResponse>(ENDPOINTS.auth.me);
+  return httpGetNoRefresh<MeResponse>(ENDPOINTS.auth.me);
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
