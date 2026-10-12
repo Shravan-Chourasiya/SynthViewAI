@@ -10,10 +10,16 @@ export const RateLimits = {
     limit: 200,
   },
 
-  /** Auth routes — register, login, logout */
+  /** Auth routes — register, login, logout, refresh */
   AUTH: {
     windowMs: 15 * 60 * 1000, // 15 minutes
     limit: 20,
+  },
+
+  /** Authenticated user reads — /usr/me, /usr/sessions etc. */
+  USR: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: 300,
   },
 
   /** OTP verification — tighter to prevent brute force */

@@ -37,6 +37,7 @@ import {
 } from "../modules/auth/controllers/auth.controller.js";
 
 const authLimiter = createRateLimiter("AUTH");
+const usrLimiter = createRateLimiter("USR");
 const otpVerifyLimiter = createRateLimiter("OTP_VERIFY");
 const otpResendLimiter = createRateLimiter("OTP_RESEND");
 const passwordLimiter = createRateLimiter("PASSWORD_RESET");
@@ -122,7 +123,7 @@ export const createAuthRouter = (): Router => {
     emailUpdateOtpVerifyController,
   );
 
-  router.get("/usr/me", requireAuth, csrfTokenMiddleware, authLimiter, getMeController);
+  router.get("/usr/me", requireAuth, csrfTokenMiddleware, usrLimiter, getMeController);
   router.patch(
     "/usr/profile",
     requireAuth,
@@ -130,19 +131,19 @@ export const createAuthRouter = (): Router => {
     validateBody(updateProfileSchema),
     updateProfileController,
   );
-  router.get("/usr/sessions", requireAuth, csrfTokenMiddleware, authLimiter, getSessionsController);
+  router.get("/usr/sessions", requireAuth, csrfTokenMiddleware, usrLimiter, getSessionsController);
   router.delete(
     "/usr/sessions",
     requireAuth,
     csrfTokenMiddleware,
-    authLimiter,
+    usrLimiter,
     deleteAllSessionsController,
   );
   router.delete(
     "/usr/session/:id",
     requireAuth,
     csrfTokenMiddleware,
-    authLimiter,
+    usrLimiter,
     deleteSessionController,
   );
   return router;
