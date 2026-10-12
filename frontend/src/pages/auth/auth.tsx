@@ -12,18 +12,15 @@ export function AuthPage() {
     const mode: AuthMode = location.pathname === '/register' ? 'register' : 'login'
     const from = (location.state as { from?: string } | null)?.from ?? '/dashboard'
     
-    // Check if we have a pending email in the auth store to determine if we should show verify form
     const [showVerifyForm, setShowVerifyForm] = useState(false);
-    const pendingEmail = useAuthStore.getState().pendingEmail;
-    const user = useAuthStore.getState().user;
-    const status = useAuthStore.getState().status;
+    const pendingEmail = useAuthStore((s) => s.pendingEmail);
+    const status = useAuthStore((s) => s.status);
 
-    // Check if user is already authenticated and redirect
     useEffect(() => {
-        if (status === 'authenticated' && user) {
+        if (status === 'authenticated') {
             navigate(from, { replace: true });
         }
-    }, [status, user, navigate, from]);
+    }, [status, navigate, from]);
 
     useEffect(() => {
         if (pendingEmail) {

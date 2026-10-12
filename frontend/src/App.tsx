@@ -75,6 +75,7 @@ function PublicFallback() {
 
 function GuestOnly({ children }: { children: React.ReactNode }) {
   const status = useAuthStore((s) => s.status)
+  if (status === 'idle' || status === 'loading') return <PageFallback />
   if (status === 'authenticated') return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }

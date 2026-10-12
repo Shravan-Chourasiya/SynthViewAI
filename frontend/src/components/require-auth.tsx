@@ -29,7 +29,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
-    if (status === "idle" || status === "unauthenticated") {
+    if (status === "idle") {
       void bootstrap();
     }
   }, [bootstrap, status]);
