@@ -620,67 +620,64 @@ export async function forgotPasswordOtpVerifyService(
   ]);
 }
 
-// ── Update Password — Send OTP ────────────────────────────────────────────────
+// ── Update Password ──────────────────────────────────────────────────────────
 
-export async function updatePasswordService(input: UpdatePasswordInput): Promise<void> {
+export async function updatePasswordService(
+  userId: string,
+  input: UpdatePasswordInput,
+): Promise<void> {
   const db = getPgDb();
 
   const [user] = await db
     .select({
       id: usersTable.id,
+      email: usersTable.email,
       accountStatus: usersTable.accountStatus,
       password: usersTable.password,
     })
     .from(usersTable)
-    .where(eq(usersTable.email, input.email))
+    .where(eq(usersTable.id, userId))
     .limit(1);
 
   const isPasswordMatch = user ? await bcrypt.compare(input.currentPassword, user.password) : false;
 
   if (user?.accountStatus !== "active" || !isPasswordMatch) {
     throw new AppError(
-      "Invalid email or current password",
+      "Invalid current password",
       StatusCodes.UNAUTHORIZED,
       ErrorCodes.AUTH_INVALID_CREDENTIALS,
       { isOperational: true },
     );
   }
 
-  const isNewPasswordSameAsCurrent = input.currentPassword === input.newPassword;
-  if (isNewPasswordSameAsCurrent) {
-    throw new AppError(
-      "New password cannot be the same as the current password",
-      StatusCodes.BAD_REQUEST,
-      ErrorCodes.VALIDATION_FAILED,
-      { isOperational: true },
-    );
-  }
+  const hashedPassword = await bcrypt.hash(input.newPassword, SALT_ROUNDS);
 
-  await db
-    .update(usersTable)
-    .set({ password: await bcrypt.hash(input.newPassword, SALT_ROUNDS) })
-    .where(eq(usersTable.email, input.email));
-
-  // Invalidate all active sessions on password change
+  // Fetch all active sessions before the transaction so we can blacklist tokens
   const sessions = await db
     .select({ accessToken: sessionsTable.accessToken, refreshToken: sessionsTable.refreshToken })
     .from(sessionsTable)
-    .where(and(eq(sessionsTable.userId, user.id), eq(sessionsTable.isActive, true)));
+    .where(and(eq(sessionsTable.userId, userId), eq(sessionsTable.isActive, true)));
 
-  await Promise.all([
-    db
+  // Single transaction: update password + revoke all sessions + reset sessionCount
+  await db.transaction(async (tx) => {
+    await tx
+      .update(usersTable)
+      .set({ password: hashedPassword, sessionCount: 0 })
+      .where(eq(usersTable.id, userId));
+    await tx
       .update(sessionsTable)
       .set({ isActive: false, isRevoked: true })
-      .where(eq(sessionsTable.userId, user.id)),
-    ...sessions.flatMap((s) => [blacklistToken(s.accessToken), blacklistToken(s.refreshToken)]),
-  ]);
+      .where(eq(sessionsTable.userId, userId));
+  });
 
-  // Security-relevant, user-initiated change → confirm it in writing.
-  sendInBackground("credential updated (password)", () =>
-    sendCredentialUpdatedMail(input.email, { field: "password", changedAt: new Date() }),
+  // Blacklist tokens outside the transaction (Redis, best-effort)
+  await Promise.all(
+    sessions.flatMap((s) => [blacklistToken(s.accessToken), blacklistToken(s.refreshToken)]),
   );
 
-  return;
+  sendInBackground("credential updated (password)", () =>
+    sendCredentialUpdatedMail(user.email, { field: "password", changedAt: new Date() }),
+  );
 }
 
 // ── Update Email — Send OTP ────────────────────────────────────────────────

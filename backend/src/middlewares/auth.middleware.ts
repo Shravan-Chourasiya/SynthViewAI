@@ -37,14 +37,13 @@ export const requireAuth = async (
       );
     }
 
-    // Verify session is still valid
     const session = await SessionService.validateSession(payload.sessionId, payload.tokenFamily);
 
     if (!session) {
       throw new AppError(
-        "Session not found or expired",
+        "Session expired or revoked",
         StatusCodes.UNAUTHORIZED,
-        ErrorCodes.AUTH_UNAUTHORIZED,
+        ErrorCodes.AUTH_SESSION_EXPIRED,
         { isOperational: true }
       );
     }

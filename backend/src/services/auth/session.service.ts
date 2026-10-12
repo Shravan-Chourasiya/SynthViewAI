@@ -14,18 +14,19 @@ interface SessionData {
   expiryDate: Date;
   createdAt: Date;
   updatedAt: Date;
-  userRole: string; // Adding user role to session data
+  userRole: string;
 }
 
 export class SessionService {
   /**
-   * Validate a session by ID and token family
+   * Validate a session by ID and token family.
+   * Revoked, inactive, expired, or mismatched-family sessions are treated as
+   * invalid to guarantee the auth middleware can fail with AUTH_SESSION_EXPIRED.
    */
   static async validateSession(sessionId: string, tokenFamily: string): Promise<SessionData | null> {
     const db = getPgDb();
 
-    // Find the session
-    const sessionResult = await db
+    const [sessionResult] = await db
       .select({
         id: sessionsTable.id,
         userId: sessionsTable.userId,
@@ -33,29 +34,34 @@ export class SessionService {
         expiryDate: sessionsTable.expiryDate,
         createdAt: sessionsTable.createdAt,
         updatedAt: sessionsTable.updatedAt,
+        isActive: sessionsTable.isActive,
+        isRevoked: sessionsTable.isRevoked,
+        isExpired: sessionsTable.isExpired,
       })
       .from(sessionsTable)
       .where(eq(sessionsTable.id, sessionId))
       .limit(1);
 
-    if (!sessionResult.length) {
-      return null;
-    }
-    
-    const session = sessionResult[0]!;
-    
-    if (session.tokenFamily !== tokenFamily) {
+    if (!sessionResult) {
       return null;
     }
 
-    // Check if session is expired
-    if (new Date() > session.expiryDate) {
-      // Clean up expired session
-      await db.delete(sessionsTable).where(eq(sessionsTable.id, sessionId));
+    const session = sessionResult;
+
+    if (
+      session.tokenFamily !== tokenFamily ||
+      session.isRevoked ||
+      !session.isActive ||
+      session.isExpired ||
+      new Date() > session.expiryDate
+    ) {
+      await db
+        .update(sessionsTable)
+        .set({ isActive: false, isRevoked: true, isExpired: true })
+        .where(eq(sessionsTable.id, sessionId));
       return null;
     }
 
-    // Get user role
     const userResult = await db
       .select({ userrole: usersTable.userrole })
       .from(usersTable)
@@ -63,25 +69,30 @@ export class SessionService {
       .limit(1);
 
     if (!userResult.length) {
-      // Session exists but user doesn't - clean up session
-      await db.delete(sessionsTable).where(eq(sessionsTable.id, sessionId));
+      await db
+        .update(sessionsTable)
+        .set({ isActive: false, isRevoked: true, isExpired: true })
+        .where(eq(sessionsTable.id, sessionId));
       return null;
     }
 
-    // Validate session data before returning
-    const sessionData = z.object({
-      id: z.string(),
-      userId: z.string(),
-      tokenFamily: z.string(),
-      expiryDate: z.instanceof(Date),
-      createdAt: z.instanceof(Date),
-      updatedAt: z.instanceof(Date),
-    }).parse(session);
+    const sessionData = z
+      .object({
+        id: z.string(),
+        userId: z.string(),
+        tokenFamily: z.string(),
+        expiryDate: z.instanceof(Date),
+        createdAt: z.instanceof(Date),
+        updatedAt: z.instanceof(Date),
+      })
+      .parse(session);
 
-    // Validate user role
     const userRole = userResult[0]?.userrole;
     if (!userRole) {
-      await db.delete(sessionsTable).where(eq(sessionsTable.id, sessionId));
+      await db
+        .update(sessionsTable)
+        .set({ isActive: false, isRevoked: true, isExpired: true })
+        .where(eq(sessionsTable.id, sessionId));
       return null;
     }
 

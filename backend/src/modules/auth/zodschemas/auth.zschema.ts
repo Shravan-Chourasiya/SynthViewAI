@@ -53,7 +53,6 @@ export const forgotPasswordOtpVerifySchema = z
 
 export const updatePasswordSchema = z
   .object({
-    email: z.string().regex(userRegex.emailRegex, { message: "Invalid email format" }),
     currentPassword: z.string().min(1, { message: "Current password is required" }),
     newPassword: z.string().regex(userRegex.passwordRegex, {
       message:
@@ -107,6 +106,8 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ForgotPasswordOtpVerifyInput = z.infer<typeof forgotPasswordOtpVerifySchema>;
 export type UpdatePasswordInput = z.infer<typeof updatePasswordSchema>;
+// Alias kept for internal use — the email is sourced from req.auth, not the body
+export type UpdatePasswordBody = UpdatePasswordInput;
 export type UpdateEmailInput = z.infer<typeof updateEmailSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type EmailUpdateOtpVerifyInput = z.infer<typeof emailUpdateOtpVerifySchema>;

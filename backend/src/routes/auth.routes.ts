@@ -118,7 +118,7 @@ export const createAuthRouter = (): Router => {
     requireAuth,
     csrfTokenMiddleware,
     passwordLimiter,
-    validateBody(updateEmailSchema),
+    validateBody(emailUpdateOtpVerifySchema),
     emailUpdateOtpVerifyController,
   );
 

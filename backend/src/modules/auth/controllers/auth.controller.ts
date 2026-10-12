@@ -355,7 +355,7 @@ export const forgotPasswordOtpVerifyController = async (
   }
 };
 
-// ── Update Password — Send OTP ────────────────────────────────────────────────
+// ── Update Password ──────────────────────────────────────────────────────────
 
 export const updatePasswordController = async (
   req: ValidatedRequest<UpdatePasswordInput>,
@@ -363,12 +363,14 @@ export const updatePasswordController = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    await updatePasswordService(req.body);
+    const authReq = req as AuthenticatedRequest;
+    await updatePasswordService(authReq.auth.userId, req.body);
+    clearAuthCookies(res);
     const response: SuccessResponse = {
       success: true,
       statusCode: StatusCodes.OK,
-      message: "Password reset successfully. Please log in with your new password.",
-      data: null,
+      message: "Password changed. Please log in again.",
+      data: { loggedOut: true },
     };
     res.status(StatusCodes.OK).json(response);
   } catch (error) {
