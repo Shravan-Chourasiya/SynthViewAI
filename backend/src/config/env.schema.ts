@@ -19,10 +19,10 @@ const envSchema = z.object({
     .transform((val) => val.split(",").map((s) => s.trim()))
     .pipe(z.array(z.string().url())),
   COOKIE_DOMAIN: z.string().optional(),
-  // COOKIE_SAME_SITE: lax | strict | none
-  // Production default (when unset) is "none" so cross-site Vercel→Render cookies work.
-  // Set to "lax" only when frontend and backend share one registrable domain.
-  // Invalid values are rejected at boot by auth.constants.ts parseSameSite.
+  // lax | strict | none — validated here so a typo fails loudly at boot.
+  // Production defaults to `none` in auth.constants.ts when this is unset.
+  // Use `none` for Vercel (frontend) + Render (backend) deployments; browsers
+  // drop SameSite=Lax/Strict cookies on cross-site responses, breaking WS auth.
   COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).optional(),
   API_VERSION: z.string(),
   // ── Email (Brevo SMTP relay) ────────────────────────────────────────────────

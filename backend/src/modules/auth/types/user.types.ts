@@ -4,4 +4,5 @@ export interface LoginResult {
   csrfToken: string;
   deviceId: string;
   sessionId: string;
+  userId: string;
 }

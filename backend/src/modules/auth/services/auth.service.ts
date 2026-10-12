@@ -329,6 +329,7 @@ export async function loginService(
     csrfToken,
     deviceId,
     sessionId: session.id,
+    userId: user.id,
   };
 }
 

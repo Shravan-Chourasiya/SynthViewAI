@@ -137,7 +137,7 @@ export const loginController = async (
     const userAgent = req.headers["user-agent"] ?? "unknown";
     const existingDeviceId = req.cookies?.[COOKIE_NAMES.DEVICE_ID] as string | undefined;
 
-    const { accessToken, refreshToken, deviceId, csrfToken } = await loginService(
+    const { accessToken, refreshToken, deviceId, csrfToken, userId } = await loginService(
       req.body,
       ipAddress,
       userAgent,
@@ -146,11 +146,13 @@ export const loginController = async (
 
     setAuthCookies(res, accessToken, refreshToken, csrfToken, deviceId);
 
+    const user = await getMeService(userId);
+
     const response: SuccessResponse = {
       success: true,
       statusCode: StatusCodes.OK,
       message: "Login successful.",
-      data: null,
+      data: user,
     };
     res.status(StatusCodes.OK).json(response);
   } catch (error) {
