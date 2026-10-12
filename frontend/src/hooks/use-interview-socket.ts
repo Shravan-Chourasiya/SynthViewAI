@@ -44,6 +44,7 @@ const WS_ERROR_MESSAGES: Record<WsErrorPayload["code"], string> = {
   INTERVIEW_NOT_FOUND: "This interview could not be found.",
   INTERVIEW_INVALID_STATE: "This action is not available in the interview’s current state.",
   QUESTION_NOT_FOUND: "The requested interview question could not be found.",
+  QUESTION_NOT_COMPLETED: "The current question must be answered or skipped before requesting the next one.",
   ANSWER_REJECTED: "That answer could not be accepted. Please try the current question again.",
   CONTEXT_MISSING: "The interview session is no longer available. Please return to the lobby.",
   INTERNAL_ERROR: "The interview service encountered an unexpected error. Please try again.",

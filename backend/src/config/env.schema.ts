@@ -19,6 +19,11 @@ const envSchema = z.object({
     .transform((val) => val.split(",").map((s) => s.trim()))
     .pipe(z.array(z.string().url())),
   COOKIE_DOMAIN: z.string().optional(),
+  // COOKIE_SAME_SITE: lax | strict | none
+  // Production default (when unset) is "none" so cross-site Vercel→Render cookies work.
+  // Set to "lax" only when frontend and backend share one registrable domain.
+  // Invalid values are rejected at boot by auth.constants.ts parseSameSite.
+  COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).optional(),
   API_VERSION: z.string(),
   // ── Email (Brevo SMTP relay) ────────────────────────────────────────────────
   // Every value is required. Registration, OTP verification, password reset and

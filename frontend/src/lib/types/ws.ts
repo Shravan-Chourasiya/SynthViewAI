@@ -164,6 +164,7 @@ export interface WsErrorPayload extends WsBase {
     | "INTERVIEW_NOT_FOUND"
     | "INTERVIEW_INVALID_STATE"
     | "QUESTION_NOT_FOUND"
+    | "QUESTION_NOT_COMPLETED"
     | "ANSWER_REJECTED"
     | "CONTEXT_MISSING"
     | "INTERNAL_ERROR";
