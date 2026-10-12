@@ -31,6 +31,14 @@ export function InterviewMetricsPage() {
 
   useEffect(() => {
     if (!id) return
+    // The backend only serves metrics for COMPLETED interviews.
+    // Wait until the interview is loaded before deciding whether to fetch.
+    if (!interview) return
+    if (interview.status !== 'COMPLETED') {
+      setFailed(true)
+      setError('Metrics are only available for completed interviews.')
+      return
+    }
     let alive = true
     api
       .getMetrics(id)
@@ -46,9 +54,9 @@ export function InterviewMetricsPage() {
     return () => {
       alive = false
     }
-  }, [id])
+  }, [id, interview])
 
-  if (loading || (!metrics && !failed)) {
+  if (loading || (!interview && !interviewError)) {
     return (
       <AppShell title="Interview Metrics">
         <DetailSkeleton />
@@ -58,10 +66,25 @@ export function InterviewMetricsPage() {
   if (interviewError || error) {
     return <AppShell title="Interview Metrics"><Alert variant="destructive">{interviewError ?? error}</Alert></AppShell>
   }
-  if (!interview || !metrics) {
+  if (!interview) {
     return (
       <AppShell title="Interview Metrics">
         <InterviewNotFound />
+      </AppShell>
+    )
+  }
+  // Metrics fetch is still in flight for a completed interview
+  if (!metrics && !failed) {
+    return (
+      <AppShell title="Interview Metrics">
+        <DetailSkeleton />
+      </AppShell>
+    )
+  }
+  if (!metrics) {
+    return (
+      <AppShell title="Interview Metrics">
+        <Alert variant="destructive">{error ?? 'Unable to load interview metrics.'}</Alert>
       </AppShell>
     )
   }

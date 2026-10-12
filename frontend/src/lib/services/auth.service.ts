@@ -30,8 +30,8 @@ export function verifyOtp(body: VerifyOtpRequest): Promise<void> {
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 
-export function login(body: LoginRequest): Promise<void> {
-  return httpPost(ENDPOINTS.auth.login, body);
+export function login(body: LoginRequest): Promise<MeResponse> {
+  return httpPost<MeResponse>(ENDPOINTS.auth.login, body);
 }
 
 // ── Refresh ───────────────────────────────────────────────────────────────────

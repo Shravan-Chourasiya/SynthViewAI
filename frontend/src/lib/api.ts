@@ -318,12 +318,7 @@ export const api = {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    const user = await authSvc.me();
-    return authSvc.updatePassword({
-      email: user.email,
-      currentPassword,
-      newPassword,
-    });
+    return authSvc.updatePassword({ currentPassword, newPassword });
   },
 
   async deleteAccount(): Promise<void> {

@@ -84,9 +84,8 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => {
     async login(email, password, deviceType = "desktop") {
       set({ status: "loading", error: null });
       try {
-        await authSvc.login({ email, password, deviceType });
-        const user = await authSvc.me();
-        set({ user, status: "authenticated", error: null, pendingEmail: null }); // Clear pending email after successful login
+        const user = await authSvc.login({ email, password, deviceType });
+        set({ user, status: "authenticated", error: null, pendingEmail: null });
       } catch (error) {
         set({
           status: "unauthenticated",
