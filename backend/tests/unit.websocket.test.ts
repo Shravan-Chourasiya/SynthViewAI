@@ -308,4 +308,61 @@ describe("Websocket Functionality", () => {
       );
     });
   });
+
+  // ── code:submit ────────────────────────────────────────────────────────────
+  // A code answer used to be folded into a "[lang]\ncode" string, which made the
+  // language indistinguishable from anything the candidate typed. It is now the
+  // answer text, with the language passed beside it.
+  describe("code:submit", () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    it("submits the code as the answer and the language separately", async () => {
+      const handlers: Record<string, (payload: unknown) => void> = {};
+      const socketEmit = vi.fn();
+      const socket = {
+        id: "socket-1",
+        data: { userId: "user-1" } as Record<string, unknown>,
+        emit: socketEmit,
+        join: vi.fn(),
+        leave: vi.fn(),
+        on: (event: string, handler: (payload: unknown) => void) => {
+          handlers[event] = handler;
+        },
+      };
+      const io = {
+        on: (_event: string, callback: (socket: unknown) => void) => callback(socket),
+        to: vi.fn(() => ({ emit: vi.fn() })),
+      } as unknown as Server;
+
+      vi.mocked(interviewService.fetchInterviewById).mockResolvedValue({
+        userId: "user-1",
+        interviewStatus: "INPROGRESS",
+      } as never);
+      vi.mocked(interviewService.submitAnswerService).mockResolvedValue(undefined as never);
+
+      const code = "def add(a, b):\n    return a + b\n";
+      registerInterviewGateway(io);
+      handlers["code:submit"]?.({
+        interviewId: "interview-1",
+        questionId: "question-1",
+        language: "python",
+        code,
+      });
+      await flush();
+
+      const [, , submitted] = vi.mocked(interviewService.submitAnswerService).mock.calls[0]!;
+      expect(submitted).toEqual({
+        questionId: "question-1",
+        answerData: code,
+        answerType: "TEXT",
+        answerLanguage: "python",
+      });
+      // The old behaviour prefixed the language into the answer text itself.
+      expect((submitted as { answerData: string }).answerData).not.toContain("[python]");
+      expect(socketEmit).toHaveBeenCalledWith(
+        "answer:accepted",
+        expect.objectContaining({ questionId: "question-1" }),
+      );
+    });
+  });
 });

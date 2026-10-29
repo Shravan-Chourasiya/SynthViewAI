@@ -3,6 +3,8 @@
 // Imported by graph.state.ts, context.manager.ts, prompts.ts, and tests.
 // Keeping these separate means tests never transitively load @langchain/langgraph.
 
+import type { AnswerFormat } from "./answer-format.js";
+
 export interface QuestionHistoryEntry {
   questionId: string;
   questionTitle: string;
@@ -16,6 +18,11 @@ export interface QuestionHistoryEntry {
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
   /** Short subdomain tag (e.g. "feature-store") used for topic-diversity checks. */
   topic?: string;
+  /**
+   * How this question was answered — prose or code. Carried in session history so
+   * the one-in-three CODE quota can be counted without another database read.
+   */
+  answerFormat?: AnswerFormat | null;
   /**
    * Semantic vector for this question's text, used to catch a question that has
    * been asked again in different words (see similarity.ts). A per-session working
@@ -46,6 +53,11 @@ export interface PriorQuestion {
   questionTitle: string;
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
   wasAnswered: boolean;
+  /**
+   * Persisted answer format of this question. Optional so callers written before
+   * the column existed still typecheck; an absent value counts as TEXT.
+   */
+  answerFormat?: AnswerFormat | null;
 }
 
 export interface PerformanceMetrics {
@@ -61,6 +73,13 @@ export interface GraphTurnInput {
   sequenceNumber?: number;
   answerData?: string;
   answerType?: "TEXT" | "AUDIO" | "VIDEO";
+  /**
+   * Format of the question being answered. The evaluator switches to the code
+   * rubric when this is "CODE"; absent means prose.
+   */
+  answerFormat?: "TEXT" | "CODE";
+  /** Language the code answer was written in, when known. */
+  answerLanguage?: string | null;
   questionTitle?: string;
   endReason?: "COMPLETED" | "CANCELLED" | "ABANDONED" | "TIMED_OUT";
   // Adaptation hint — set by the adaptive engine, consumed by router + interviewer
@@ -78,6 +97,13 @@ export interface GeneratedQuestionShape {
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
   /** Short subdomain tag returned by the model, null/undefined when unavailable. */
   topic?: string | null;
+  /**
+   * Whether the candidate answers in prose or in a code editor. Absent means TEXT —
+   * the graph always sets this explicitly once the session quota is applied.
+   */
+  answerFormat?: AnswerFormat;
+  /** Suggested language for a CODE answer (e.g. "python"); null for TEXT questions. */
+  codeLanguage?: string | null;
 }
 
 export type DetectionSignal = "strong" | "weak" | "vague" | "incomplete" | "off_topic" | "none";

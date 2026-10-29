@@ -5,6 +5,50 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { Question } from '@/lib/types'
 
+/**
+ * The question's header badges. Shared by the prose and code panels so a candidate
+ * sees the same position, type and difficulty whichever answer surface is shown.
+ */
+export function QuestionMeta({
+  question,
+  index,
+  total,
+}: {
+  question: Question
+  index: number
+  /** `null` when the total number of questions isn't known yet. */
+  total: number | null
+}) {
+  return (
+    <div className="animate-fade-in flex flex-wrap items-center gap-2">
+      {question.isFollowUp ? (
+        <Badge variant="vague" dot>
+          Adaptive follow-up
+        </Badge>
+      ) : (
+        <Badge variant="default" dot>
+          AI-generated
+        </Badge>
+      )}
+      <Badge variant="outline">
+        Q{index}{total !== null ? ` of ${total}` : ' of …'}
+      </Badge>
+      <Badge variant="outline">{question.topic}</Badge>
+      <Badge
+        variant={
+          question.difficulty === 'Hard'
+            ? 'weak'
+            : question.difficulty === 'Easy'
+              ? 'strong'
+              : 'vague'
+        }
+      >
+        {question.difficulty}
+      </Badge>
+    </div>
+  )
+}
+
 export function QuestionPanel({
   question,
   index,
@@ -49,32 +93,7 @@ export function QuestionPanel({
   return (
     <div className="flex h-full flex-col rounded-xl bg-card/30 p-1">
       {/* meta — fades with the rest of the card on question change instead of popping in */}
-      <div className="animate-fade-in flex flex-wrap items-center gap-2">
-        {question.isFollowUp ? (
-          <Badge variant="vague" dot>
-            Adaptive follow-up
-          </Badge>
-        ) : (
-          <Badge variant="default" dot>
-            AI-generated
-          </Badge>
-        )}
-        <Badge variant="outline">
-          Q{index}{total !== null ? ` of ${total}` : ' of …'}
-        </Badge>
-        <Badge variant="outline">{question.topic}</Badge>
-        <Badge
-          variant={
-            question.difficulty === 'Hard'
-              ? 'weak'
-              : question.difficulty === 'Easy'
-                ? 'strong'
-                : 'vague'
-          }
-        >
-          {question.difficulty}
-        </Badge>
-      </div>
+      <QuestionMeta question={question} index={index} total={total} />
 
       {/* question */}
       <div className="mt-5 flex items-start gap-2 max-w-3xl text-pretty">

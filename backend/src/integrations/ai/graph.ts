@@ -27,6 +27,7 @@ import {
   topicTagFromTitle,
 } from "./coverage.js";
 import type { QuestionCategory } from "./coverage.js";
+import { resolveAnswerFormat } from "./answer-format.js";
 import { detectSemanticRepeat } from "./similarity.js";
 import type { RepeatMatch } from "./similarity.js";
 import { embedTexts } from "./embeddings.js";
@@ -253,6 +254,9 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
             ...(topic ? { topic } : {}),
             ...(embedding ? { embedding } : {}),
             ...(answerExcerpt ? { answerExcerpt } : {}),
+            // Carried from the persisted row so the CODE quota is counted correctly
+            // even after a restart wiped this graph's session memory.
+            ...(q.answerFormat ? { answerFormat: q.answerFormat } : {}),
             sequenceNumber: index + 1,
             wasAnswered: q.wasAnswered,
             score: null,
@@ -284,6 +288,7 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
       questionTitle: h.questionTitle,
       questionType: h.questionType,
       wasAnswered: h.wasAnswered,
+      ...(h.answerFormat ? { answerFormat: h.answerFormat } : {}),
     })),
   };
 
@@ -380,11 +385,49 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
     );
   }
 
+  // Answer format is decided AFTER the category is settled: for a MIXED session the
+  // model may have typed the question differently from what is recorded, and "only a
+  // technical question may ask for code" has to be judged against the category the
+  // candidate will actually see. The 1-in-3 quota is counted from session history,
+  // which survives a restart because priorQuestions carries each row's format.
+  const format = resolveAnswerFormat(
+    {
+      answerFormat: generated.answerFormat,
+      codeLanguage: generated.codeLanguage,
+      questionType,
+    },
+    sessionHistory,
+  );
+  if (format.override) {
+    logger.info(
+      {
+        interviewId: state.interviewId,
+        title: generated.questionTitle,
+        questionType,
+        override: format.override,
+      },
+      "[graph] interviewer — answer format overridden",
+    );
+  }
+
   const topic = generated.topic ?? topicTagFromTitle(generated.questionTitle);
-  const recorded: GeneratedQuestionShape = { ...generated, questionType, topic };
+  const recorded: GeneratedQuestionShape = {
+    ...generated,
+    questionType,
+    topic,
+    answerFormat: format.answerFormat,
+    codeLanguage: format.codeLanguage,
+  };
 
   logger.info(
-    { interviewId: state.interviewId, mode, title: recorded.questionTitle, questionType, topic },
+    {
+      interviewId: state.interviewId,
+      mode,
+      title: recorded.questionTitle,
+      questionType,
+      topic,
+      answerFormat: format.answerFormat,
+    },
     "[graph] interviewer — question generated",
   );
 
@@ -400,6 +443,9 @@ async function interviewerNode(state: InterviewGraphState): Promise<Partial<Inte
         questionTitle: recorded.questionTitle,
         questionType: recorded.questionType,
         ...(recorded.topic ? { topic: recorded.topic } : {}),
+        // Kept in session memory so the next turn counts this CODE question even if
+        // the caller's priorQuestions list has not been refreshed yet.
+        ...(recorded.answerFormat ? { answerFormat: recorded.answerFormat } : {}),
         ...(verdict.embedding?.length ? { embedding: verdict.embedding } : {}),
         sequenceNumber,
         wasAnswered: false,

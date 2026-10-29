@@ -36,8 +36,9 @@ export interface AnswerSubmitPayload extends WsBase {
   answerType: "TEXT" | "AUDIO" | "VIDEO";
 }
 
-// Protocol-complete for the backend contract, but not emitted by this UI: the server
-// folds code:submit into a TEXT answer and code execution (codebox) is out of scope.
+// Protocol-complete for the backend contract, but not emitted by this UI yet: the
+// server stores the code and its language as separate fields on the answer. Code
+// execution (codebox) remains out of scope — the evaluator is told the code was not run.
 export interface CodeSubmitPayload extends WsBase {
   event: "code:submit";
   interviewId: string;
@@ -101,6 +102,13 @@ export interface QuestionDeliveredPayload extends WsBase {
   questionTitle: string;
   questionDescription?: string | null;
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /**
+   * Whether the candidate answers in prose or in the code editor. Always present, so
+   * the view never has to guess a default for a question already on screen.
+   */
+  answerFormat: "TEXT" | "CODE";
+  /** Suggested language for a CODE answer (e.g. "python"); absent for TEXT questions. */
+  codeLanguage?: string;
   /** Short subdomain tag from the AI engine (e.g. "team-conflict", "url-shortener"). */
   topic?: string;
   /** True when the adaptive engine decided this is a follow-up to the previous question. */

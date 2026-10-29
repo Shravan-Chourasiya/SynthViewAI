@@ -317,7 +317,10 @@ export function registerInterviewGateway(io: IoServer): void {
     });
 
     // ── code:submit ─────────────────────────────────────────────────────────
-    // Treated as a TEXT answer for now; codebox integration is out of scope.
+    // The code is the answer text and its language is stored beside it — it is NOT
+    // folded into a "[lang]\ncode" string, which used to make the language
+    // indistinguishable from anything the candidate typed. Execution (codebox) is
+    // still out of scope; the evaluator is told the code was not run.
     socket.on("code:submit", (payload) => {
       void (async () => {
         const { interviewId, questionId, language, code } = payload;
@@ -326,11 +329,17 @@ export function registerInterviewGateway(io: IoServer): void {
           const fakeAuthReq = { auth: { userId: socket.data.userId } } as Parameters<
             typeof submitAnswerService
           >[0];
-          await submitAnswerService(fakeAuthReq, interviewId, {
-            questionId,
-            answerData: `[${language}]\n${code}`,
-            answerType: "TEXT",
-          }, io);
+          await submitAnswerService(
+            fakeAuthReq,
+            interviewId,
+            {
+              questionId,
+              answerData: code,
+              answerType: "TEXT",
+              answerLanguage: language,
+            },
+            io,
+          );
           if (code.trim()) {
             socket.emit("answer:accepted", {
               eventVersion: EVENT_VERSION,

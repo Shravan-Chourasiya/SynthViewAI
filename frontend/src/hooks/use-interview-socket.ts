@@ -30,6 +30,8 @@ type SocketHookResult = {
     answerData: string,
     answerType?: "TEXT" | "AUDIO" | "VIDEO",
   ) => void;
+  /** Submit a code answer. The code is the answer; the language is stored beside it. */
+  submitCode: (questionId: string, language: string, code: string) => void;
   requestNextQuestion: () => void;
   cancelInterview: () => void;
   endInterview: () => void;
@@ -54,7 +56,10 @@ function questionFromPayload(payload: QuestionDeliveredPayload): Question {
   return {
     id: payload.questionId,
     index: payload.sequenceNumber - 1,
-    kind: "text",
+    // The backend's answerFormat is the single source of truth for which answer
+    // surface the room renders. "TEXT" (or a legacy payload without the field)
+    // means the prose panel.
+    kind: payload.answerFormat === "CODE" ? "code" : "text",
     category:
       payload.questionType === "BEHAVIORAL" ? "Behavioral"
       : payload.questionType === "TECHNICAL" ? "Technical"
@@ -64,6 +69,7 @@ function questionFromPayload(payload: QuestionDeliveredPayload): Question {
     text: payload.questionTitle,
     isFollowUp: payload.isFollowUp ?? false,
     ...(payload.questionDescription ? { starter: payload.questionDescription } : {}),
+    ...(payload.codeLanguage ? { codeLanguage: payload.codeLanguage } : {}),
   };
 }
 
@@ -399,9 +405,24 @@ export function useInterviewSocket(
     [emit, interviewId, store],
   );
 
-  // code:submit is deliberately not exposed here: the backend folds coding
-  // submissions into TEXT answers (codebox is out of scope) and no UI offers a
-  // coding round. Re-add this only when code execution actually ships.
+  // Code answers travel on their own event so the server can store the code and its
+  // language as separate fields. Mirrors submitAnswer exactly: same paused-room
+  // guard, same transcript entry, same busy state while the evaluator runs.
+  const submitCode = useCallback(
+    (questionId: string, language: string, code: string) => {
+      if (!interviewId) return;
+      if (store.getState().timeExpired) return;
+      store.getState().appendTranscript(code);
+      store.getState().setAiStatus("evaluating");
+      emit(SOCKET_EVENTS.client.codeSubmit, {
+        interviewId,
+        questionId,
+        language,
+        code,
+      });
+    },
+    [emit, interviewId, store],
+  );
 
   const cancelInterview = useCallback(() => {
     if (interviewId) emit(SOCKET_EVENTS.client.cancel, { interviewId });
@@ -422,6 +443,7 @@ export function useInterviewSocket(
   return {
     connectionState,
     submitAnswer,
+    submitCode,
     requestNextQuestion,
     cancelInterview,
     endInterview,

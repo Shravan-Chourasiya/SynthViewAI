@@ -192,6 +192,13 @@ export interface QuestionDeliveredPayload extends BasePayload {
   questionTitle: string;
   questionDescription?: string;
   questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /**
+   * Whether the candidate answers in prose or in the code editor. Always present so
+   * the client never has to guess a default for a question already on screen.
+   */
+  answerFormat: "TEXT" | "CODE";
+  /** Suggested language for a CODE answer (e.g. "python"); omitted for TEXT. */
+  codeLanguage?: string;
   /** Short subdomain tag (e.g. "team-conflict", "url-shortener") from the AI engine. */
   topic?: string;
   /** True when the adaptive engine decided this question is a follow-up to the previous one. */

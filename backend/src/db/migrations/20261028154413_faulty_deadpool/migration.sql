@@ -1,0 +1,2 @@
+ALTER TABLE "interview_answers" ADD COLUMN "answer_language" varchar(32);--> statement-breakpoint
+ALTER TABLE "interview_answers" ALTER COLUMN "answer_data" SET DATA TYPE text USING "answer_data"::text;

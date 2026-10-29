@@ -14,6 +14,7 @@ import { logger } from "../../utils/logger.js";
 import { PROVIDER_CONTEXT_WINDOWS } from "./context.manager.js";
 import { generatedQuestionSchema, aiEvaluateResultSchema } from "./ai.types.js";
 import type { GenerateQuestionInput, GeneratedQuestion, AiEvaluateResult } from "./ai.types.js";
+import { normaliseAnswerFormat, normaliseCodeLanguage } from "./answer-format.js";
 import type { InterviewerPromptResult, EvaluatorPromptResult } from "./prompts.js";
 import { getGroqClient, getMistralClient } from "./sdk-clients.js";
 
@@ -337,7 +338,18 @@ function parseAndValidateQuestion(
   }
   // Normalise the optional topic tag to an explicit null: the schema accepts an
   // omitted field (`nullish`) and downstream only ever needs string | null.
-  return { ...result.data, topic: result.data.topic ?? null };
+  //
+  // answerFormat is resolved here against this question's own type, so a behavioural
+  // question can never reach the graph as CODE and an unusable value becomes TEXT
+  // instead of throwing MALFORMED_RESPONSE. The one-in-three quota needs session
+  // history, so that half is applied later in the interviewer node.
+  const answerFormat = normaliseAnswerFormat(result.data.answerFormat, result.data.questionType);
+  return {
+    ...result.data,
+    topic: result.data.topic ?? null,
+    answerFormat,
+    codeLanguage: answerFormat === "CODE" ? normaliseCodeLanguage(result.data.codeLanguage) : null,
+  };
 }
 
 // `origin` identifies which provider/model produced the response so a truncated

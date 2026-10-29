@@ -21,7 +21,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Meter } from '@/components/ui/panel'
-import { DifficultyBadge, TypeBadge } from '@/components/interview-ui'
+import { AnswerDisplay, DifficultyBadge, TypeBadge } from '@/components/interview-ui'
 import { api } from '@/lib/api'
 import { fmtDate, fmtMinutes } from '@/lib/format'
 import { notifyApiError, notifySuccess } from '@/lib/notify'
@@ -521,12 +521,12 @@ export function InterviewReportPage() {
               <div className="border-t border-border p-5 pt-4">
                 <h3 className="text-sm font-semibold leading-relaxed">{q.question}</h3>
 
-                <div className="mt-3 rounded-lg border border-border bg-background/50 px-3.5 py-2.5">
-                  <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Your answer
-                  </p>
-                  <p className="mt-1 text-sm leading-relaxed">{q.answer}</p>
-                </div>
+                <AnswerDisplay
+                  className="mt-3"
+                  answer={q.answer}
+                  answerFormat={q.answerFormat}
+                  codeLanguage={q.codeLanguage}
+                />
 
                 <div className="mt-3 flex items-start gap-2.5 rounded-lg bg-primary/5 px-3.5 py-2.5 ring-1 ring-primary/20">
                   <Brain className="mt-0.5 size-3.5 shrink-0 text-primary" />

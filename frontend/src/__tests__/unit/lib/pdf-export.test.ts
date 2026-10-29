@@ -261,3 +261,118 @@ describe('buildFullReportPdf', () => {
     })
   })
 })
+
+// ── Code answers ──────────────────────────────────────────────────────────────
+
+describe('code answers in the export', () => {
+  // One line far past the character grid, plus real structure so indentation
+  // has something to preserve.
+  const longCode = [
+    'function summarise(rows) {',
+    '  const buckets = new Map();',
+    `  const marker = "${'x'.repeat(400)}";`,
+    '  for (const row of rows) {',
+    '    const key = row.topic ?? "general";',
+    '    buckets.set(key, (buckets.get(key) ?? 0) + 1);',
+    '  }',
+    '  return { buckets, marker };',
+    '}',
+  ].join('\n')
+
+  const codeReport = (answer: string): InterviewReport =>
+    reportWith([
+      {
+        question: 'Implement a topic summariser.',
+        answer,
+        level: 'TECHNICAL',
+        answerFormat: 'CODE',
+        codeLanguage: 'javascript',
+        evaluation: evaluation(80),
+      },
+    ])
+
+  it('labels the block, keeps the note and wraps a long line inside the margin', () => {
+    const doc = buildFullReportPdf({
+      interview,
+      report: codeReport(longCode),
+      metrics: null,
+      history,
+    })
+    const runs = pages(doc).flatMap(pageText).map((run) => run.text)
+    const text = runs.join('\n')
+
+    expect(text).toContain('Your answer - javascript')
+    expect(text).toContain('Code was reviewed, not executed')
+
+    // The 400-character line was cut at the grid instead of drawn whole — a
+    // single run that long would run off the right margin of an A4 page.
+    const markerRuns = runs.filter((run) => run.includes('const marker ='))
+    for (const run of markerRuns) expect(run.length).toBeLessThanOrEqual(120)
+    // The line spans several runs, and every character of it survived. Only
+    // the marker line carries a run of x's this long.
+    const markerChunks = runs.filter((run) => /x{20,}/.test(run))
+    expect(markerChunks.length).toBeGreaterThan(1)
+    const markerXs = markerChunks
+      .flatMap((run) => run.match(/x+/g) ?? [])
+      .reduce((sum, run) => sum + run.length, 0)
+    expect(markerXs).toBe(400)
+  })
+
+  it('preserves indentation and paginates a sample taller than one page', () => {
+    const tall = Array.from(
+      { length: 140 },
+      (_, i) => `  const row${i} = ${'y'.repeat(60)};`,
+    ).join('\n')
+
+    const withCode = buildFullReportPdf({
+      interview,
+      report: codeReport(tall),
+      metrics: null,
+      history,
+    })
+    const withText = buildFullReportPdf({
+      interview,
+      report: reportWith([
+        { question: 'Q?', answer: 'A', level: 'TECHNICAL', evaluation: evaluation(80) },
+      ]),
+      metrics: null,
+      history,
+    })
+
+    // The tall code answer really did force extra pages.
+    expect(pages(withCode).length).toBeGreaterThan(pages(withText).length)
+
+    const text = allText(withCode)
+    const runs = pages(withCode).flatMap(pageText).map((run) => run.text)
+    // Leading whitespace is part of the answer and survives the monospaced grid.
+    expect(text).toContain('  const row0 =')
+    expect(text).toContain('  const row139 =')
+    expect(text).toContain('Code was reviewed, not executed')
+    // No control character from pasted code can reach the content stream.
+    for (const run of runs) {
+      for (const character of run) {
+        expect(character.charCodeAt(0)).toBeGreaterThanOrEqual(0x20)
+      }
+    }
+  })
+
+  it('leaves prose answers on their original single line', () => {
+    const doc = buildFullReportPdf({
+      interview,
+      report: reportWith([
+        {
+          question: 'Q?',
+          answer: 'I would profile first.',
+          level: 'TECHNICAL',
+          evaluation: evaluation(80),
+        },
+      ]),
+      metrics: null,
+      history,
+    })
+
+    const text = allText(doc)
+    expect(text).toContain('Your answer: I would profile first.')
+    expect(text).not.toContain('Code was reviewed, not executed')
+  })
+})

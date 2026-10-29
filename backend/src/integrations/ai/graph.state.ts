@@ -195,6 +195,9 @@ export function nextQuestionInputToGraphState(
       questionTitle: q.questionTitle,
       questionType: q.questionType,
       wasAnswered: q.wasAnswered,
+      // Persisted format of each earlier question — what makes the CODE quota
+      // restart-safe rather than a property of this process's memory.
+      ...(q.answerFormat ? { answerFormat: q.answerFormat } : {}),
     })),
     currentInput: {
       operation: "generate",
@@ -214,6 +217,10 @@ export function evaluateInputToGraphState(input: AiEvaluateInput): Partial<Inter
       answerData: input.answerData,
       answerType: input.answerType,
       questionTitle: input.questionTitle,
+      // Carried so the evaluator can pick the code rubric and name the language
+      // instead of guessing either from the answer text.
+      ...(input.answerFormat ? { answerFormat: input.answerFormat } : {}),
+      answerLanguage: input.answerLanguage ?? null,
     },
   };
 }

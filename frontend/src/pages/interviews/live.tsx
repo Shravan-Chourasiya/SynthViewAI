@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Activity, Loader2 } from 'lucide-react'
 import { QuestionPanel } from '@/components/interview-room/question-panel'
+import { CodeAnswerPanel } from '@/components/interview-room/code-answer-panel'
 import {
   AiStatusBar,
   CandidateControls,
@@ -54,7 +55,7 @@ export function LiveRoomPage() {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
   const screenVideoRef = useRef<HTMLVideoElement>(null); // Ref for screen video element
   const [endOpen, setEndOpen] = useState(false)
-  const { submitAnswer, endInterview, extendTime } = useInterviewSocket(interview?.id)
+  const { submitAnswer, submitCode, endInterview, extendTime } = useInterviewSocket(interview?.id)
 
   const conn = connectionState as ConnectionState
   const ai = aiStatus === 'thinking' ? 'preparing' : aiStatus === 'generating' ? 'adapting' : aiStatus === 'evaluating' ? 'evaluating' : aiStatus === 'idle' ? 'idle' : 'ready' as AIState
@@ -346,18 +347,30 @@ export function LiveRoomPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:p-6">
-            {/* No code execution environment exists, so a coding question type is not
-                reachable. If the backend ever delivers one, it is answered as text
-                instead of rendering a run-code panel. */}
+            {/* The backend decides the answer surface per question: a CODE question
+                gets the editor, everything else the prose panel. Keying on the question
+                id remounts the panel (and reloads that question's draft) on every new
+                question. */}
             <div key={question.id} className="animate-fade-in h-full">
-              <QuestionPanel
-                question={question}
-                index={qIndex}
-                total={qTotal}
-                busy={busy}
-                paused={timeExpired}
-                onSubmit={(text) => submitAnswer(question.id, text)}
-              />
+              {question.kind === 'code' ? (
+                <CodeAnswerPanel
+                  question={question}
+                  index={qIndex}
+                  total={qTotal}
+                  busy={busy}
+                  paused={timeExpired}
+                  onSubmit={(code, language) => submitCode(question.id, language, code)}
+                />
+              ) : (
+                <QuestionPanel
+                  question={question}
+                  index={qIndex}
+                  total={qTotal}
+                  busy={busy}
+                  paused={timeExpired}
+                  onSubmit={(text) => submitAnswer(question.id, text)}
+                />
+              )}
             </div>
           </div>
         </div>

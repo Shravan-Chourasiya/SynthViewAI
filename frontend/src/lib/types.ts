@@ -62,8 +62,8 @@ export interface Interview extends InterviewConfig {
   currentQuestion: number;
 }
 
-/** "code" is reserved for the codebox integration, which is not built. The backend only
- * emits text questions, so the live room renders every question as text by default. */
+/** Which answer surface the live room renders for a question. The backend decides this
+ * per question (`answerFormat`); code questions get the editor, everything else text. */
 export type QuestionKind = "text" | "code";
 
 export interface Question {
@@ -74,9 +74,10 @@ export interface Question {
   topic: string;
   difficulty: Exclude<Difficulty, "Adaptive">;
   text: string;
-  /** Reserved for the code editor's seed content. Code execution (codebox) is not
-   * built, so nothing renders this field and the live room shows text questions only. */
+  /** The question's clarifying note, used as the editor's seed/placeholder content. */
   starter?: string;
+  /** Language the backend suggests for a code answer (e.g. "python"). Absent for text. */
+  codeLanguage?: string;
   isFollowUp?: boolean;
 }
 
@@ -107,6 +108,10 @@ export interface InterviewReport {
     question: string;
     answer: string;
     level: string;
+    /** From the question row; absent on older payloads, which render as prose. */
+    answerFormat?: "TEXT" | "CODE";
+    /** Language recorded alongside a code answer, when one was chosen. */
+    codeLanguage?: string | null;
     evaluation: Evaluation;
   }[];
 }

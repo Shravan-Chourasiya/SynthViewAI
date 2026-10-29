@@ -62,6 +62,9 @@ export const aiNextQuestionInputSchema = z.object({
       questionType: z.enum(["BEHAVIORAL", "TECHNICAL", "MIXED"]),
       wasAnswered: z.boolean(),
       topic: z.string().max(60).optional(),
+      // Persisted format of that question — the interviewer prompt counts these to
+      // keep the one-in-three CODE quota across restarts.
+      answerFormat: z.enum(["TEXT", "CODE"]).nullish(),
     }),
   ),
   adaptationHint: z
@@ -89,6 +92,14 @@ export const aiEvaluateInputSchema = z.object({
   questionTitle: z.string(),
   answerData: z.string(),
   answerType: z.enum(["TEXT", "AUDIO", "VIDEO"]),
+  /**
+   * Whether this answer is code. Set from the question's own format, so the
+   * evaluator never has to infer it from the answer text. Optional: absent means
+   * prose, which is what every pre-existing caller and stored row is.
+   */
+  answerFormat: z.enum(["TEXT", "CODE"]).optional(),
+  /** Language a code answer was written in (e.g. "python"); null when unknown. */
+  answerLanguage: z.string().max(32).nullish(),
 });
 export type AiEvaluateInput = z.infer<typeof aiEvaluateInputSchema>;
 
@@ -119,6 +130,14 @@ export const generatedQuestionSchema = z.object({
   // sloppier model response still validates; the graph falls back to a tag
   // derived from the title.
   topic: z.string().min(1).max(60).nullish(),
+  // Deliberately unvalidated here rather than an enum: an unrecognised format — a
+  // wrong type, a stray "code" in lower case, a number — is not a reason to throw
+  // MALFORMED_RESPONSE and burn the retry/fallback budget on a question that is
+  // otherwise perfectly good. Both fields are normalised by
+  // normaliseAnswerFormat/normaliseCodeLanguage (answer-format.ts), which default
+  // anything unrecognised to TEXT.
+  answerFormat: z.unknown().optional(),
+  codeLanguage: z.unknown().optional(),
 });
 
 const detectionSignalSchema = z.enum([

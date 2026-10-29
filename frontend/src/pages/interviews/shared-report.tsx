@@ -5,7 +5,7 @@ import { BrandMark } from '@/components/brand-mark'
 import { ScoreRing } from '@/components/charts'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
-import { DifficultyBadge, TypeBadge } from '@/components/interview-ui'
+import { AnswerDisplay, DifficultyBadge, TypeBadge } from '@/components/interview-ui'
 import { httpGet } from '@/lib/http'
 import { ENDPOINTS } from '@/lib/constants/endpoints'
 import { fmtDate, fmtMinutes } from '@/lib/format'
@@ -47,6 +47,10 @@ interface SharedReportPayload {
     questionTitle: string
     questionType: string
     answerData: string | null
+    /** From the question row; older rows omit it and render as prose. */
+    answerFormat?: 'TEXT' | 'CODE' | null
+    /** Language recorded alongside a code answer. */
+    answerLanguage?: string | null
     evaluationData: {
       score: number
       feedback: string
@@ -229,12 +233,12 @@ export default function SharedReportPage() {
                         </span>
                       </summary>
                       <div className="border-t border-border p-5 pt-4">
-                        <div className="rounded-lg border border-border bg-background/50 px-3.5 py-2.5">
-                          <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                            Answer
-                          </p>
-                          <p className="mt-1 text-sm leading-relaxed">{q.answerData ?? 'No answer recorded.'}</p>
-                        </div>
+                        <AnswerDisplay
+                          label="Answer"
+                          answer={q.answerData ?? 'No answer recorded.'}
+                          answerFormat={q.answerFormat}
+                          codeLanguage={q.answerLanguage}
+                        />
                         <div className="mt-3 flex items-start gap-2.5 rounded-lg bg-primary/5 px-3.5 py-2.5 ring-1 ring-primary/20">
                           <Brain className="mt-0.5 size-3.5 shrink-0 text-primary" />
                           <div className="min-w-0">

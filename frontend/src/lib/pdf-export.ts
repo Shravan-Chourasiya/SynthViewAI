@@ -196,6 +196,54 @@ function createBuilder(documentTitle: string) {
     return textBlock(text, { size, bold: true, gapAfter: 2.5 })
   }
 
+  /**
+   * Code answer. Courier is monospaced, so the block is wrapped on the exact
+   * character grid rather than by measurement: indentation survives and no line
+   * can run past the margin. Tabs expand to the editor's two-space indent — the
+   * only whitespace normalisation applied — and the lines paginate one at a
+   * time, so a sample taller than a page flows instead of clipping.
+   */
+  function codeBlock(code: string, options: { size?: number; indent?: number } = {}): Block {
+    const size = options.size ?? 8
+    const indent = options.indent ?? 4
+    const lineHeight = mmPerLine(size)
+    pdf.setFont('courier', 'normal')
+    pdf.setFontSize(size)
+    const charWidth = pdf.getTextWidth('M') || 1.7
+    const maxChars = Math.max(16, Math.floor((CONTENT_WIDTH - indent) / charWidth))
+
+    const lines: string[] = []
+    for (const raw of String(code ?? '').replace(/\t/g, '  ').split(/\r?\n/)) {
+      // pdfSafe first (courier is single-byte too), then drop the control
+      // characters that would corrupt the content stream. pdfSafe has already
+      // flattened everything above U+00FF, so a per-character check is safe.
+      const clean = pdfSafe(raw)
+        .split('')
+        .filter((character) => character.charCodeAt(0) >= 0x20)
+        .join('')
+      if (clean.length <= maxChars) {
+        lines.push(clean)
+        continue
+      }
+      for (let i = 0; i < clean.length; i += maxChars) lines.push(clean.slice(i, i + maxChars))
+    }
+
+    return {
+      height: lines.length * lineHeight + 2,
+      draw: () => {
+        pdf.setFont('courier', 'normal')
+        pdf.setFontSize(size)
+        textColor(COLORS.ink)
+        for (const line of lines) {
+          if (y + lineHeight > BOTTOM) addPage()
+          pdf.text(line, PAGE.margin + indent, y + lineHeight * 0.72)
+          y += lineHeight
+        }
+        y += 2
+      },
+    }
+  }
+
   /** A label/value list, used for key facts in the Overview and hero sections. */
   function keyValueBlock(rows: Array<[string, string]>): Block {
     const rowHeight = 5.6
@@ -412,6 +460,7 @@ function createBuilder(documentTitle: string) {
     placeBlock,
     textBlock,
     headingBlock,
+    codeBlock,
     keyValueBlock,
     barChartBlock,
     listBlock,
@@ -590,9 +639,21 @@ function renderReport(builder: Builder, report: InterviewReport) {
         { size: 8.5, bold: true, color: builder.scoreChipColor(question.evaluation.score) },
       ),
       builder.textBlock(question.question, { bold: true }),
-      builder.textBlock(`Your answer: ${question.answer}`, { color: COLORS.muted }),
-      builder.textBlock(`AI evaluation: ${question.evaluation.feedback}`),
     ]
+    if (question.answerFormat === 'CODE') {
+      parts.push(
+        builder.textBlock(`Your answer — ${question.codeLanguage || 'code'}`, {
+          size: 8.5,
+          bold: true,
+          color: COLORS.muted,
+        }),
+        builder.codeBlock(question.answer),
+        builder.textBlock('Code was reviewed, not executed', { size: 8, color: COLORS.muted }),
+      )
+    } else {
+      parts.push(builder.textBlock(`Your answer: ${question.answer}`, { color: COLORS.muted }))
+    }
+    parts.push(builder.textBlock(`AI evaluation: ${question.evaluation.feedback}`))
     if (question.evaluation.strengths.length) {
       parts.push(
         builder.textBlock('Strengths', { size: 8.5, bold: true, color: COLORS.strong }),

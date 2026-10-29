@@ -14,6 +14,7 @@ import {
   QUESTION_TIMEOUT_MS,
 } from "../../../constants/interview.constants.js";
 import { StatusCodes } from "http-status-codes";
+import { decideSubmission, type AnswerSubmissionPayload } from "../answer-submission.js";
 import {
   writeInterviewContext,
   readInterviewContext,
@@ -535,6 +536,9 @@ export async function generateAndDeliverQuestionService(
         questionTitle: interviewQuestionsTable.questionTitle,
         questionType: interviewQuestionsTable.questionType,
         questionState: interviewQuestionsTable.questionState,
+        // The generator counts these to keep its one-in-three CODE quota across a
+        // restart, when its own session history is gone.
+        answerFormat: interviewQuestionsTable.answerFormat,
       })
       .from(interviewQuestionsTable)
       .where(eq(interviewQuestionsTable.interviewId, interviewId))
@@ -554,6 +558,7 @@ export async function generateAndDeliverQuestionService(
         questionTitle: q.questionTitle,
         questionType: q.questionType,
         wasAnswered: q.questionState === "ANSWERED" || q.questionState === "EVALUATED",
+        answerFormat: q.answerFormat,
       })),
       ...(pendingHint ? { adaptationHint: pendingHint } : {}),
     });
@@ -579,6 +584,10 @@ export async function generateAndDeliverQuestionService(
       questionTitle: generated.questionTitle,
       questionDescription: generated.questionDescription ?? undefined,
       questionType: generated.questionType,
+      // The graph always resolves a format; the fallbacks here keep a question from a
+      // stub/fallback path (or an old lookahead entry) safely prose.
+      answerFormat: generated.answerFormat ?? "TEXT",
+      codeLanguage: generated.codeLanguage ?? undefined,
       questionDifficulty,
       questionState: "PENDING",
     })
@@ -624,6 +633,8 @@ export async function generateAndDeliverQuestionService(
         ? { questionDescription: generated.questionDescription }
         : {}),
       questionType: generated.questionType,
+      answerFormat: generated.answerFormat ?? "TEXT",
+      ...(generated.codeLanguage ? { codeLanguage: generated.codeLanguage } : {}),
       ...(generated.topic ? { topic: generated.topic } : {}),
       isFollowUp: context.pendingAdaptationHint?.mode === "follow_up",
       deliveredAt: new Date().toISOString(),
@@ -657,6 +668,8 @@ async function redeliverCurrentQuestion(context: InterviewContext, io: IoServer)
     questionTitle: question.questionTitle,
     ...(question.questionDescription ? { questionDescription: question.questionDescription } : {}),
     questionType: question.questionType,
+    answerFormat: question.answerFormat,
+    ...(question.codeLanguage ? { codeLanguage: question.codeLanguage } : {}),
     isFollowUp: false,
     deliveredAt: new Date().toISOString(),
     timeoutSeconds: Math.floor(QUESTION_TIMEOUT_MS / 1000),
@@ -692,6 +705,9 @@ async function kickoffLookahead(
         questionTitle: interviewQuestionsTable.questionTitle,
         questionType: interviewQuestionsTable.questionType,
         questionState: interviewQuestionsTable.questionState,
+        // The generator counts these to keep its one-in-three CODE quota across a
+        // restart, when its own session history is gone.
+        answerFormat: interviewQuestionsTable.answerFormat,
       })
       .from(interviewQuestionsTable)
       .where(eq(interviewQuestionsTable.interviewId, interviewId))
@@ -705,6 +721,7 @@ async function kickoffLookahead(
         questionTitle: q.questionTitle,
         questionType: q.questionType,
         wasAnswered: q.questionState === "ANSWERED" || q.questionState === "EVALUATED",
+        answerFormat: q.answerFormat,
       })),
       ...(decision ? { adaptationHint: decision.hint } : {}),
     });
@@ -1350,6 +1367,10 @@ export async function getInterviewHistoryService(
       answerData: interviewAnswersTable.answerData,
       answerType: interviewAnswersTable.answerType,
       answerState: interviewAnswersTable.answerState,
+      // Format comes from the question, language from the answer: the report UI
+      // must never infer either from the answer text.
+      answerFormat: interviewQuestionsTable.answerFormat,
+      answerLanguage: interviewAnswersTable.answerLanguage,
       evaluationData: interviewAnswersTable.evaluationData,
       answeredAt: interviewAnswersTable.answeredAt,
       timeTakenSeconds: interviewAnswersTable.timeTakenSeconds,
@@ -1392,7 +1413,7 @@ export async function getAnsweredQuestionIdsService(interviewId: string): Promis
 export async function submitAnswerService(
   authreq: AuthenticatedRequest,
   interviewId: string,
-  payload: { questionId: string; answerData: string; answerType: "TEXT" | "AUDIO" | "VIDEO" },
+  payload: AnswerSubmissionPayload,
   io?: IoServer,
 ) {
   const interview = await resolveInterview(authreq, interviewId);
@@ -1444,12 +1465,15 @@ export async function submitAnswerService(
       .where(eq(interviewQuestionsTable.id, payload.questionId))
       .limit(1),
   ]);
-  if (existing) return existing; // idempotent — return the already-persisted answer
+  // ── One decision for every door an answer arrives through ────────────────
+  // Idempotent replay, empty-as-skip, and the 20,000-character ceiling all live in
+  // answer-submission.ts so the HTTP route, answer:submit and code:submit cannot
+  // drift apart. An oversized answer throws here, before any write or AI call.
+  const decision = decideSubmission(existing?.id ?? null, payload);
 
-  const isEmpty = payload.answerData.trim().length === 0;
+  if (decision.kind === "duplicate") return existing; // already persisted — return it unchanged
 
-  // Empty answer = treat as skipped
-  if (isEmpty) {
+  if (decision.kind === "skip") {
     return skipQuestionInternal(db, interviewId, payload.questionId, now, "SKIPPED");
   }
 
@@ -1479,8 +1503,11 @@ export async function submitAnswerService(
       .values({
         interviewId,
         questionId: payload.questionId,
-        answerData: payload.answerData,
-        answerType: payload.answerType,
+        // Code is stored as the answer text with its language beside it — never
+        // folded together — so the evaluator can use the language as a fact.
+        answerData: decision.answerData,
+        answerType: decision.answerType,
+        answerLanguage: decision.answerLanguage ?? undefined,
         answeredAt: now,
         timeTakenSeconds,
       })
@@ -1498,6 +1525,8 @@ export async function submitAnswerService(
           questionTitle: interviewQuestionsTable.questionTitle,
           questionType: interviewQuestionsTable.questionType,
           sequenceNumber: interviewQuestionsTable.sequenceNumber,
+          // Tells the evaluator to use the code rubric instead of the prose one.
+          answerFormat: interviewQuestionsTable.answerFormat,
         })
         .from(interviewQuestionsTable)
         .where(eq(interviewQuestionsTable.id, payload.questionId))
@@ -1520,8 +1549,12 @@ export async function submitAnswerService(
         questionId: payload.questionId,
         answerId: answer!.id,
         questionTitle: question.questionTitle,
-        answerData: payload.answerData,
-        answerType: payload.answerType,
+        answerData: answer!.answerData,
+        answerType: answer!.answerType,
+        // Format comes from the question, the language from the stored answer: the
+        // evaluator must never have to parse either out of the answer text.
+        answerFormat: question.answerFormat,
+        answerLanguage: answer!.answerLanguage ?? null,
       });
 
       // ── Step 2: Persist the evaluation to both rows ───────────────────────
@@ -1588,7 +1621,7 @@ export async function submitAnswerService(
         sequenceNumber: question.sequenceNumber,
         wasAnswered: true,
         score: evalResult.score,
-        answerExcerpt: excerptAnswer(payload.answerData),
+        answerExcerpt: excerptAnswer(answer!.answerData),
       };
 
       const newPerfState = updatePerformanceState(
@@ -2023,6 +2056,10 @@ export async function getSharedReportService(token: string) {
       questionTitle: interviewQuestionsTable.questionTitle,
       questionType: interviewQuestionsTable.questionType,
       answerData: interviewAnswersTable.answerData,
+      // Same two fields as the owner-facing history read — the shared copy must
+      // show a code answer as code too.
+      answerFormat: interviewQuestionsTable.answerFormat,
+      answerLanguage: interviewAnswersTable.answerLanguage,
       evaluationData: interviewAnswersTable.evaluationData,
       timeTakenSeconds: interviewAnswersTable.timeTakenSeconds,
     })

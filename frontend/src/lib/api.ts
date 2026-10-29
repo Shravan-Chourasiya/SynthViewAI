@@ -70,6 +70,8 @@ type ReportHistory = {
     questionTitle?: string;
     questionType?: string;
     answerData?: string | null;
+    answerFormat?: "TEXT" | "CODE" | null;
+    answerLanguage?: string | null;
     evaluationData?: {
       score?: number;
       feedback?: string;
@@ -98,10 +100,15 @@ function normalizeReport(data: BackendReport, history: ReportHistory | null): In
     .map((question) => {
       const evaluation = question.evaluationData!;
       const score = asNumber(evaluation.score);
+      // The backend's answerFormat is authoritative; anything else (older rows,
+      // a payload that predates the column) renders as prose.
+      const isCode = question.answerFormat === "CODE";
       return {
         question: question.questionTitle ?? "Interview question",
         answer: question.answerData ?? "No answer recorded.",
         level: question.questionType ?? "Interview",
+        answerFormat: isCode ? ("CODE" as const) : ("TEXT" as const),
+        codeLanguage: isCode ? question.answerLanguage ?? null : null,
         evaluation: {
           score,
           signal: signalForScore(score),

@@ -10,6 +10,7 @@
 import type { QuestionHistoryEntry, InterviewerMode, GraphTurnInput } from "./ai.graph.types.js";
 import { coveredTopics, summarizeCategoryMix, type CategoryMix } from "./coverage.js";
 import type { QuestionCategory } from "./coverage.js";
+import { canUseCodeAnswer, summarizeAnswerFormats, CODE_QUESTIONS_PER } from "./answer-format.js";
 
 // Minimal state shape prompts.ts needs — no LangGraph dependency
 export interface PromptStateContext {
@@ -43,6 +44,37 @@ const MAX_LISTED_TOPICS = 10;
  * so rather than dropping titles silently.
  */
 const MAX_AVOID_TITLES = 40;
+
+/**
+ * Answer-format instruction. The quota is stated with the session's real counts for
+ * the same reason mixingLines() states the behavioural/technical split: a rule the
+ * model cannot count is a rule it will break. The graph still enforces both rules
+ * mechanically (answer-format.ts) — this is the instruction that keeps it from
+ * having to.
+ */
+function answerFormatLines(
+  history: QuestionHistoryEntry[],
+  interviewType: "BEHAVIORAL" | "TECHNICAL" | "MIXED",
+): string[] {
+  if (interviewType === "BEHAVIORAL") {
+    return [
+      `Answer format: every question in this interview is behavioral, so "answerFormat" must be "TEXT" and "codeLanguage" null.`,
+    ];
+  }
+
+  const stats = summarizeAnswerFormats(history);
+  return [
+    `Answer format:`,
+    `  - "answerFormat" is "TEXT" unless the question genuinely requires the candidate to write code. Prose stays the default.`,
+    `  - Only a "TECHNICAL" question may be "CODE" — a behavioral question must always be "TEXT".`,
+    `  - At most one in every ${CODE_QUESTIONS_PER} technical questions may be "CODE": the first two technical questions of a session are always "TEXT".`,
+    `  - This session has asked ${stats.technicalCount} technical question(s), ${stats.codeCount} of them "CODE".`,
+    canUseCodeAnswer(history)
+      ? `  - A "CODE" question is still available for this turn if the question is technical.`
+      : `  - The "CODE" allowance is used up at this point in the session — "answerFormat" must be "TEXT".`,
+    `  - When "answerFormat" is "CODE", set "codeLanguage" to the language the answer should be written in, taken from the role and its listed skills (e.g. "python", "typescript", "java", "c++", "sql"). When "answerFormat" is "TEXT", "codeLanguage" must be null.`,
+  ];
+}
 
 function categoryLabel(category: QuestionCategory): string {
   return category === "BEHAVIORAL" ? "behavioral/situational" : "technical/domain";
@@ -188,11 +220,13 @@ export function buildInterviewerPrompt(
     `  - Vary the subdomain of each question: never ask two questions on the same theme with different wording.`,
     ...(type === "MIXED" ? mixingLines(mix) : []),
     ...topicLines(fullHistory),
+    ...answerFormatLines(fullHistory, type),
     ...wrapUpLines(hint),
     `Respond with a JSON object only — no markdown, no explanation.`,
-    `Schema: { "questionTitle": string, "questionDescription": string | null, "questionType": ${questionTypeSchema}, "topic": string }`,
+    `Schema: { "questionTitle": string, "questionDescription": string | null, "questionType": ${questionTypeSchema}, "topic": string, "answerFormat": ${type === "BEHAVIORAL" ? `"TEXT"` : `"TEXT" | "CODE"`}, "codeLanguage": string | null }`,
     `questionDescription should be a brief clarifying note (1–2 sentences) or null if the question is self-explanatory.`,
     `"topic" is a short kebab-case subdomain tag for this question (2-4 words, e.g. "feature-store", "url-shortener", "team-conflict"). Use a NEW tag unless this question is a deliberate follow-up on the same subdomain.`,
+    `"answerFormat" must be "TEXT" for every question unless it is a technical question that needs code, and "codeLanguage" is null whenever "answerFormat" is "TEXT".`,
   ].join("\n");
 
   let userPrompt: string;
@@ -250,6 +284,28 @@ export interface EvaluatorPromptResult {
   userPrompt: string;
 }
 
+/**
+ * Rubric for a code answer. The score fields are unchanged — this only says what
+ * each one means when the "answer" is source text that nothing has run.
+ *
+ * The not-executed statement is load-bearing: without it a model reads code as if it
+ * had observed the output, and either invents a result or marks down anything it
+ * cannot mentally execute.
+ */
+function codeAnswerLines(language: string | null): string[] {
+  return [
+    `This answer is CODE${language ? ` written in ${language}` : ""}, submitted as source text.`,
+    `  - The code was NOT executed, compiled, or tested. Judge it by reading it. Do not claim you ran it and do not assume an output.`,
+    `  - "correctness": would the approach produce a correct result as written? Judge the algorithm and reasoning, not whether this exact text would compile in your environment.`,
+    `  - "technicalDepth": algorithmic complexity, choice of data structures, and whether the stated trade-offs hold.`,
+    `  - "clarity": readability — naming, structure, error handling, and whether another engineer could follow it.`,
+    `  - "relevance": whether the solution actually solves the question that was asked.`,
+    `  - Do NOT penalise trivial syntax slips: a missing semicolon, import, or type annotation, minor formatting, or a language-version nuance.`,
+    `  - DO penalise algorithmic errors, incorrect complexity claims, mishandled edge cases, and code that would clearly not run at all.`,
+    `  - Comment on edge cases: empty input, a single element, duplicates, overflow, and failure paths.`,
+  ];
+}
+
 export function buildEvaluatorPrompt(
   state: PromptStateContext,
   trimmedHistory: QuestionHistoryEntry[],
@@ -257,6 +313,8 @@ export function buildEvaluatorPrompt(
   const questionTitle = state.currentInput?.questionTitle ?? "the interview question";
   const answerData = state.currentInput?.answerData ?? "";
   const answerType = state.currentInput?.answerType ?? "TEXT";
+  const isCodeAnswer = state.currentInput?.answerFormat === "CODE";
+  const answerLanguage = state.currentInput?.answerLanguage ?? null;
   const role = state.jobRole ?? "a software engineer";
   const difficulty = state.difficulty.toLowerCase();
 
@@ -276,6 +334,7 @@ export function buildEvaluatorPrompt(
     `  - Your scores and detection signals are consumed by an adaptive engine to adjust interview difficulty and topic.`,
     `  - Your feedback is shown to the candidate after the session — make it constructive and specific.`,
     `  - Do not generate follow-up questions or suggest what the candidate should have said.`,
+    ...(isCodeAnswer ? codeAnswerLines(answerLanguage) : []),
     `Respond with a JSON object only — no markdown, no explanation.`,
 
     `Schema:`,
@@ -303,7 +362,14 @@ export function buildEvaluatorPrompt(
   const userPrompt = [
     `Question: "${questionTitle}"`,
     `Answer type: ${answerType}`,
-    `Candidate's answer: "${answerData}"`,
+    `Answer format: ${
+      isCodeAnswer
+        ? `CODE${answerLanguage ? ` (${answerLanguage})` : ""} — source text only, NOT executed`
+        : "TEXT (prose)"
+    }`,
+    isCodeAnswer
+      ? `Candidate's code (not executed):\n\`\`\`${answerLanguage ?? ""}\n${answerData}\n\`\`\``
+      : `Candidate's answer: "${answerData}"`,
     historyContext,
   ]
     .filter(Boolean)

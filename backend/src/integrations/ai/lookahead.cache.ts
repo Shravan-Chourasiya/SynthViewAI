@@ -11,12 +11,28 @@
 
 import { redisClient } from "../../config/redis.init.js";
 import type { GeneratedQuestion } from "./ai.types.js";
+import { normaliseAnswerFormat, normaliseCodeLanguage } from "./answer-format.js";
 
 const KEY_PREFIX = "interview:lookahead:";
 const TTL_SECONDS = 10 * 60; // 10 minutes
 
 function lookaheadKey(interviewId: string): string {
   return `${KEY_PREFIX}${interviewId}`;
+}
+
+/**
+ * A cached question was serialised as-is, so an entry written by a build that
+ * predates answerFormat comes back without it. Normalising on read means a
+ * pre-deploy cache entry still delivers a usable TEXT question instead of
+ * `undefined`, and can never deliver CODE for a behavioural question.
+ */
+function normaliseCachedQuestion(question: GeneratedQuestion): GeneratedQuestion {
+  const answerFormat = normaliseAnswerFormat(question.answerFormat, question.questionType);
+  return {
+    ...question,
+    answerFormat,
+    codeLanguage: answerFormat === "CODE" ? normaliseCodeLanguage(question.codeLanguage) : null,
+  };
 }
 
 export async function writeLookahead(
@@ -29,7 +45,7 @@ export async function writeLookahead(
 export async function readLookahead(interviewId: string): Promise<GeneratedQuestion | null> {
   const raw = await redisClient.get(lookaheadKey(interviewId));
   if (!raw) return null;
-  return JSON.parse(raw) as GeneratedQuestion;
+  return normaliseCachedQuestion(JSON.parse(raw) as GeneratedQuestion);
 }
 
 // Atomically consume the lookahead: read + delete in one round-trip.
@@ -38,7 +54,7 @@ export async function consumeLookahead(interviewId: string): Promise<GeneratedQu
   const key = lookaheadKey(interviewId);
   const raw = await redisClient.getdel(key);
   if (!raw) return null;
-  return JSON.parse(raw) as GeneratedQuestion;
+  return normaliseCachedQuestion(JSON.parse(raw) as GeneratedQuestion);
 }
 
 // Called by the adaptive engine when it decides to change direction mid-flight.
