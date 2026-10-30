@@ -1,237 +1,299 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   BarChart3,
-  ClipboardList,
   LayoutDashboard,
   LogOut,
   Menu,
-  Plus,
+  PlusCircle,
   RotateCcw,
   Settings,
   Shield,
+  SquareStack,
   User as UserIcon,
   X,
 } from 'lucide-react'
-import { ThemeToggle } from '@/components/theme-toggle'
-import { BrandMark } from '@/components/brand-mark'
-import { NotificationBell } from '@/components/notification-bell'
-import { useAuthStore } from '@/lib/stores/auth.store'
-import { resumableInterviews } from '@/lib/services/interview.service'
-import { canAccessAdmin } from '@/lib/roles'
+import type { LucideIcon } from 'lucide-react'
+import { BrandLockup } from './brand-mark'
+import { ThemeToggle } from './theme-toggle'
+import { NotificationBell } from './notification-bell'
+import { CommandTrigger } from './command-palette'
+import { Button } from '@/components/ui/button'
+import { InitialsAvatar } from '@/components/ui/misc'
+import { useAuthStore } from '@/lib/stores/auth-store'
+import { useUiStore } from '@/lib/stores/ui-store'
+import { interviewService } from '@/lib/services'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
   to: string
   label: string
-  icon: typeof LayoutDashboard
-  /** null = still loading, undefined = fetch failed — both suppress the badge. */
-  count?: number | null
+  icon: LucideIcon
+  end?: boolean
+  badge?: number
 }
 
-const isActive = (pathname: string, to: string) => {
-  if (to === '/interviews') {
-    return pathname === '/interviews' || /^\/interviews\/(?!new$|resumable$)[^/]+$/.test(pathname)
+const MAIN: NavItem[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/interviews/new', label: 'New Interview', icon: PlusCircle },
+  { to: '/interviews', label: 'Interviews', icon: SquareStack, end: true },
+  { to: '/interviews/resumable', label: 'Resumable', icon: RotateCcw },
+]
+
+const INSIGHTS: NavItem[] = [{ to: '/analytics', label: 'Analytics', icon: BarChart3 }]
+
+const ACCOUNT: NavItem[] = [
+  { to: '/profile', label: 'Profile', icon: UserIcon },
+  { to: '/settings', label: 'Settings', icon: Settings },
+]
+
+const ADMIN: NavItem[] = [{ to: '/admin', label: 'Admin Panel', icon: Shield, end: true }]
+
+function pageTitleFor(pathname: string) {
+  if (pathname.startsWith('/interviews/') && pathname !== '/interviews/new') {
+    const tail = pathname.split('/')[3]
+    const map: Record<string, string> = {
+      lobby: 'Lobby',
+      live: 'Live room',
+      completed: 'Session complete',
+      history: 'Question timeline',
+      metrics: 'Metrics',
+      report: 'Report',
+      resumable: 'Resumable sessions',
+    }
+    if (tail && map[tail]) return map[tail]
+    return 'Interview detail'
   }
-  return pathname === to || pathname.startsWith(`${to}/`)
+  if (pathname === '/interviews/new') return 'New interview'
+  if (pathname === '/interviews') return 'Interviews'
+  if (pathname === '/dashboard') return 'Dashboard'
+  if (pathname === '/analytics') return 'Analytics'
+  if (pathname === '/profile') return 'Profile'
+  if (pathname === '/settings') return 'Settings'
+  if (pathname === '/settings/sessions') return 'Active sessions'
+  if (pathname === '/admin') return 'Admin panel'
+  if (pathname === '/admin/users') return 'Users'
+  if (pathname === '/admin/interviews') return 'All interviews'
+  return 'SynthView AI'
 }
 
-function SideNav({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * Nav group with a single highlight that slides between items instead of each
+ * item toggling its own background. Measured from the active link's box.
+ */
+function NavGroup({ label, items, onNavigate }: { label: string; items: NavItem[]; onNavigate?: () => void }) {
+  const listRef = useRef<HTMLUListElement | null>(null)
+  const [highlight, setHighlight] = useState<{ top: number; height: number } | null>(null)
   const { pathname } = useLocation()
-  const user = useAuthStore((s) => s.user)
-  // Task A: the real resumable count. While loading (null) or on error
-  // (undefined) no badge renders — a flashing 0 or a broken fetch must never
-  // look like "nothing to resume".
-  const [resumable, setResumable] = useState<number | null | undefined>(null)
 
   useEffect(() => {
-    let alive = true
-    resumableInterviews()
-      .then((items) => {
-        if (alive) setResumable(items.length)
-      })
-      .catch(() => {
-        if (alive) setResumable(undefined) // fail silent → no badge
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
+    const list = listRef.current
+    if (!list) return
 
-  const groups: { title: string; items: NavItem[] }[] = [
-    {
-      title: 'Main',
-      items: [
-        { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { to: '/interviews/new', label: 'New Interview', icon: Plus },
-        { to: '/interviews', label: 'Interviews', icon: ClipboardList },
-        { to: '/interviews/resumable', label: 'Resumable', icon: RotateCcw, count: resumable ?? null },
-      ],
-    },
-    {
-      title: 'Insights',
-      items: [{ to: '/analytics', label: 'Analytics', icon: BarChart3 }],
-    },
-    {
-      title: 'Account',
-      items: [
-        { to: '/profile', label: 'Profile', icon: UserIcon },
-        { to: '/settings', label: 'Settings', icon: Settings },
-      ],
-    },
-  ]
-  
-  // Add the admin menu for every role that can reach the admin area
-  // (moderator < admin < owner — see @/lib/roles).
-  if (canAccessAdmin(user?.userrole)) {
-    groups.push({
-      title: 'Admin',
-      items: [{ to: '/admin', label: 'Admin Panel', icon: Shield }],
-    })
-  }
+    const measure = () => {
+      const active = list.querySelector<HTMLElement>('[aria-current="page"]')
+      if (!active) {
+        setHighlight(null)
+        return
+      }
+      // Measure against the list box, not offsetTop — the links live inside a
+      // relatively-positioned <li>, so offsetTop is always 0 relative to it.
+      const listBox = list.getBoundingClientRect()
+      const activeBox = active.getBoundingClientRect()
+      setHighlight({ top: activeBox.top - listBox.top, height: activeBox.height })
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(list)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [pathname, items])
 
   return (
-    <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
-      {groups.map((g) => (
-        <div key={g.title}>
-          <p className="mb-1.5 px-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            {g.title}
-          </p>
-          <div className="flex flex-col gap-0.5">
-            {g.items.map((item) => {
-              const active = isActive(pathname, item.to)
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={onNavigate}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                    active
-                      ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground ring-1 ring-sidebar-ring/30'
-                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
-                  )}
-                >
-                  <Icon className="size-4 shrink-0" />
-                  {item.label}
-                  {item.count != null && item.count > 0 ? (
-                    <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 font-mono text-[10px] leading-none text-primary-foreground">
-                      {item.count}
-                    </span>
-                  ) : null}
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-      ))}
-    </nav>
+    <div className="px-3">
+      <p className="px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70">
+        {label}
+      </p>
+      <ul ref={listRef} className="relative space-y-0.5">
+        {highlight ? (
+          <li
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 rounded-lg bg-sidebar-accent ring-1 ring-sidebar-ring/30 transition-all duration-300 ease-out"
+            style={{ top: highlight.top, height: highlight.height }}
+          />
+        ) : null}
+        {items.map((item) => (
+          <li key={item.to} className="relative">
+            <NavLink
+              to={item.to}
+              end={item.end}
+              viewTransition
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                cn(
+                  'group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                  isActive
+                    ? 'font-medium text-sidebar-accent-foreground'
+                    : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+                )
+              }
+            >
+              <item.icon className="size-4 shrink-0" />
+              <span className="flex-1 truncate">{item.label}</span>
+              {item.badge ? (
+                <span className="rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary tabular-nums ring-1 ring-primary/25">
+                  {item.badge}
+                </span>
+              ) : null}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
-export function AppShell({ title, children }: { title: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const { pathname } = useLocation()
-  const navigate = useNavigate()
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const user = useAuthStore((s) => s.user)
-  const logout = useAuthStore((s) => s.logout)
+  const signOut = useAuthStore((s) => s.signOut)
+  const navigate = useNavigate()
 
-  useEffect(() => {
-    setOpen(false)
-  }, [pathname])
+  const { data: resumable } = useQuery({
+    queryKey: ['interviews', 'resumable'],
+    queryFn: () => interviewService.resumable(),
+    staleTime: 30_000,
+  })
 
-  const initials = ([user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || '?')
-    .split(' ')
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-
-  const signOut = () => {
-    void logout().then(() => navigate('/login'))
-  }
+  const main = MAIN.map((item) =>
+    item.to === '/interviews/resumable' ? { ...item, badge: resumable?.length ?? 0 } : item,
+  )
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* mobile scrim */}
-      {open ? (
-        <div
-          className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm lg:hidden"
-          onClick={() => setOpen(false)}
-          aria-hidden="true"
-        />
-      ) : null}
+    <div className="flex h-full flex-col bg-sidebar">
+      <div className="flex h-14 shrink-0 items-center border-b border-sidebar-border px-4">
+        <Link
+          to="/dashboard"
+          onClick={onNavigate}
+          className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <BrandLockup compact />
+        </Link>
+      </div>
 
-      {/* sidebar */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-300 lg:translate-x-0',
-          open ? 'translate-x-0' : '-translate-x-full',
-        )}
+      <nav
+        className="scrollbar-none flex-1 space-y-4 overflow-y-auto py-4"
+        aria-label="App"
+        data-lenis-prevent
       >
-        <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3.5">
-          <Link to="/" className="flex items-center gap-2">
-            <BrandMark className="size-9" />
-            <span className="text-[15px] font-semibold tracking-tight">
-              SynthView <span className="text-primary">AI</span>
-            </span>
-          </Link>
-          <button
-            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground lg:hidden"
-            onClick={() => setOpen(false)}
-            aria-label="Close navigation"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
+        <NavGroup label="Main" items={main} onNavigate={onNavigate} />
+        <NavGroup label="Insights" items={INSIGHTS} onNavigate={onNavigate} />
+        <NavGroup label="Account" items={ACCOUNT} onNavigate={onNavigate} />
+        {(user?.userrole === 'admin' || user?.userrole === 'owner') ? <NavGroup label="Admin" items={ADMIN} onNavigate={onNavigate} /> : null}
+      </nav>
 
-        <SideNav onNavigate={() => setOpen(false)} />
-
-        <div className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-2.5 rounded-lg bg-sidebar-accent/40 px-2.5 py-2">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[11px] font-semibold text-primary ring-1 ring-primary/30">
-              {initials}
-            </span>
+      <div className="border-t border-sidebar-border p-3">
+        {user ? (
+          <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
+            <InitialsAvatar name={user.name ?? user.username} className="size-8 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium">{[user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || 'Candidate'}</p>
-              <p className="truncate font-mono text-[10px] text-muted-foreground">
-                @{user?.username ?? ''}
-              </p>
+              <p className="truncate text-sm font-medium">{user.name ?? user.username}</p>
+              <p className="truncate font-mono text-[10px] text-muted-foreground">@{user.username}</p>
             </div>
-            <button
-              onClick={signOut}
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="Sign out"
-              title="Sign out"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => {
+                signOut()
+                navigate('/')
+              }}
+              className="text-muted-foreground"
             >
               <LogOut className="size-4" />
-            </button>
+            </Button>
           </div>
-        </div>
+        ) : (
+          <Link
+            to="/login"
+            className="block rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50"
+          >
+            Sign in
+          </Link>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function AppShell() {
+  const location = useLocation()
+  const sidebarOpen = useUiStore((s) => s.sidebarOpen)
+  const setSidebarOpen = useUiStore((s) => s.setSidebarOpen)
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname, setSidebarOpen])
+
+  return (
+    <div className="min-h-dvh bg-background">
+      <aside className="app-sidebar fixed inset-y-0 left-0 hidden w-64 border-r border-sidebar-border lg:block">
+        <SidebarContent />
       </aside>
 
-      {/* main column */}
-      <div className="flex min-h-screen flex-col lg:pl-64">
-        <header className="app-shell-topbar sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground lg:hidden"
-              onClick={() => setOpen(true)}
+      {sidebarOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <div className="relative h-full w-64 animate-slide-in-left border-r border-sidebar-border shadow-2xl">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close navigation"
+              className="absolute top-3.5 right-3 z-10 text-muted-foreground"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="size-4" />
+            </Button>
+            <SidebarContent onNavigate={() => setSidebarOpen(false)} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="lg:pl-64">
+        <header className="app-topbar sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              className="lg:hidden"
               aria-label="Open navigation"
+              onClick={() => setSidebarOpen(true)}
             >
               <Menu className="size-4" />
-            </button>
-            <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
+            </Button>
+            <h1 className="truncate text-sm font-semibold tracking-tight">{pageTitleFor(location.pathname)}</h1>
           </div>
           <div className="flex items-center gap-2">
+            <CommandTrigger />
             <NotificationBell />
             <ThemeToggle />
           </div>
         </header>
 
-        <main className="app-shell-main flex-1 px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className="px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-7xl animate-slide-up">
+            <Outlet />
+          </div>
+        </main>
       </div>
     </div>
   )

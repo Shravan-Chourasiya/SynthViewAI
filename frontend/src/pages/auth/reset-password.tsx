@@ -1,118 +1,76 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { AlertTriangle, Loader2 } from 'lucide-react'
-import { AuthLayout } from '@/components/auth-layout'
-import { Alert } from '@/components/ui/alert'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { KeyRound, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { PasswordCard } from '@/components/auth/password-card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { ApiError, api } from '@/lib/api'
-import { PasswordChecklist, PasswordRulesInfo, passwordIsValid } from './password-checklist'
-import { notifyError, notifySuccess } from '@/lib/notify'
+import { Input, Label } from '@/components/ui/input'
+import { authService } from '@/lib/services'
 
-export function ResetPasswordPage() {
+export default function ResetPasswordPage() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const email = (location.state as { email?: string } | null)?.email ?? ''
-  const [otp, setOtp] = useState('')
+  const [searchParams] = useSearchParams()
+  const email = searchParams.get('email') ?? ''
+  const otp = searchParams.get('otp') ?? ''
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [expired, setExpired] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const mismatch = confirm.length > 0 && password !== confirm
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (loading || expired) return
-    if (!passwordIsValid(password)) {
-      notifyError('Password does not meet the requirements below.')
-      return
-    }
-    if (password !== confirm) {
-      notifyError('Passwords do not match.')
-      return
-    }
-    setLoading(true)
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    setSubmitting(true)
     try {
-      if (!email) {
-        notifyError('Your reset email is missing. Please request a new reset.')
-        return
-      }
-      if (!/^\d{6}$/.test(otp)) {
-        notifyError('Enter the 6-digit verification code.')
-        return
-      }
-      await api.resetPassword(email, otp, password)
-      notifySuccess('Password reset successfully!');
+      await authService.forgotPasswordVerify({ email, otp, newPassword: password, confirmPassword: confirm })
+      toast.success('Password updated — sign in to continue')
       navigate('/login')
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'AUTH_INVALID_CREDENTIALS') {
-        setExpired(true)
-        notifyError('This reset link has expired. Please request a new one.');
-      } else {
-        notifyError(err instanceof Error ? err.message : 'Unable to reset password.');
-      }
+      toast.error('Reset failed', { description: err instanceof Error ? err.message : undefined })
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
   return (
-    <AuthLayout title="Set a new password" subtitle="Choose a strong password you haven't used before.">
-      <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
-        {expired ? (
-          <Alert variant="warning" icon={<AlertTriangle className="size-4" />}>
-            This reset link has expired.{' '}
-            <Link to="/forgot-password" className="font-medium underline underline-offset-2">
-              Request a new one
-            </Link>
-            .
-          </Alert>
-        ) : null}
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="otp">Verification code</Label>
-          <Input id="otp" inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} />
+    <PasswordCard
+      eyebrow="New password"
+      title="Choose a new password."
+      description="Make it something you have not used elsewhere. At least eight characters."
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="reset-password">New password</Label>
+          <Input
+            id="reset-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            required
+          />
         </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="password">New password</Label>
-          <div>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <PasswordChecklist value={password} />
+        <div className="space-y-2">
+          <Label htmlFor="reset-confirm">Confirm password</Label>
+          <Input
+            id="reset-confirm"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            aria-invalid={mismatch}
+            required
+          />
+          {mismatch ? <p className="text-xs text-destructive">Passwords do not match.</p> : null}
         </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="confirm">Confirm new password</Label>
-          <div>
-            <Input
-              id="confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <Button type="submit" className="h-10 w-full" disabled={loading || expired}>
-          {loading ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              Resetting…
-            </>
-          ) : (
-            'Reset password'
-          )}
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          disabled={submitting || mismatch || password.length < 8}
+        >
+          {submitting ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+          {submitting ? 'Updating' : 'Update password'}
         </Button>
-
       </form>
-    </AuthLayout>
+    </PasswordCard>
   )
 }

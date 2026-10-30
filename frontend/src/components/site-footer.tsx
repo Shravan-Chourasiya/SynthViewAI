@@ -1,34 +1,38 @@
 import { Link } from 'react-router-dom'
-import { BrandMark } from '@/components/brand-mark'
+import { BrandLockup } from './brand-mark'
 
-const columns = [
+const COLUMNS = [
   {
     title: 'Product',
     links: [
-      { label: 'How It Works', href: '/#how-it-works' },
-      { label: 'Interview Types', href: '/#interview-types' },
-      { label: 'Reports', href: '/#reports' },
+      { label: 'Interview types', to: '/#interview-types' },
+      { label: 'How it works', to: '/#how-it-works' },
+      { label: 'Reports', to: '/#reports' },
+      { label: 'Analytics', to: '/analytics' },
     ],
   },
   {
     title: 'Get started',
     links: [
-      { label: 'Sign In', href: '/login' },
-      { label: 'Create Account', href: '/register' },
+      { label: 'Create an account', to: '/register' },
+      { label: 'Sign in', to: '/login' },
+      { label: 'New interview', to: '/interviews/new' },
+      { label: 'Dashboard', to: '/dashboard' },
     ],
   },
   {
     title: 'Company',
     links: [
-      { label: 'About', href: '/about' },
-      { label: 'Contact', href: '/contact' },
+      { label: 'About', to: '/about' },
+      { label: 'Contact', to: '/contact' },
+      { label: 'Principles', to: '/#principles' },
     ],
   },
   {
     title: 'Legal',
     links: [
-      { label: 'Privacy', href: '/privacy' },
-      { label: 'Terms', href: '/terms' },
+      { label: 'Privacy', to: '/privacy' },
+      { label: 'Terms', to: '/terms' },
     ],
   },
 ]
@@ -36,55 +40,43 @@ const columns = [
 export function SiteFooter() {
   return (
     <footer className="border-t border-border bg-card/40">
-      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
-          <div>
-            <div className="flex items-center gap-2">
-              <BrandMark className="size-9" />
-              <span className="text-[15px] font-semibold tracking-tight">
-                SynthView <span className="text-primary">AI</span>
-              </span>
-            </div>
-            <p className="mt-4 max-w-xs text-pretty text-sm leading-relaxed text-muted-foreground">
-              An AI interviewer that evaluates performance and dynamically
-              changes the interview based on how you answer.
+      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
+          <div className="space-y-3">
+            <BrandLockup />
+            <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+              An adaptive AI interviewer that listens, evaluates and adjusts in real time — then tells you
+              the truth about what it heard.
             </p>
           </div>
-          {columns.map((col) => (
-            <div key={col.title}>
-              <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                {col.title}
-              </p>
-              <ul className="mt-4 space-y-2.5">
-                {col.links.map((link) => (
+
+          {COLUMNS.map((column) => (
+            <div key={column.title}>
+              <h3 className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {column.title}
+              </h3>
+              <ul className="mt-3 space-y-2">
+                {column.links.map((link) => (
                   <li key={link.label}>
-                    {link.href.startsWith('#') || link.href.startsWith('/#') ? (
-                      <a
-                        href={link.href}
-                        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        {link.label}
-                      </a>
-                    ) : (
-                      <Link
-                        to={link.href}
-                        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        {link.label}
-                      </Link>
-                    )}
+                    <Link
+                      to={link.to}
+                      className="rounded text-sm text-foreground/80 transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      {link.label}
+                    </Link>
                   </li>
                 ))}
               </ul>
             </div>
           ))}
         </div>
-        <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-border pt-6 sm:flex-row">
-          <p className="font-mono text-xs text-muted-foreground">
-            © {new Date().getFullYear()} SynthView AI. All rights reserved.
+
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6">
+          <p className="font-mono text-[11px] text-muted-foreground tabular-nums">
+            © {new Date().getFullYear()} SynthView AI
           </p>
-          <p className="font-mono text-xs text-muted-foreground">
-            Adaptive interviews, built for how you actually perform.
+          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            UI prototype · mock data
           </p>
         </div>
       </div>
