@@ -15,7 +15,7 @@ import {
   type SQLWrapper,
 } from "drizzle-orm";
 import { getPgDb } from "../../../db/postgres.init.js";
-import { usersTable, userRoleEnum } from "../../auth/schemas/user.schema.js";
+import { usersTable, userRoleEnum, accountStatusEnum } from "../../auth/schemas/user.schema.js";
 import { candidateReference } from "./interview-metrics.service.js";
 import type { interviewStatusEnum } from "../../interview/schemas/interview.schema.js";
 import { interviewsTable } from "../../interview/schemas/interview.schema.js";
@@ -84,6 +84,8 @@ interface PaginationOptions {
 interface UserListFilter {
   search?: string;
   role?: string;
+  /** `account_status` value; narrows the list without touching role visibility. */
+  status?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
 }
@@ -160,7 +162,7 @@ export async function listUsers(actorId: string, options: PaginationOptions & Pa
   totalPages: number;
 }> {
   const db = getPgDb();
-  const { page, limit, search, role, sortBy, sortOrder } = options;
+  const { page, limit, search, role, status, sortBy, sortOrder } = options;
 
   const [actorRow] = await db.select({ userrole: usersTable.userrole }).from(usersTable).where(eq(usersTable.id, actorId)).limit(1);
   const actorRank = getRoleRank(actorRow?.userrole);
@@ -187,6 +189,11 @@ export async function listUsers(actorId: string, options: PaginationOptions & Pa
   }
   if (role) {
     userConditions.push(eq(usersTable.userrole, role as (typeof USER_ROLES)[number]));
+  }
+  if (status) {
+    userConditions.push(
+      eq(usersTable.accountStatus, status as (typeof accountStatusEnum.enumValues)[number]),
+    );
   }
   if (visibilityCeiling) {
     userConditions.push(visibilityCeiling);

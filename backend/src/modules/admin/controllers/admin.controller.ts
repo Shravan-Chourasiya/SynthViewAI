@@ -39,7 +39,7 @@ export const listUsersController = async (
 ): Promise<void> => {
   try {
     // Use validated query data if available, otherwise fall back to original query
-    const { page, limit, search, role, sortBy, sortOrder } = getValidatedQuery(req);
+    const { page, limit, search, role, status, sortBy, sortOrder } = getValidatedQuery(req);
 
     const { auth } = req as typeof req & AuthenticatedRequest;
     const result = await listUsers(auth.userId, {
@@ -49,6 +49,7 @@ export const listUsersController = async (
       // rejects an explicit `undefined` for a `prop?: string` target.
       ...(search ? { search: search as string } : {}),
       ...(role ? { role: role as string } : {}),
+      ...(status ? { status: status as string } : {}),
       ...(sortBy ? { sortBy: sortBy as string } : {}),
       ...(sortOrder ? { sortOrder: sortOrder as "asc" | "desc" } : {}),
     });

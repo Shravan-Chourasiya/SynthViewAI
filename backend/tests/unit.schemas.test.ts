@@ -19,6 +19,7 @@ import {
   recoverAccountOtpSchema,
 } from "../src/modules/auth/zodschemas/auth.zschema.js";
 import { createInterviewSchema } from "../src/modules/interview/zodschemas/interview.zschema.js";
+import { userListQuerySchema } from "../src/modules/admin/zodschemas/admin.zschema.js";
 
 // ── registerSchema ────────────────────────────────────────────────────────────
 
@@ -268,5 +269,47 @@ describe("createInterviewSchema", () => {
     const result = createInterviewSchema.safeParse({ ...valid, unknownField: "x" });
     expect(result.success).toBe(true);
     expect((result.data as Record<string, unknown>).unknownField).toBeUndefined();
+  });
+});
+
+// ── userListQuerySchema ────────────────────────────────────────────────────────
+// Query strings, so every value arrives as a string. `status` is the account
+// state filter the admin console sends; there is no `invited` value because
+// that badge is derived from `is_verified` on the client.
+
+describe("userListQuerySchema", () => {
+  it("applies pagination, search and sort defaults", () => {
+    const parsed = userListQuerySchema.parse({});
+    expect(parsed).toEqual({
+      page: 1,
+      limit: 10,
+      search: "",
+      sortBy: "createdAt",
+      sortOrder: "desc",
+    });
+  });
+
+  it("accepts an account_status filter value", () => {
+    const parsed = userListQuerySchema.parse({ status: "suspended" });
+    expect(parsed.status).toBe("suspended");
+    expect(userListQuerySchema.parse({ status: "active" }).status).toBe("active");
+    expect(userListQuerySchema.parse({ status: "disabled" }).status).toBe("disabled");
+    expect(userListQuerySchema.parse({ status: "deleted" }).status).toBe("deleted");
+  });
+
+  it("rejects a status the account_status enum does not have", () => {
+    expect(userListQuerySchema.safeParse({ status: "invited" }).success).toBe(false);
+    expect(userListQuerySchema.safeParse({ status: "INVITED" }).success).toBe(false);
+  });
+
+  it("accepts a role filter and rejects an unknown role", () => {
+    expect(userListQuerySchema.parse({ role: "moderator" }).role).toBe("moderator");
+    expect(userListQuerySchema.safeParse({ role: "reviewer" }).success).toBe(false);
+  });
+
+  it("clamps an out-of-range limit instead of failing the page", () => {
+    expect(userListQuerySchema.parse({ limit: "500" }).limit).toBe(10);
+    expect(userListQuerySchema.parse({ limit: "25" }).limit).toBe(25);
+    expect(userListQuerySchema.parse({ limit: "0" }).limit).toBe(10);
   });
 });

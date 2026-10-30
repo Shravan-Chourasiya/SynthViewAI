@@ -44,6 +44,12 @@ export const userListQuerySchema = z.object({
   }),
   search: z.string().optional().default('').transform((val) => val.trim()),
   role: z.enum(['user', 'admin', 'moderator', 'owner']).optional(),
+  /**
+   * Account state filter. Mirrors the `account_status` enum exactly — the
+   * admin console derives its "invited" badge from `is_verified` instead, so
+   * there is deliberately no `invited` value to accept here.
+   */
+  status: z.enum(['active', 'suspended', 'disabled', 'deleted']).optional(),
   sortBy: z.enum(['createdAt', 'email', 'firstName', 'lastName', 'userrole']).optional().default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
 });
