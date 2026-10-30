@@ -1,228 +1,151 @@
-import { useEffect, useState } from 'react'
-import { CheckCircle2, Loader2 } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { CalendarDays, Mail, MapPin, Save, ShieldCheck, Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
+import { PageHeader } from '@/components/page-header'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Badge, StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import { useAuthStore } from '@/lib/stores/auth.store'
-import { fmtDate } from '@/lib/format'
-import { PasswordRulesInfo, passwordIsValid } from '@/pages/auth/password-checklist'
-import { notifyError, notifySuccess } from '@/lib/notify'
+import { Input, Label } from '@/components/ui/input'
+import { InitialsAvatar } from '@/components/ui/misc'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { ScoreChip } from '@/components/stat-card'
+import { useAuthStore } from '@/lib/stores/auth-store'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL, TYPE_LABEL, formatDate, formatRelative } from '@/lib/format'
 
-function displayName(user: { firstName?: string | null; lastName?: string | null; username: string }) {
-  return [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username
-}
-
-export function ProfilePage() {
+export default function ProfilePage() {
   const user = useAuthStore((s) => s.user)
-  const bootstrap = useAuthStore((s) => s.bootstrap)
+  const updateProfile = useAuthStore((s) => s.updateProfile)
 
-  const [nameVal, setNameVal] = useState('')
-  const [seeded, setSeeded] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState(user?.name ?? user?.username ?? '')
+  const [headline, setHeadline] = useState(user?.headline ?? '')
+  const [location, setLocation] = useState(user?.location ?? '')
 
-  /* security — password update moved here from the Settings page */
-  const [current, setCurrent] = useState('')
-  const [next, setNext] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [pwLoading, setPwLoading] = useState(false)
+  const interviews = useQuery({
+    queryKey: ['interviews', 'recent'],
+    queryFn: () => interviewService.list({ sort: 'recent', pageSize: 5 }),
+  })
 
-  // Seed the editable name only after the user is known. The previous code
-  // seeded `useState(name)` unconditionally and then returned `null` before
-  // the hooks below — an early return before hooks breaks the Rules of Hooks
-  // and blanks the whole page when bootstrap is still resolving.
-  useEffect(() => {
-    if (user && !seeded) {
-      setNameVal(displayName(user))
-      setSeeded(true)
-    }
-  }, [user, seeded])
-
-  // While bootstrap resolves there is no user yet — render a skeleton instead
-  // of `null` so the route never flashes a blank page.
-  if (!user) {
-    return (
-      <AppShell title="Profile">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4" aria-busy="true">
-          <Skeleton className="h-32 rounded-2xl" />
-          <Skeleton className="h-56 rounded-2xl" />
-        </div>
-      </AppShell>
-    )
-  }
-
-  const name = displayName(user)
-  const initials = name
-    .split(' ')
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (saving) return
-    setError(null)
-    if (!nameVal.trim()) return setError("Name can't be empty.")
-    setSaving(true)
-    try {
-      await api.updateProfile({ name: nameVal.trim() })
-      await bootstrap()
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const changePassword = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (pwLoading) return
-    if (!current) {
-      notifyError('Enter your current password.')
-      return
-    }
-    if (!passwordIsValid(next)) {
-      notifyError('New password does not meet the requirements.')
-      return
-    }
-    if (next !== confirm) {
-      notifyError('Passwords do not match.')
-      return
-    }
-    setPwLoading(true)
-    try {
-      await api.changePassword(current, next)
-      setCurrent('')
-      setNext('')
-      setConfirm('')
-      notifySuccess('Password updated successfully!')
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : 'Unable to update password. Please try again.')
-    } finally {
-      setPwLoading(false)
-    }
-  }
+  if (!user) return null
 
   return (
-    <AppShell title="Profile">
-      <div className="animate-slide-up mx-auto flex max-w-2xl flex-col gap-5">
-        <header>
-          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            Account
-          </p>
-          <h1 className="mt-1.5 text-2xl font-semibold tracking-tight sm:text-3xl">Profile</h1>
-        </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Your profile."
+        lede="How you show up in reports and on shared links."
+      />
 
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="flex size-16 items-center justify-center rounded-full bg-primary/15 text-xl font-semibold text-primary ring-1 ring-primary/30">
-              {initials}
-            </span>
+      <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+        <Panel className="space-y-5">
+          <div className="flex items-center gap-4">
+            <InitialsAvatar name={user.name ?? user.username} className="size-14" />
             <div className="min-w-0">
-              <p className="text-base font-semibold tracking-tight">{name}</p>
-              <p className="truncate font-mono text-xs text-muted-foreground">@{user.username}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge variant="default" dot>
-                  {user.userrole}
-                </Badge>
-                <Badge variant="outline">Joined {fmtDate(user.createdAt)}</Badge>
-                <Badge variant="outline">ID {user.id}</Badge>
-              </div>
+              <h2 className="truncate text-base font-semibold tracking-tight">{user.name ?? user.username}</h2>
+              <p className="font-mono text-[11px] text-muted-foreground">@{user.username}</p>
             </div>
           </div>
-        </section>
 
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="text-sm font-semibold">Edit profile</h2>
-          <form className="mt-4 flex flex-col gap-4" onSubmit={save} noValidate>
-            {error ? <Alert variant="destructive">{error}</Alert> : null}
-            {saved ? (
-              <Alert variant="strong" icon={<CheckCircle2 className="size-4" />}>
-                Profile updated.
-              </Alert>
-            ) : null}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="name">Display name</Label>
-              <Input id="name" value={nameVal} onChange={(e) => setNameVal(e.target.value)} />
+          <dl className="space-y-3 border-t border-border pt-5 text-sm">
+            <div className="flex items-center gap-3">
+              <Mail className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-[12px]">{user.email}</span>
             </div>
-            <div>
-              <Button type="submit" disabled={saving}>
-                {saving ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Saving…
-                  </>
-                ) : (
-                  'Save changes'
-                )}
-              </Button>
+            <div className="flex items-center gap-3">
+              <MapPin className="size-4 shrink-0 text-muted-foreground" />
+              <span>{user.location ?? '—'}</span>
             </div>
-          </form>
-        </section>
+            <div className="flex items-center gap-3">
+              <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+              <span>Joined {formatDate(user.joinedAt ?? user.createdAt)}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
+              <Badge variant={(user.role ?? user.userrole) === 'admin' ? 'default' : 'neutral'}>{user.role ?? user.userrole}</Badge>
+            </div>
+          </dl>
 
-        {/* Security — password update (moved from Settings). The always-visible
-            checklist is replaced by an info button that reveals the password
-            rules on hover / keyboard focus. */}
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="text-sm font-semibold">Security</h2>
-          <form className="mt-4 flex flex-col gap-4" onSubmit={changePassword} noValidate>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="current">Current password</Label>
-              <PasswordRulesInfo value={next} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Input
-                id="current"
-                type="password"
-                autoComplete="current-password"
-                value={current}
-                onChange={(e) => setCurrent(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="next">New password</Label>
+          <p className="border-t border-border pt-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            last active {user.lastActiveAt ? formatRelative(user.lastActiveAt) : 'recently'}
+          </p>
+        </Panel>
+
+        <div className="space-y-4">
+          <Panel flush>
+            <PanelHeader title="Account details" />
+            <div className="space-y-5 p-5">
+              <div className="space-y-2">
+                <Label htmlFor="profile-name">Full name</Label>
+                <Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profile-headline">Headline</Label>
                 <Input
-                  id="next"
-                  type="password"
-                  autoComplete="new-password"
-                  value={next}
-                  onChange={(e) => setNext(e.target.value)}
+                  id="profile-headline"
+                  value={headline}
+                  onChange={(e) => setHeadline(e.target.value)}
+                  placeholder="Senior frontend engineer"
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="confirm">Confirm new password</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                />
+              <div className="space-y-2">
+                <Label htmlFor="profile-location">Location</Label>
+                <Input id="profile-location" value={location} onChange={(e) => setLocation(e.target.value)} />
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" disabled={pwLoading}>
-                {pwLoading ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Updating…
-                  </>
-                ) : (
-                  'Update password'
-                )}
+              <Button
+                onClick={() => {
+                  void updateProfile({
+                    firstName: name.split(' ')[0],
+                    lastName: name.split(' ').slice(1).join(' ') || undefined,
+                  })
+                    .then(() => toast.success('Profile updated'))
+                    .catch(() => toast.error('Could not save your profile'))
+                }}
+              >
+                <Save className="size-4" />
+                Save changes
               </Button>
             </div>
-          </form>
-        </section>
+          </Panel>
+
+          <Panel flush>
+            <PanelHeader
+              title="Recent sessions"
+              aside={
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                  {interviews.data?.total ?? 0} total
+                </span>
+              }
+            />
+            {interviews.isLoading ? (
+              <SkeletonRows rows={4} />
+            ) : (
+              <ul className="divide-y divide-border">
+                {(interviews.data?.items ?? []).map((interview) => (
+                  <li key={interview.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{interview.roleTitle}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                        {interview.code} · {formatDate(interview.createdAt)}
+                      </p>
+                    </div>
+                    <Badge variant="neutral">{TYPE_LABEL[interview.type]}</Badge>
+                    <Badge variant="outline">{DIFFICULTY_LABEL[interview.difficulty]}</Badge>
+                    <StatusBadge status={interview.status} />
+                    <ScoreChip score={interview.score} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel className="flex items-start gap-3 border-primary/30 bg-primary/5">
+            <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
+            <p className="text-sm leading-relaxed">
+              Add a headline and location and they will appear on shared report links.
+            </p>
+          </Panel>
+        </div>
       </div>
-    </AppShell>
+    </div>
   )
 }

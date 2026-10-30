@@ -1,202 +1,220 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Info } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
-import { StatusBadge } from '@/components/ui/badge'
-import { DifficultyBadge, TypeBadge } from '@/components/interview-ui'
-import { fmtDate, fmtMinutes } from '@/lib/format'
-import { api } from '@/lib/api'
-import type { InterviewStatus } from '@/lib/types'
+import { Link, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
-  DetailSkeleton,
-  InterviewHeader,
-  InterviewNotFound,
-  useInterview,
-} from './shared'
-import type { ReactNode } from 'react'
+  ArrowRight,
+  BarChart3,
+  FileText,
+  History,
+  Play,
+  Plus,
+  Sparkles,
+} from 'lucide-react'
+import { PageHeader } from '@/components/page-header'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Badge, StatusBadge } from '@/components/ui/badge'
+import { buttonVariants } from '@/components/ui/button'
+import { Meter } from '@/components/ui/meter'
+import { Skeleton, SkeletonRows } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/empty-state'
+import { ScoreChip } from '@/components/stat-card'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL, EXPERIENCE_LABEL, TYPE_LABEL, formatDate, formatRelative } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
-const STATUS_ALERT: Record<
-  InterviewStatus,
-  { variant: 'default' | 'strong' | 'destructive'; message: string }
-> = {
-  CREATED: { variant: 'default', message: 'Interview configured and ready to start.' },
-  READY: { variant: 'default', message: 'Interview configured and ready to start.' },
-  IN_PROGRESS: { variant: 'default', message: 'Interview in progress — resume any time to continue.' },
-  COMPLETED: { variant: 'strong', message: 'Interview finished. The full report is ready.' },
-  CANCELLED: { variant: 'destructive', message: 'This interview was cancelled and can no longer be resumed.' },
-  ABANDONED: { variant: 'destructive', message: 'This interview was abandoned and can no longer be resumed.' },
-  EXPIRED: { variant: 'destructive', message: "This interview's scheduled window has passed and it can no longer be started." },
-}
+export default function InterviewDetailPage() {
+  const { id = '' } = useParams()
 
-export function InterviewDetailPage() {
-  const { id } = useParams()
-  const { interview, loading, error } = useInterview(id)
-  const [actual, setActual] = useState<{ score: number; questions: number; sessionSeconds: number } | null>(null)
+  const interviewQuery = useQuery({
+    queryKey: ['interview', id],
+    queryFn: () => interviewService.get(id),
+  })
 
-  useEffect(() => {
-    if (!id || interview?.status !== 'COMPLETED') return
-    ;(api.getMetrics(id) as Promise<{ overall: number; questionScores: unknown[]; activeSeconds: number }>)
-      .then((metrics) => setActual({ score: metrics.overall, questions: metrics.questionScores.length, sessionSeconds: metrics.activeSeconds }))
-      .catch(() => undefined)
-  }, [id, interview?.status])
+  const questionsQuery = useQuery({
+    queryKey: ['interview', id, 'questions'],
+    queryFn: () => interviewService.questions(id),
+    enabled: Boolean(interviewQuery.data),
+  })
 
-  if (loading) {
+  if (interviewQuery.isLoading) {
     return (
-      <AppShell title="Interview Detail">
-        <DetailSkeleton />
-      </AppShell>
-    )
-  }
-  if (!interview) {
-    return (
-      <AppShell title="Interview Detail">
-        {error ? <Alert variant="destructive">{error}</Alert> : <InterviewNotFound />}
-      </AppShell>
-    )
-  }
-
-  const alert = STATUS_ALERT[interview.status] ?? {
-    variant: 'default' as const,
-    message: `Interview status: ${interview.status}.`,
-  }
-  const pct = interview.status === 'COMPLETED' ? 100 : Math.round((interview.progress ?? 0) * 100)
-
-  return (
-    <AppShell title="Interview Detail">
-      <div className="interview-print-root animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
-        <InterviewHeader interview={interview} active="overview" />
-
-        {/* stats */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Overall score" value={actual ? String(actual.score) : interview.score !== null ? String(interview.score) : '—'} />
-          <StatCard label="Session time" value={actual ? formatDuration(actual.sessionSeconds) : fmtMinutes(interview.durationMin)} />
-          <StatCard label="Questions" value={actual ? String(actual.questions) : String(interview.currentQuestion)} />
-          <StatCard label="Progress" value={`${pct}%`} />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-          {/* configuration */}
-          <section className="rounded-2xl border border-border bg-card p-6">
-            <h2 className="text-sm font-semibold">Configuration</h2>
-            <div className="mt-2">
-              <ConfigRow label="Domain">{interview.domain}</ConfigRow>
-              <ConfigRow label="Target role">{interview.roleTitle}</ConfigRow>
-              <ConfigRow label="Target company">{interview.company || 'No target company'}</ConfigRow>
-              <ConfigRow label="Type">
-                <TypeBadge type={interview.type} />
-              </ConfigRow>
-              <ConfigRow label="Difficulty">
-                <DifficultyBadge difficulty={interview.difficulty} />
-              </ConfigRow>
-              <ConfigRow label="Experience">{interview.experienceLevel}</ConfigRow>
-              <ConfigRow label="Interview style">{interview.interviewStyle === 'REGULAR' ? 'Other / regular' : interview.interviewStyle}</ConfigRow>
-              <ConfigRow label="Duration">{fmtMinutes(interview.durationMin)}</ConfigRow>
-              <ConfigRow label="End interview by">
-                {interview.endingCriteria === 'QUESTION_COUNT'
-                  ? `${interview.questionCount ?? '—'} questions (duration safety limit)`
-                  : 'Duration limit'}
-              </ConfigRow>
-            </div>
-            <div className="mt-4">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Topics
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {interview.topics.length ? (
-                  interview.topics.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-md bg-secondary px-2.5 py-1 font-mono text-xs text-secondary-foreground"
-                    >
-                      {t}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">
-                    AI will choose based on the role
-                  </span>
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* status & progress */}
-          <section className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Status &amp; progress</h2>
-                <StatusBadge status={interview.status} />
-              </div>
-              <div className="mt-4">
-                <div className="mb-1.5 flex items-center justify-between font-mono text-[11px] text-muted-foreground">
-                  <span>Completion</span>
-                  <span className="tabular-nums">{pct}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-              <dl className="mt-4 flex flex-col gap-2 font-mono text-[11px] text-muted-foreground">
-                <div className="flex justify-between">
-                  <dt>Created</dt>
-                  <dd>{fmtDate(interview.createdAt)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt>Last activity</dt>
-                  <dd>{fmtDate(interview.lastActivityAt)}</dd>
-                </div>
-                {interview.status === 'IN_PROGRESS' ? (
-                  <div className="flex justify-between">
-                    <dt>Position</dt>
-                    <dd>
-                      Round {interview.currentRound}/{interview.rounds} · Q{interview.currentQuestion}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-            </div>
-            <Alert
-              variant={alert.variant}
-              icon={
-                alert.variant === 'strong' ? (
-                  <CheckCircle2 className="size-4" />
-                ) : alert.variant === 'destructive' ? (
-                  <AlertTriangle className="size-4" />
-                ) : (
-                  <Info className="size-4" />
-                )
-              }
-            >
-              {alert.message}
-            </Alert>
-          </section>
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-1/2" />
+        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+          <Skeleton className="h-64 rounded-2xl" />
+          <Skeleton className="h-64 rounded-2xl" />
         </div>
       </div>
-    </AppShell>
-  )
-}
+    )
+  }
 
-function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const remainder = seconds % 60; return minutes ? `${minutes}m ${remainder}s` : `${remainder}s` }
+  if (interviewQuery.isError || !interviewQuery.data) {
+    return (
+      <ErrorState
+        code="404"
+        title="Interview not found"
+        body="This session may have been deleted, or the link belongs to another account."
+        actions={
+          <Link to="/interviews" className={buttonVariants({ variant: 'outline' })}>
+            Back to interviews
+          </Link>
+        }
+      />
+    )
+  }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+  const interview = interviewQuery.data
+  const questions = questionsQuery.data ?? []
+  const done = interview.status === 'completed'
+
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{value}</p>
-    </div>
-  )
-}
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={interview.code}
+        title={interview.roleTitle}
+        lede={interview.summary ?? 'No summary yet — the report is written once the session is evaluated.'}
+        actions={
+          <>
+            <StatusBadge status={interview.status} />
+            {done ? (
+              <Link to={`/interviews/${id}/report`} className={cn(buttonVariants({}), 'h-10')}>
+                <FileText className="size-4" />
+                Open report
+              </Link>
+            ) : (
+              <Link to={`/interviews/${id}/lobby`} className={cn(buttonVariants({}), 'h-10')}>
+                <Play className="size-4" />
+                {interview.status === 'in-progress' ? 'Resume' : 'Enter lobby'}
+              </Link>
+            )}
+          </>
+        }
+      />
 
-function ConfigRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-2.5 last:border-0">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="text-right text-sm">{children}</span>
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <Panel flush>
+          <PanelHeader title="Configuration" />
+          <dl className="grid grid-cols-2 gap-px bg-border">
+            {[
+              { label: 'Field', value: interview.field },
+              { label: 'Company', value: interview.company ?? 'Not specified' },
+              { label: 'Format', value: TYPE_LABEL[interview.type] },
+              { label: 'Difficulty', value: DIFFICULTY_LABEL[interview.difficulty] },
+              { label: 'Experience', value: EXPERIENCE_LABEL[interview.experienceLevel] },
+              { label: 'Duration', value: `${interview.durationMinutes}m` },
+              { label: 'Rounds', value: `${interview.rounds}` },
+              { label: 'Created', value: formatDate(interview.createdAt) },
+            ].map((row) => (
+              <div key={row.label} className="bg-card px-5 py-4">
+                <dt className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {row.label}
+                </dt>
+                <dd className="mt-1 text-sm">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="space-y-2 border-t border-border p-5">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Topics</p>
+            <div className="flex flex-wrap gap-1.5">
+              {interview.topics.map((topic) => (
+                <Badge key={topic} variant="default">
+                  {topic}
+                </Badge>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2 border-t border-border p-5">
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Progress</p>
+              <span className="font-mono text-[11px] tabular-nums">
+                {interview.answeredCount}/{interview.questionCount}
+              </span>
+            </div>
+            <Meter value={interview.progress * 100} label="Interview progress" />
+          </div>
+        </Panel>
+
+        <div className="space-y-4">
+          <Panel>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Score</p>
+            <div className="mt-3 flex items-baseline gap-3">
+              <span className="font-mono text-4xl font-semibold tabular-nums">
+                {interview.score ?? '—'}
+              </span>
+              {interview.score !== null ? (
+                <span className="font-mono text-sm text-muted-foreground">/100</span>
+              ) : null}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Updated {formatRelative(interview.updatedAt)}
+            </p>
+          </Panel>
+
+          <Panel className="space-y-2">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Jump to</p>
+            {[
+              { to: `/interviews/${id}/history`, label: 'Question timeline', icon: History },
+              { to: `/interviews/${id}/metrics`, label: 'Metrics', icon: BarChart3 },
+              { to: `/interviews/${id}/report`, label: 'Report', icon: FileText },
+            ].map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="flex items-center gap-3 rounded-xl border border-border px-4 py-2.5 text-sm transition-colors outline-none hover:border-primary/40 hover:bg-secondary/40 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <link.icon className="size-4 text-primary" />
+                <span className="flex-1">{link.label}</span>
+                <ArrowRight className="size-3.5 text-muted-foreground" />
+              </Link>
+            ))}
+          </Panel>
+        </div>
+      </div>
+
+      <Panel flush>
+        <PanelHeader
+          title={
+            <span className="inline-flex items-center gap-2">
+              <Sparkles className="size-3.5 text-primary" />
+              Questions
+            </span>
+          }
+          aside={
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {questions.length} total
+            </span>
+          }
+        />
+        {questionsQuery.isLoading ? (
+          <SkeletonRows rows={4} />
+        ) : (
+          <ul className="divide-y divide-border">
+            {questions.map((question, index) => (
+              <li
+                key={question.id}
+                className="animate-rise-in flex flex-wrap items-center gap-3 px-5 py-4"
+                style={{ '--stagger-i': index } as React.CSSProperties}
+              >
+                <span className="font-mono text-[11px] text-muted-foreground">Q{question.index}</span>
+                <p className="min-w-0 flex-1 truncate text-sm">
+                  {question.prompt}
+                </p>
+                <Badge variant="neutral">{question.topic}</Badge>
+                <Badge variant="outline">{DIFFICULTY_LABEL[question.difficulty]}</Badge>
+                <ScoreChip score={question.score} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="border-t border-border bg-secondary/30 px-5 py-3">
+          <Link
+            to="/interviews/new"
+            className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="size-3" />
+            Run another session
+          </Link>
+        </div>
+      </Panel>
     </div>
   )
 }

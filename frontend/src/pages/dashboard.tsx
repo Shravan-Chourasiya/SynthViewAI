@@ -1,339 +1,231 @@
-import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
-  Award,
+  ArrowRight,
   BarChart3,
-  ClipboardList,
+  CalendarClock,
+  Flame,
   Play,
   Plus,
-  RotateCcw,
-  Sparkles,
+  Target,
+  Trophy,
 } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
 import { PageHeader } from '@/components/page-header'
-import { Sparkline } from '@/components/charts'
-import { StatusBadge } from '@/components/ui/badge'
+import { Panel, PanelHeader } from '@/components/ui/panel'
 import { buttonVariants } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Panel, PanelHeader, Meter } from '@/components/ui/panel'
-import { CountUp } from '@/components/ui/count-up'
-import { DifficultyBadge, RowAction, TypeBadge } from '@/components/interview-ui'
-import { useAuthStore } from '@/lib/stores/auth.store'
-import { useInterviewListStore } from '@/lib/stores/interview-list.store'
-import { fmtDate } from '@/lib/format'
-import type { Interview } from '@/lib/types'
+import { Badge, StatusBadge } from '@/components/ui/badge'
+import { Meter } from '@/components/ui/meter'
+import { Skeleton, SkeletonRows, SkeletonStatGrid } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
+import { ScoreChip, StatCard } from '@/components/stat-card'
+import { Sparkline } from '@/components/charts'
+import { interviewService, analyticsService } from '@/lib/services'
+import { useAuthStore } from '@/lib/stores/auth-store'
+import { DIFFICULTY_LABEL, TYPE_LABEL, formatDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-interface DashData {
-  average: number
-  best: number
-  total: number
-  completed: number
-  trend: number[]
-  categories: { label: string; value: number }[]
-  recent: Interview[]
-  resumable: Interview | null
-}
-
-export function DashboardPage() {
-  const user = useAuthStore((s) => s.user)
-  const interviews = useInterviewListStore((s) => s.interviews)
-  const interviewStatus = useInterviewListStore((s) => s.status)
-  const fetchInterviews = useInterviewListStore((s) => s.fetchInterviews)
-
-  // Derived in render (no stale-state race): the effect only triggers fetches,
-  // and every store update re-renders with fresh numbers automatically.
-  const data: DashData | null = useMemo(() => {
-    if (interviewStatus === 'idle' || interviewStatus === 'loading') return null
-    const completed = interviews
-      .filter((interview) => interview.status === 'COMPLETED')
-      .sort(
-        (a, b) =>
-          new Date(a.lastActivityAt || a.createdAt).getTime() -
-          new Date(b.lastActivityAt || b.createdAt).getTime(),
-      )
-    const scores = completed
-      .map((interview) => interview.score)
-      .filter((score): score is number => score !== null)
-    const average = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0
-    const categories = ['Behavioral', 'Technical', 'Coding', 'Mixed']
-      .map((label) => {
-        const values = completed
-          .filter((interview) => interview.type === label)
-          .map((interview) => interview.score)
-          .filter((score): score is number => score !== null)
-        return { label, value: values.length ? Math.round(values.reduce((sum, score) => sum + score, 0) / values.length) : 0 }
-      })
-      .filter((category) => category.value > 0)
-    return {
-      average,
-      best: scores.length ? Math.max(...scores) : 0,
-      total: interviews.length,
-      completed: completed.length,
-      trend: scores.slice(-8),
-      categories,
-      recent: interviews.slice(0, 4),
-      resumable: interviews.find((i) => i.status === 'IN_PROGRESS') ?? null,
-    }
-  }, [interviews, interviewStatus])
-
-  useEffect(() => {
-    // The store surfaces failures through `status`/`error`.
-    // A completed interview can happen immediately before returning here.
-    // Bypass the short list cache so the trend reflects that new result.
-    void fetchInterviews({ force: true }).catch(() => undefined)
-  }, [fetchInterviews])
-
-  const firstName = (user?.firstName ?? user?.username ?? 'there').split(' ')[0]
+function greeting() {
   const hour = new Date().getHours()
-  const greeting =
-    hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-
-  return (
-    <AppShell title="Dashboard">
-      {interviewStatus === 'loading' || interviewStatus === 'idle' ? (
-        <DashboardSkeleton />
-      ) : interviewStatus === 'error' ? (
-        <p className="text-sm text-destructive">Unable to load dashboard interviews.</p>
-      ) : data ? (
-        <DashboardContent data={data} firstName={firstName} greeting={greeting} />
-      ) : (
-        <DashboardSkeleton />
-      )}
-    </AppShell>
-  )
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
 }
 
-function DashboardContent({
-  data,
-  firstName,
-  greeting,
-}: {
-  data: DashData
-  firstName: string
-  greeting: string
-}) {
+export default function DashboardPage() {
+  const user = useAuthStore((s) => s.user)
+
+  const interviews = useQuery({
+    queryKey: ['interviews', 'recent'],
+    queryFn: () => interviewService.list({ sort: 'recent', pageSize: 5 }),
+  })
+
+  const resumable = useQuery({
+    queryKey: ['interviews', 'resumable'],
+    queryFn: () => interviewService.resumable(),
+  })
+
+  const analytics = useQuery({
+    queryKey: ['analytics', 'summary'],
+    queryFn: () => analyticsService.summary(),
+  })
+
+  const completed = interviews.data?.items.filter((i) => i.status === 'completed') ?? []
+  const scores = completed.map((i) => i.score ?? 0)
+  const average = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
+  const best = scores.length ? Math.max(...scores) : 0
+  const inProgress = resumable.data ?? []
+  const firstName = (user?.name ?? user?.username ?? 'there').split(' ')[0]
+
   return (
-    <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-6">
-      {/* greeting header — PageHeader is the app-wide heading block; the
-          per-page mono eyebrow is gone (one of two competing header systems) */}
+    <div className="space-y-6">
       <PageHeader
-        title={`${greeting}, ${firstName}.`}
-        lede="Every answer changes what the interviewer asks next. Pick up where you left off, or start a fresh adaptive session."
+        title={`${greeting()}, ${firstName}.`}
+        lede="Pick up a session, or start a fresh one. Everything below is your own history."
         actions={
-          data?.total ? (
-            <Link to="/interviews/new" className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}>
-              <Plus className="size-4" />
-              Start New Interview
-            </Link>
-          ) : null
+          <Link to="/interviews/new" className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}>
+            <Plus className="size-4" />
+            New interview
+          </Link>
         }
       />
 
-      {data.total === 0 ? (
-        <EmptyDashboard />
-      ) : (
-        <>
-          {data.resumable ? <ResumeBanner interview={data.resumable} /> : null}
-
-          {/* stats — one entrance choreography: cards rise in sequence, the two
-              score numbers count up, the icons' meters fill */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard index={0} icon={ClipboardList} label="Total interviews" value={String(data.total)} />
-            <StatCard index={1} icon={Award} label="Completed" value={String(data.completed)} />
-            <StatCard index={2} icon={BarChart3} label="Average score" value={data.average ? String(data.average) : null} />
-            <StatCard index={3} icon={Sparkles} label="Best score" value={data.best ? String(data.best) : null} />
+      {inProgress.length > 0 ? (
+        <div className="animate-rise-in space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0 space-y-1.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-primary">Resume your session</p>
+              <h2 className="text-lg font-semibold tracking-tight">{inProgress[0]!.roleTitle}</h2>
+              <p className="font-mono text-[11px] text-muted-foreground">
+                {inProgress[0]!.code} · Q
+                {Math.min(inProgress[0]!.answeredCount + 1, inProgress[0]!.questionCount)} of{' '}
+                {inProgress[0]!.questionCount} · Round {inProgress[0]!.currentRound || 1}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-32">
+                <Meter value={inProgress[0]!.progress * 100} label="Session progress" />
+              </div>
+              <Link
+                to={`/interviews/${inProgress[0]!.id}/lobby`}
+                className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}
+              >
+                <Play className="size-4" />
+                Resume
+              </Link>
+            </div>
           </div>
+        </div>
+      ) : null}
 
-          {/* trend + categories */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Panel>
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Score trend</h2>
-                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                  Last {data.trend.length} completed
-                </span>
-              </div>
-              <div className="mt-4">
-                <Sparkline values={data.trend} height={80} />
-              </div>
-            </Panel>
-            <Panel>
-              <h2 className="text-sm font-semibold">Category performance</h2>
-              <div className="mt-4 flex flex-col gap-4">
-                {data.categories.map((c) => (
-                  <div key={c.label}>
-                    <div className="mb-1.5 flex items-center justify-between text-sm">
-                      <span>{c.label}</span>
-                      <span className="font-mono tabular-nums text-muted-foreground">
-                        {c.value}%
+      {analytics.isLoading ? (
+        <SkeletonStatGrid />
+      ) : analytics.isError ? (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
+          Could not load your statistics.
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard icon={BarChart3} label="Total sessions" value={interviews.data?.total ?? 0} index={0} numeric />
+          <StatCard icon={Target} label="Completed" value={completed.length} index={1} numeric hint="In recent history" />
+          <StatCard icon={Flame} label="Average score" value={average} index={2} numeric suffix="/100" />
+          <StatCard icon={Trophy} label="Best score" value={best} index={3} numeric suffix="/100" />
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+        <Panel flush>
+          <PanelHeader
+            title="Score trend"
+            description="Last sessions, oldest to newest"
+            aside={
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                avg {average || '—'}
+              </span>
+            }
+          />
+          <div className="p-5">
+            {analytics.isLoading ? (
+              <Skeleton className="h-28 w-full" />
+            ) : analytics.data ? (
+              <Sparkline
+                data={(analytics.data.scoreOverTime ?? []).map((point) => point.score)}
+                height={110}
+              />
+            ) : null}
+            <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-4">
+              {(analytics.data?.scoreOverTime ?? []).slice(-3).map((point) => (
+                <div key={point.label}>
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {point.label}
+                  </p>
+                  <p className="mt-1 font-mono text-sm tabular-nums">{point.score}/100</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel flush>
+          <PanelHeader title="Category performance" description="Rolling average by dimension" />
+          <div className="space-y-4 p-5">
+            {analytics.isLoading
+              ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)
+              : (analytics.data?.byCategory ?? []).slice(0, 5).map((row) => (
+                  <div key={row.category} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">{row.category}</span>
+                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                        {row.score}/100
                       </span>
                     </div>
-                    {/* Meter unifies bar motion with analytics (which already eased)
-                        and with the live-room progress bar; dashboard bars previously snapped. */}
-                    <Meter value={c.value} />
+                    <Meter value={row.score} tone={row.score >= 82 ? 'strong' : row.score >= 70 ? 'good' : row.score >= 58 ? 'vague' : 'weak'} />
                   </div>
                 ))}
-              </div>
-            </Panel>
           </div>
+        </Panel>
+      </div>
 
-          {/* recent interviews */}
-          <Panel flush>
-            <PanelHeader
-              title="Recent interviews"
-              aside={
-                <Link to="/interviews" className="font-mono text-[11px] text-primary hover:underline">
-                  View all
+      <Panel flush>
+        <PanelHeader
+          title="Recent interviews"
+          aside={
+            <Link
+              to="/interviews"
+              className="rounded font-mono text-[10px] uppercase tracking-wider text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              View all
+            </Link>
+          }
+        />
+
+        {interviews.isLoading ? (
+          <SkeletonRows rows={5} />
+        ) : interviews.isError ? (
+          <p className="p-5 text-sm text-destructive">Could not load your interviews.</p>
+        ) : interviews.data && interviews.data.items.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {interviews.data.items.map((interview, index) => (
+              <li
+                key={interview.id}
+                className="animate-rise-in"
+                style={{ '--stagger-i': index } as React.CSSProperties}
+              >
+                <Link
+                  to={`/interviews/${interview.id}`}
+                  className="flex flex-wrap items-center gap-4 px-5 py-4 outline-none transition-colors hover:bg-secondary/30 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{interview.roleTitle}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                      {interview.code} · {formatDate(interview.createdAt)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="neutral">{TYPE_LABEL[interview.type]}</Badge>
+                    <Badge variant="outline">{DIFFICULTY_LABEL[interview.difficulty]}</Badge>
+                    <StatusBadge status={interview.status} />
+                    <ScoreChip score={interview.score} />
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="p-5">
+            <EmptyState
+              icon={CalendarClock}
+              title="No interviews yet"
+              description="Your first session takes about half an hour and produces a full report."
+              action={
+                <Link to="/interviews/new" className={buttonVariants({})}>
+                  Start an interview
+                  <ArrowRight className="size-4" />
                 </Link>
               }
             />
-            <ul className="divide-y divide-border">
-              {data.recent.map((i, index) => (
-                <li
-                  key={i.id}
-                  className="animate-rise-in flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-accent/40"
-                  style={{ ['--stagger-i' as string]: index }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{i.roleTitle}</p>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      {i.company} · {fmtDate(i.createdAt)}
-                    </p>
-                  </div>
-                  <div className="hidden items-center gap-2 md:flex">
-                    <TypeBadge type={i.type} />
-                    <DifficultyBadge difficulty={i.difficulty} />
-                  </div>
-                  <StatusBadge status={i.status} />
-                  <span className="w-14 text-right font-mono text-sm tabular-nums">
-                    {i.score !== null ? (
-                      <>
-                        {i.score}
-                        <span className="text-muted-foreground">/100</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </span>
-                  <RowAction interview={i} />
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        </>
-      )}
-    </div>
-  )
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  index,
-}: {
-  icon: typeof ClipboardList
-  label: string
-  value: string | null
-  index: number
-}) {
-  return (
-    <div
-      className="animate-rise-in rounded-2xl border border-border bg-card p-5"
-      style={{ ['--stagger-i' as string]: index }}
-    >
-      <div className="flex items-center gap-2">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/25">
-          <Icon className="size-4 text-primary" />
-        </span>
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      </div>
-      <p className="mt-3 text-2xl font-semibold tracking-tight">
-        <CountUp value={value == null ? null : Number(value)} />
-      </p>
-    </div>
-  )
-}
-
-function ResumeBanner({ interview }: { interview: Interview }) {
-  const pct = Math.round(interview.progress * 100)
-  return (
-    <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-primary/30 bg-primary/5 px-5 py-4">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 ring-1 ring-primary/30">
-        <RotateCcw className="size-4 text-primary" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">
-          Interview in progress — {interview.roleTitle}
-        </p>
-        <div className="mt-1.5 flex items-center gap-3">
-          <div className="h-1.5 w-full max-w-60 overflow-hidden rounded-full bg-secondary">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
           </div>
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-            {pct}%
-          </span>
-        </div>
-      </div>
-      <Link
-        to={`/interviews/${interview.id}/lobby`}
-        className={cn(buttonVariants({ size: 'sm' }))}
-      >
-        <Play className="size-3.5" />
-        Resume
-      </Link>
-    </div>
-  )
-}
-
-function EmptyDashboard() {
-  return (
-    <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-      <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/25">
-        <Sparkles className="size-6 text-primary" />
-      </span>
-      <h2 className="mt-5 text-lg font-semibold tracking-tight">
-        You haven't completed an interview yet.
-      </h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-        Configure your first adaptive interview — the AI interviewer evaluates
-        every answer and shapes the session around how you perform.
-      </p>
-      <div className="mt-6 flex justify-center">
-        <Link
-          to="/interviews/new"
-          className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-5')}
-        >
-          <Plus className="size-4" />
-          Start your first interview
-        </Link>
-      </div>
-    </div>
-  )
-}
-
-function DashboardSkeleton() {
-  return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6" aria-busy="true">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-3 w-36" />
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-80 max-w-full" />
-        </div>
-        <Skeleton className="h-11 w-44 rounded-lg" />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-28 rounded-2xl" />
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Skeleton className="h-48 rounded-2xl" />
-        <Skeleton className="h-48 rounded-2xl" />
-      </div>
-      <Skeleton className="h-64 rounded-2xl" />
+        )}
+      </Panel>
     </div>
   )
 }

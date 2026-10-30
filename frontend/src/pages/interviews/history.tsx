@@ -1,271 +1,228 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowDownUp, Plus, Search, SquareStack } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
-import { Panel } from '@/components/ui/panel'
-import { StatusBadge } from '@/components/ui/badge'
+import { Panel, PanelHeader } from '@/components/ui/panel'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { DifficultyBadge, RowAction, TypeBadge } from '@/components/interview-ui'
-import { useInterviewListStore } from '@/lib/stores/interview-list.store'
-import { fmtDate } from '@/lib/format'
-import { INTERVIEW_STATUSES, type Interview } from '@/lib/types'
+import { Badge, StatusBadge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
+import { ScoreChip } from '@/components/stat-card'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL, TYPE_LABEL, formatDate } from '@/lib/format'
+import type { InterviewStatus, InterviewType } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const PER_PAGE = 6
+const PAGE_SIZE = 8
 
-export function InterviewsPage() {
-  const all = useInterviewListStore((s) => s.interviews)
-  const listStatus = useInterviewListStore((s) => s.status)
-  const fetchInterviews = useInterviewListStore((s) => s.fetchInterviews)
-  const [query, setQuery] = useState('')
-  const [type, setType] = useState('')
-  const [status, setStatus] = useState('')
-  const [difficulty, setDifficulty] = useState('')
+export default function InterviewHistoryPage() {
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<InterviewStatus | 'all'>('all')
+  const [type, setType] = useState<InterviewType | 'all'>('all')
+  const [sort, setSort] = useState<'recent' | 'score' | 'role'>('recent')
   const [page, setPage] = useState(1)
 
-  useEffect(() => {
-    // The store records the failure in `status`/`error`, so swallow the
-    // re-thrown rejection here to avoid an unhandled promise rejection.
-    void fetchInterviews().catch(() => undefined)
-  }, [fetchInterviews])
+  const query = useQuery({
+    queryKey: ['interviews', 'list', { search, status, type, sort, page }],
+    queryFn: () => interviewService.list({ search, status, type, sort, page, pageSize: PAGE_SIZE }),
+  })
 
-  useEffect(() => {
+  const total = query.data?.total ?? 0
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const onSearch = (value: string) => {
+    setSearch(value)
     setPage(1)
-  }, [query, type, status, difficulty])
-
-  const filtered = useMemo(() => {
-    if (!all) return []
-    const q = query.trim().toLowerCase()
-    return all.filter(
-      (i) =>
-        (!q || `${i.roleTitle} ${i.company} ${i.domain}`.toLowerCase().includes(q)) &&
-        (!type || i.type === type) &&
-        (!status || i.status === status) &&
-        (!difficulty || i.difficulty === difficulty),
-    )
-  }, [all, query, type, status, difficulty])
-
-  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
-  const slice = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-  const hasFilters = Boolean(query || type || status || difficulty)
-
-  const clearFilters = () => {
-    setQuery('')
-    setType('')
-    setStatus('')
-    setDifficulty('')
   }
-
-  if (listStatus === 'idle' || listStatus === 'loading') {
-    return (
-      <AppShell title="Interview History">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4" aria-busy="true">
-          <Skeleton className="h-9 w-64" />
-          <Skeleton className="h-14 rounded-2xl" />
-          <Skeleton className="h-96 rounded-2xl" />
-        </div>
-      </AppShell>
-    )
+  const onStatus = (value: string) => {
+    setStatus(value as InterviewStatus | 'all')
+    setPage(1)
   }
-
-  if (listStatus === 'error') {
-    return <AppShell title="Interview History"><p className="p-6 text-sm text-destructive">Unable to load interview history.</p></AppShell>
+  const onType = (value: string) => {
+    setType(value as InterviewType | 'all')
+    setPage(1)
+  }
+  const onSort = (value: string) => {
+    setSort(value as 'recent' | 'score' | 'role')
+    setPage(1)
   }
 
   return (
-    <AppShell title="Interview History">
-      <div className="animate-slide-up mx-auto flex max-w-7xl flex-col gap-5">
-        <PageHeader
-          title="Interview history"
-          lede="Every session you've configured, taken, or resumed."
-          actions={
-            all.length > 0 ? (
-              <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
-                <Plus className="size-4" />
-                New Interview
-              </Link>
-            ) : null
+    <div className="space-y-6">
+      <PageHeader
+        title="Every session you have run."
+        lede="Filter by status or format, sort by score, and open any session to read its report."
+        actions={
+          <Link to="/interviews/new" className={buttonVariants({})}>
+            <Plus className="size-4" />
+            New interview
+          </Link>
+        }
+      />
+
+      <Panel flush>
+        <div className="flex flex-wrap items-center gap-3 border-b border-border p-4">
+          <div className="relative min-w-56 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search roles, codes or topics"
+              className="pl-9"
+              aria-label="Search interviews"
+            />
+          </div>
+
+          <Select value={status} onValueChange={onStatus}>
+            <SelectTrigger className="w-40" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="in-progress">In progress</SelectItem>
+              <SelectItem value="scheduled">Scheduled</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="abandoned">Abandoned</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={type} onValueChange={onType}>
+            <SelectTrigger className="w-36" aria-label="Filter by type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="behavioral">Behavioral</SelectItem>
+              <SelectItem value="technical">Technical</SelectItem>
+              <SelectItem value="mixed">Mixed</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={sort} onValueChange={onSort}>
+            <SelectTrigger className="w-40" aria-label="Sort interviews">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="recent">Most recent</SelectItem>
+              <SelectItem value="score">Highest score</SelectItem>
+              <SelectItem value="role">Role A–Z</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <PanelHeader
+          title={
+            <span className="inline-flex items-center gap-2">
+              <ArrowDownUp className="size-3.5 text-muted-foreground" />
+              Results
+            </span>
+          }
+          aside={
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {total} session{total === 1 ? '' : 's'}
+            </span>
           }
         />
 
-        {/* filters */}
-        <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-border bg-card p-3.5">
-          {/* Full width on phones, then grows to absorb the leftover row space. */}
-          <div className="relative basis-full sm:basis-auto sm:min-w-72 sm:flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search role, company or domain…"
-              aria-label="Search interviews"
-              className="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <FilterSelect label="Filter by type" value={type} onChange={setType}>
-            <option value="">All types</option>
-            {['Behavioral', 'Technical', 'Mixed'].map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Filter by status" value={status} onChange={setStatus}>
-            <option value="">All statuses</option>
-            {INTERVIEW_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Filter by difficulty" value={difficulty} onChange={setDifficulty}>
-            <option value="">All difficulty</option>
-            {['Easy', 'Medium', 'Hard', 'Adaptive'].map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </FilterSelect>
-          {hasFilters ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Clear
-            </Button>
-          ) : null}
-        </div>
+        {query.isLoading ? (
+          <SkeletonRows rows={PAGE_SIZE} />
+        ) : query.isError ? (
+          <p className="p-5 text-sm text-destructive">Could not load interviews. Try again shortly.</p>
+        ) : query.data && query.data.items.length > 0 ? (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Format</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Score</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {query.data.items.map((interview, index) => (
+                  <TableRow
+                    key={interview.id}
+                    className="animate-rise-in"
+                    style={{ '--stagger-i': index } as React.CSSProperties}
+                  >
+                    <TableCell>
+                      <Link
+                        to={`/interviews/${interview.id}`}
+                        className="rounded font-medium outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {interview.roleTitle}
+                      </Link>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                        {interview.code}
+                        {interview.company ? ` · ${interview.company}` : ''}
+                      </p>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="neutral">{TYPE_LABEL[interview.type]}</Badge>
+                        <Badge variant="outline">{DIFFICULTY_LABEL[interview.difficulty]}</Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={interview.status} />
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                      {formatDate(interview.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <ScoreChip score={interview.score} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
 
-        {/* table / empty states */}
-        {all.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-            <h2 className="text-lg font-semibold tracking-tight">No interviews yet.</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-              Start your first AI interview — it adapts to every answer you give.
-            </p>
-            <div className="mt-6 flex justify-center">
-              <Link to="/interviews/new" className={cn(buttonVariants(), 'h-10 px-4')}>
-                <Plus className="size-4" />
-                Start your first interview
-              </Link>
-            </div>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-            <h2 className="text-lg font-semibold tracking-tight">
-              No interviews match your filters.
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Try a different search term or reset the filters.
-            </p>
-            <div className="mt-6 flex justify-center">
-              <Button variant="outline" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Panel flush>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-190 text-left">
-                <thead>
-                  <tr className="border-b border-border bg-secondary/40 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="px-5 py-3 font-medium">Role</th>
-                    <th className="px-4 py-3 font-medium">Type</th>
-                    <th className="px-4 py-3 font-medium">Difficulty</th>
-                    <th className="px-4 py-3 font-medium">Date</th>
-                    <th className="px-4 py-3 font-medium">Duration</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 text-right font-medium">Score</th>
-                    <th className="px-5 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {slice.map((i) => (
-                    <InterviewHistoryRow key={i.id} interview={i} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* pagination */}
-            <div className="flex items-center justify-between border-t border-border px-5 py-3">
-              <p className="font-mono text-[11px] text-muted-foreground">
-                {filtered.length} result{filtered.length === 1 ? '' : 's'} · Page {page} of {pages}
-              </p>
-              <div className="flex items-center gap-1.5">
-                <button
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                Page {page} of {pages}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  aria-label="Previous page"
-                  className="flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  <ChevronLeft className="size-3.5" />
-                </button>
-                <button
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={page >= pages}
-                  onClick={() => setPage((p) => p + 1)}
-                  aria-label="Next page"
-                  className="flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  onClick={() => setPage((p) => Math.min(pages, p + 1))}
                 >
-                  <ChevronRight className="size-3.5" />
-                </button>
+                  Next
+                </Button>
               </div>
             </div>
-          </Panel>
+          </>
+        ) : (
+          <div className="p-5">
+            <EmptyState
+              icon={SquareStack}
+              title="Nothing matches those filters"
+              description="Try clearing the search box, or run a new session and it will show up here."
+              action={
+                <Link to="/interviews/new" className={cn(buttonVariants({ variant: 'outline' }))}>
+                  Start an interview
+                </Link>
+              }
+            />
+          </div>
         )}
-      </div>
-    </AppShell>
-  )
-}
-
-const InterviewHistoryRow = memo(function InterviewHistoryRow({ interview: i }: { interview: Interview }) {
-  return (
-    <tr className="text-sm transition-colors hover:bg-accent/40">
-      <td className="px-5 py-3.5">
-        <Link
-          to={`/interviews/${i.id}`}
-          className="font-medium transition-colors hover:text-primary"
-        >
-          {i.roleTitle}
-        </Link>
-        <p className="font-mono text-[11px] text-muted-foreground">
-          {i.company}
-        </p>
-      </td>
-      <td className="px-4 py-3.5"><TypeBadge type={i.type} /></td>
-      <td className="px-4 py-3.5"><DifficultyBadge difficulty={i.difficulty} /></td>
-      <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">
-        {fmtDate(i.createdAt)}
-      </td>
-      <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">
-        {i.durationMin}m
-      </td>
-      <td className="px-4 py-3.5"><StatusBadge status={i.status} /></td>
-      <td className="px-4 py-3.5 text-right font-mono tabular-nums">
-        {i.score !== null ? i.score : '—'}
-      </td>
-      <td className="px-5 py-3.5 text-right">
-        <RowAction interview={i} />
-      </td>
-    </tr>
-  )
-})
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  children: ReactNode
-}) {
-  return (
-    <div className="relative">
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-9 appearance-none rounded-md border border-input bg-transparent pl-3 pr-8 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
-      >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      </Panel>
     </div>
   )
 }
