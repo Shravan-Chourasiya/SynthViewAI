@@ -42,7 +42,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 }
 
 /** Map the backend's suggested language onto a selector value. */
-export function normaliseLanguage(raw?: string): string {
+export function normaliseLanguage(raw?: string | null): string {
   const value = (raw ?? '').trim().toLowerCase()
   if (!value) return 'javascript'
   return LANGUAGE_ALIASES[value] ?? value
@@ -168,7 +168,7 @@ export function CodeAnswerPanel({
 
       <div className="mt-5 flex items-start gap-2 max-w-3xl text-pretty">
         <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
-          {question.text}
+          {question.prompt}
         </h2>
       </div>
 

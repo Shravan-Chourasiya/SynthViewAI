@@ -1,5 +1,115 @@
 import { jsPDF } from 'jspdf'
-import type { Interview, InterviewReport, TimelineEvent } from './types'
+
+/*
+ * Legacy export payload.
+ *
+ * The programmatic exporter predates the redesigned client and still speaks the
+ * original report contract (category scores, per-question `evaluation`, a
+ * timeline of events). It is kept self-contained on purpose: the app-facing
+ * model lives in `./types`, and the two must not be forced to share a shape.
+ * Adapting this exporter to the new model is tracked in docs/frontend-migration.md §9.
+ */
+
+type PdfInterviewType = 'Behavioral' | 'Technical' | 'Coding' | 'Mixed'
+type PdfDifficulty = 'Easy' | 'Medium' | 'Hard' | 'Adaptive'
+type PdfExperienceLevel = 'Entry' | 'Junior' | 'Mid-level' | 'Senior'
+type PdfInterviewStyle = 'FAANG' | 'MAANG' | 'STARTUP' | 'REGULAR'
+type PdfEndingCriteria = 'QUESTION_COUNT' | 'DURATION'
+type PdfSignalTone = 'strong' | 'good' | 'vague' | 'weak'
+type PdfInterviewStatus =
+  | 'CREATED'
+  | 'READY'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'ABANDONED'
+  | 'EXPIRED'
+
+export interface PdfInterviewConfig {
+  domain: string
+  roleTitle: string
+  company?: string
+  targetedCompany?: string
+  targetedCompanyOther?: string
+  experienceLevel: PdfExperienceLevel
+  difficulty: PdfDifficulty
+  type: PdfInterviewType
+  durationMin: number
+  rounds: number
+  topics: string[]
+  interviewStyle: PdfInterviewStyle
+  endingCriteria: PdfEndingCriteria
+  questionCount?: number
+}
+
+export interface PdfInterview extends PdfInterviewConfig {
+  id: string
+  userId: string
+  status: PdfInterviewStatus
+  createdAt: string
+  lastActivityAt: string
+  progress: number
+  score: number | null
+  currentRound: number
+  currentQuestion: number
+}
+
+export interface PdfEvaluation {
+  score: number
+  signal: PdfSignalTone
+  feedback: string
+  strengths: string[]
+  weaknesses: string[]
+  improvedAnswer?: string
+}
+
+export interface PdfReportQuestion {
+  question: string
+  answer: string
+  level: string
+  answerFormat?: 'TEXT' | 'CODE'
+  codeLanguage?: string | null
+  evaluation: PdfEvaluation
+}
+
+export interface PdfReport {
+  interviewId: string
+  overallScore: number
+  categoryScores: { label: string; value: number }[]
+  strengths: string[]
+  weaknesses: string[]
+  summary: string
+  recommendations: { gap: string; resource: string }[]
+  difficultyProgression: string[]
+  questions: PdfReportQuestion[]
+}
+
+export type PdfTimelineEventType =
+  | 'created'
+  | 'started'
+  | 'question_delivered'
+  | 'answer_submitted'
+  | 'evaluation_completed'
+  | 'difficulty_changed'
+  | 'topic_changed'
+  | 'followup_generated'
+  | 'code_submitted'
+  | 'resumed'
+  | 'cancelled'
+  | 'completed'
+
+export interface PdfTimelineEvent {
+  id: string
+  type: PdfTimelineEventType
+  label: string
+  detail: string
+  at: string
+}
+
+/** Public aliases — the exported builders keep their historical names. */
+export type Interview = PdfInterview
+export type InterviewReport = PdfReport
+export type TimelineEvent = PdfTimelineEvent
 
 /**
  * Report export.
@@ -28,11 +138,17 @@ import type { Interview, InterviewReport, TimelineEvent } from './types'
 
 // ── Palette ─────────────────────────────────────────────────────────────────
 // The app's theme colours are oklch() CSS variables, which jsPDF cannot parse,
-// so the print palette below mirrors them as RGB.
+// so the theme exposes a parallel `--pdf-*` token set as space-separated RGB.
+// Every document build re-reads those tokens (see `syncPdfPalette`), keeping the
+// export on the active theme instead of a palette fixed at authoring time; the
+// literals below are only the fallback for documents built without a stylesheet
+// (unit tests, detached documents).
 
 type Rgb = [number, number, number]
 
-const COLORS: Record<'ink' | 'muted' | 'line' | 'soft' | 'primary' | 'strong' | 'vague' | 'weak', Rgb> = {
+type PdfColorKey = 'ink' | 'muted' | 'line' | 'soft' | 'primary' | 'strong' | 'vague' | 'weak'
+
+const COLORS: Record<PdfColorKey, Rgb> = {
   ink: [17, 24, 39],
   muted: [107, 114, 128],
   line: [226, 232, 240],
@@ -41,6 +157,33 @@ const COLORS: Record<'ink' | 'muted' | 'line' | 'soft' | 'primary' | 'strong' | 
   strong: [31, 157, 99],
   vague: [201, 138, 26],
   weak: [209, 72, 60],
+}
+
+const PDF_TOKENS: Record<PdfColorKey, string> = {
+  ink: '--pdf-ink',
+  muted: '--pdf-muted',
+  line: '--pdf-line',
+  soft: '--pdf-soft',
+  primary: '--pdf-primary',
+  strong: '--pdf-strong',
+  vague: '--pdf-vague',
+  weak: '--pdf-weak',
+}
+
+function parseRgbTriple(raw: string): Rgb | null {
+  const parts = raw.trim().split(/\s+/).map(Number)
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0 || part > 255)) return null
+  return [Math.round(parts[0]!), Math.round(parts[1]!), Math.round(parts[2]!)]
+}
+
+/** Re-reads the active theme's `--pdf-*` tokens; called once per document build. */
+function syncPdfPalette(): void {
+  if (typeof document === 'undefined') return
+  const styles = getComputedStyle(document.documentElement)
+  for (const key of Object.keys(PDF_TOKENS) as PdfColorKey[]) {
+    const value = parseRgbTriple(styles.getPropertyValue(PDF_TOKENS[key]))
+    if (value) COLORS[key] = value
+  }
 }
 
 const PAGE = { width: 210, height: 297, margin: 14 }
@@ -102,6 +245,9 @@ const GLYPH_FALLBACKS: Array<[RegExp, string]> = [
   [/[\u2713\u2714]/g, '+'],
   [/[\u2717\u2718\u2716\u274C]/g, 'x'],
   [/[\u00A0\u2007\u2009\u202F]/g, ' '],
+  // Stripping invisible formatting characters is the intent, so the class
+  // genuinely contains a zero-width joiner — the rule is a false positive here.
+  // eslint-disable-next-line no-misleading-character-class
   [/[\u00AD\u200B\u200C\u200D\u2060\uFEFF]/g, ''],
 ]
 
@@ -111,6 +257,9 @@ export function pdfSafe(value: string): string {
   for (const [pattern, replacement] of GLYPH_FALLBACKS) out = out.replace(pattern, replacement)
   // Whatever is still out of range (emoji, non-Latin scripts) would be dropped or
   // corrupted, so it becomes one visible placeholder per code point instead.
+  // The range starts at U+0000 because jsPDF's core fonts stop at U+00FF;
+  // matching control bytes is unavoidable in a whitelist over a code page.
+  // eslint-disable-next-line no-control-regex
   return out.replace(/[^\u0000-\u00FF]/gu, '?')
 }
 
@@ -702,6 +851,7 @@ export function downloadTabPdf(payload: ExportPayload): void {
 
 /** Builds the current tab's document without saving it. */
 export function buildTabPdf(payload: ExportPayload) {
+  syncPdfPalette()
   const { interview, tab, report, metrics, history } = payload
   const builder = createBuilder(`${title(interview)} — ${tab}`)
 
@@ -743,6 +893,7 @@ export function downloadFullReportPdf(input: FullReportInput): void {
 
 /** Builds the full report document without saving it. */
 export function buildFullReportPdf({ interview, report, metrics, history }: FullReportInput) {
+  syncPdfPalette()
   const builder = createBuilder(`${title(interview)} — full report`)
 
   // The overview tab's export carries its own session summary; in the full report

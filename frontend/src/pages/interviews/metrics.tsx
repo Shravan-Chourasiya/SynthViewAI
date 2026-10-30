@@ -1,186 +1,147 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Activity, ListChecks, Timer } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
-import { Alert } from '@/components/ui/alert'
-import { Bars } from '@/components/charts'
-import { api } from '@/lib/api'
-import {
-  DetailSkeleton,
-  interviewDisplayTitle,
-  InterviewHeader,
-  InterviewNotFound,
-  useInterview,
-} from './shared'
+import { Link, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Activity, BarChart3, Gauge, Target } from 'lucide-react'
+import { PageHeader } from '@/components/page-header'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Meter } from '@/components/ui/meter'
+import { Skeleton } from '@/components/ui/skeleton'
+import { buttonVariants } from '@/components/ui/button'
+import { StatCard } from '@/components/stat-card'
+import { CategoryBarChart, SkillRadarChart } from '@/components/charts'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL } from '@/lib/format'
 
-interface Metrics {
-  interviewId: string
-  overall: number
-  questionScores: { label: string; value: number }[]
-  topics: { label: string; value: number }[]
-  timePerQuestion: number[]
-  activeSeconds: number
-}
+export default function MetricsPage() {
+  const { id = '' } = useParams()
 
-export function InterviewMetricsPage() {
-  const { id } = useParams()
-  const { interview, loading, error: interviewError } = useInterview(id)
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const interviewQuery = useQuery({
+    queryKey: ['interview', id],
+    queryFn: () => interviewService.get(id),
+  })
 
-  useEffect(() => {
-    if (!id) return
-    // The backend only serves metrics for COMPLETED interviews.
-    // Wait until the interview is loaded before deciding whether to fetch.
-    if (!interview) return
-    if (interview.status !== 'COMPLETED') {
-      setFailed(true)
-      setError('Metrics are only available for completed interviews.')
-      return
-    }
-    let alive = true
-    api
-      .getMetrics(id)
-      .then((m) => {
-        if (alive) setMetrics(m as Metrics)
-      })
-      .catch(() => {
-        if (alive) {
-          setFailed(true)
-          setError('Unable to load interview metrics.')
+  const reportQuery = useQuery({
+    queryKey: ['interview', id, 'report'],
+    queryFn: () => interviewService.report(id),
+  })
+
+  if (reportQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-1/3" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32 rounded-2xl" />
+          ))}
+        </div>
+        <Skeleton className="h-72 rounded-2xl" />
+      </div>
+    )
+  }
+
+  const report = reportQuery.data
+  const interview = interviewQuery.data
+  const scores = (report?.questions ?? []).map((q) => q.score ?? 0)
+  const average = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
+  const spread = scores.length ? Math.max(...scores) - Math.min(...scores) : 0
+  const consistency = Math.max(0, 100 - spread)
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={interview?.code}
+        title="Metrics"
+        lede="How this session was scored, and where the variance came from."
+        actions={
+          <Link to={`/interviews/${id}/report`} className={buttonVariants({ variant: 'outline' })}>
+            Open report
+          </Link>
         }
-      })
-    return () => {
-      alive = false
-    }
-  }, [id, interview])
+      />
 
-  if (loading || (!interview && !interviewError)) {
-    return (
-      <AppShell title="Interview Metrics">
-        <DetailSkeleton />
-      </AppShell>
-    )
-  }
-  if (interviewError || error) {
-    return <AppShell title="Interview Metrics"><Alert variant="destructive">{interviewError ?? error}</Alert></AppShell>
-  }
-  if (!interview) {
-    return (
-      <AppShell title="Interview Metrics">
-        <InterviewNotFound />
-      </AppShell>
-    )
-  }
-  // Metrics fetch is still in flight for a completed interview
-  if (!metrics && !failed) {
-    return (
-      <AppShell title="Interview Metrics">
-        <DetailSkeleton />
-      </AppShell>
-    )
-  }
-  if (!metrics) {
-    return (
-      <AppShell title="Interview Metrics">
-        <Alert variant="destructive">{error ?? 'Unable to load interview metrics.'}</Alert>
-      </AppShell>
-    )
-  }
-
-  const timeData = metrics.timePerQuestion.map((v, i) => ({
-    label: `Q${i + 1}`,
-    value: v,
-  }))
-
-  return (
-    <AppShell title="Interview Metrics">
-      <div className="interview-print-root animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
-        <InterviewHeader interview={interview} active="metrics" />
-        <div className="print-document-title">
-          <h1>{interviewDisplayTitle(interview)} — Metrics</h1>
-          <p>{interview.company ?? 'No target company'} · {interview.domain}</p>
-        </div>
-
-        {/* stats */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard icon={Activity} label="Overall score" value={String(metrics.overall)} />
-          <StatCard icon={Timer} label="Session time" value={formatDuration(metrics.activeSeconds)} />
-          <StatCard icon={ListChecks} label="Questions" value={String(metrics.questionScores.length)} />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ChartCard title="Question-level scores" note="per-question evaluation">
-            {metrics.questionScores.length ? <Bars data={metrics.questionScores} height={150} color="var(--chart-1)" /> : <EmptyChart label="No evaluated answers yet" />}
-          </ChartCard>
-          <ChartCard title="Interview mix" note="average score by question type">
-            {metrics.topics.length ? <Bars data={metrics.topics} height={150} color="var(--chart-2)" /> : <EmptyChart label="No topic scores yet" />}
-          </ChartCard>
-          <ChartCard title="Time per question" note="seconds spent">
-            {timeData.length ? <Bars data={timeData} height={150} color="var(--chart-3)" /> : <EmptyChart label="Timing data is not available" />}
-          </ChartCard>
-
-          <section className="flex items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-6">
-            <p className="max-w-xs text-center text-sm text-muted-foreground">
-              Code execution is not available yet, so no coding metrics are displayed.
-            </p>
-          </section>
-        </div>
-
-        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          Session time is measured from start until the interview was ended.
-        </p>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={Target} label="Overall" value={report?.overallScore ?? 0} index={0} numeric suffix="/100" />
+        <StatCard icon={BarChart3} label="Answered average" value={average} index={1} numeric suffix="/100" />
+        <StatCard icon={Gauge} label="Consistency" value={consistency} index={2} numeric suffix="%" hint="100 minus spread" />
+        <StatCard
+          icon={Activity}
+          label="Peak difficulty"
+          value={DIFFICULTY_LABEL[
+            (report?.progression ?? []).reduce<'easy' | 'medium' | 'hard' | 'expert'>(
+              (highest, point) => {
+                const order = ['easy', 'medium', 'hard', 'expert']
+                return order.indexOf(point.difficulty) > order.indexOf(highest) ? point.difficulty : highest
+              },
+              'easy',
+            )
+          ]}
+          index={3}
+        />
       </div>
-    </AppShell>
-  )
-}
 
-function EmptyChart({ label }: { label: string }) { return <div className="flex h-[150px] items-center justify-center rounded-xl bg-secondary/40 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div> }
-function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const remainder = seconds % 60; return minutes ? `${minutes}m ${remainder}s` : `${remainder}s` }
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel flush>
+          <PanelHeader title="Skill profile" description="Normalised across six dimensions" />
+          <div className="p-5">
+            <SkillRadarChart data={report?.skills ?? []} />
+          </div>
+        </Panel>
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Activity
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/25">
-          <Icon className="size-4 text-primary" />
-        </span>
-        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </p>
+        <Panel flush>
+          <PanelHeader title="Score by topic" />
+          <div className="p-5">
+            <CategoryBarChart
+              data={(report?.topics ?? []).map((topic) => ({ category: topic.topic, score: topic.score }))}
+            />
+          </div>
+        </Panel>
       </div>
-      <p className="mt-3 font-mono text-2xl font-semibold tabular-nums">{value}</p>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel flush>
+          <PanelHeader title="Per-question scores" aside={<span className="font-mono text-[11px] text-muted-foreground">banded</span>} />
+          <div className="space-y-4 p-5">
+            {(report?.questions ?? []).map((question) => (
+              <div key={question.id} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate text-sm">
+                    <span className="mr-2 font-mono text-[10px] text-muted-foreground">Q{question.index}</span>
+                    {question.topic}
+                  </span>
+                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {question.score}/100
+                  </span>
+                </div>
+                <Meter
+                  value={question.score ?? 0}
+                  tone={
+                    (question.score ?? 0) >= 82
+                      ? 'strong'
+                      : (question.score ?? 0) >= 70
+                        ? 'good'
+                        : (question.score ?? 0) >= 58
+                          ? 'vague'
+                          : 'weak'
+                  }
+                  className="h-1.5"
+                />
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel flush>
+          <PanelHeader title="Difficulty progression" description="Where the session escalated" />
+          <ul className="divide-y divide-border">
+            {(report?.progression ?? []).map((point) => (
+              <li key={point.index} className="flex items-center gap-4 px-5 py-3.5">
+                <span className="font-mono text-[11px] text-muted-foreground">{point.label}</span>
+                <span className="flex-1 text-sm">{DIFFICULTY_LABEL[point.difficulty]}</span>
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{point.score}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
     </div>
-  )
-}
-
-function ChartCard({
-  title,
-  note,
-  children,
-}: {
-  title: string
-  note: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          {note}
-        </span>
-      </div>
-      {children}
-    </section>
   )
 }

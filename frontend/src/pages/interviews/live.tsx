@@ -1,508 +1,332 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Activity, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Activity, Gauge, Notebook, PhoneOff, ShieldAlert } from 'lucide-react'
+import { toast } from 'sonner'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Meter } from '@/components/ui/meter'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { AiStatusBar, CameraTile, ConnectionChip } from '@/components/interview-room/room-parts'
+import { AiOrb } from '@/components/ai-orb'
 import { QuestionPanel } from '@/components/interview-room/question-panel'
 import { CodeAnswerPanel } from '@/components/interview-room/code-answer-panel'
-import {
-  AiStatusBar,
-  CandidateControls,
-  ConnectionIndicator,
-  EndInterviewDialog,
-  InterviewTimer,
-  TimeUpDialog,
-  VideoTile,
-} from '@/components/interview-room/widgets'
-import { buttonVariants } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import { useAuthStore } from '@/lib/stores/auth.store'
 import { useInterviewSocket } from '@/hooks/use-interview-socket'
-import { useLiveInterviewStore } from '@/lib/stores/live-interview.store'
-import type { Interview } from '@/lib/types'
-import type { AIState, ConnectionState } from '@/components/interview-room/widgets'
-import { cn } from '@/lib/utils'
+import { useInterviewStore } from '@/lib/stores/interview-store'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL, formatClock } from '@/lib/format'
+import { STATUS_LABEL } from '@/lib/constants/live'
 
-// The Session notes panel is a placeholder awaiting its own redesign. The copy is
-// kept here (not deleted) but rendered nowhere until that work lands.
-const SHOW_SESSION_NOTES = false
-
-export function LiveRoomPage() {
-  const { id } = useParams()
+export default function LiveRoomPage() {
+  const { id = '' } = useParams()
   const navigate = useNavigate()
-  const user = useAuthStore((s) => s.user)
-  const connectionState = useLiveInterviewStore((s) => s.connectionState)
-  const aiStatus = useLiveInterviewStore((s) => s.aiStatus)
-  const currentQuestion = useLiveInterviewStore((s) => s.currentQuestion)
-  const questionNumber = useLiveInterviewStore((s) => s.questionNumber)
-  const answeredCount = useLiveInterviewStore((s) => s.answeredCount)
-  const totalQuestions = useLiveInterviewStore((s) => s.totalQuestions)
-  const interviewStatus = useLiveInterviewStore((s) => s.interviewStatus)
-  const socketError = useLiveInterviewStore((s) => s.error)
-  const mediaStream = useLiveInterviewStore((s) => s.mediaStream)
-  const clearMediaStream = useLiveInterviewStore((s) => s.clearMediaStream)
-  const setMediaStream = useLiveInterviewStore((s) => s.setMediaStream)
-  const timeExpired = useLiveInterviewStore((s) => s.timeExpired)
-  const [interview, setInterview] = useState<Interview | null>(null)
-  const [notFound, setNotFound] = useState(false)
-  const [ended, setEnded] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  const [cameraOn, setCameraOn] = useState(true)
-  const [micOn, setMicOn] = useState(true)
-  const [sharing, setSharing] = useState(false)
-  const [mediaError, setMediaError] = useState<string | null>(null)
-  const screenStreamRef = useRef<MediaStream | null>(null)
-  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
-  const screenVideoRef = useRef<HTMLVideoElement>(null); // Ref for screen video element
+  const [muted, setMuted] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [endOpen, setEndOpen] = useState(false)
-  const { submitAnswer, submitCode, endInterview, extendTime } = useInterviewSocket(interview?.id)
+  /**
+   * The gateway only admits a join once the interview has a server-side session
+   * context, which `POST /interviews/:id/start` creates — so the room waits for
+   * that transition instead of dialling into a context that is not there yet.
+   */
+  const [roomEnabled, setRoomEnabled] = useState(false)
 
-  const conn = connectionState as ConnectionState
-  const ai = aiStatus === 'thinking' ? 'preparing' : aiStatus === 'generating' ? 'adapting' : aiStatus === 'evaluating' ? 'evaluating' : aiStatus === 'idle' ? 'idle' : 'ready' as AIState
-  const question = currentQuestion
-  const busy = ai === 'evaluating' || ai === 'adapting' || ai === 'preparing' || ai === 'unavailable'
+  const notes = useInterviewStore((s) => s.notes)
+  const setNote = useInterviewStore((s) => s.setNote)
+  const setAnswer = useInterviewStore((s) => s.setAnswer)
 
-  /* load interview + enforce state rules */
+  const interviewQuery = useQuery({
+    queryKey: ['interview', id],
+    queryFn: () => interviewService.get(id),
+    // The room is driven by socket delivery, not by the history endpoint —
+    // history is only readable once an interview is in a terminal state.
+    retry: false,
+  })
+
+  const {
+    status,
+    connection,
+    streamed,
+    activeQuestion,
+    totalQuestions,
+    complete,
+    submitAnswer,
+    submitCode,
+    endInterview,
+  } = useInterviewSocket(id || null, roomEnabled && !!id)
+
+  const [elapsed, setElapsed] = useState(0)
+
   useEffect(() => {
-    if (!id) return
-    api.getInterview(id).then((it) => {
-      if (!it) {
-        setNotFound(true)
-        return
-      }
-      if (it.status === 'COMPLETED' || it.status === 'CANCELLED' || it.status === 'ABANDONED') {
-        setEnded(true)
-        return
-      }
-      setInterview(it)
-    }).catch((err: unknown) => setLoadError(err instanceof Error ? err.message : 'Unable to load live interview.'))
-  }, [id])
+    if (paused) return
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [paused])
 
-  // The lobby is the only place that calls getUserMedia. This room only
-  // consumes that in-memory stream and cleans it up when the session ends.
+  const interview = interviewQuery.data
+  const current = activeQuestion
+  const total = totalQuestions ?? interview?.questionCount ?? 0
+  const index = current?.index ?? 0
+  /** Unknown totals must not render as "Q1/0"; the panels fall back to the index. */
+  const questionTotal = total > 0 ? total : index + 1
+  /** The backend decides the answer surface per question (`answerFormat`). */
+  const isCodeQuestion =
+    current != null && (current.kind === 'code' || current.answerFormat === 'CODE')
+
   useEffect(() => {
-    setCameraOn(Boolean(mediaStream?.getVideoTracks().some((track) => track.enabled)))
-    setMicOn(Boolean(mediaStream?.getAudioTracks().some((track) => track.enabled)))
-  }, [mediaStream])
+    if (complete) navigate(`/interviews/${id}/completed`)
+  }, [complete, id, navigate])
 
-  // Effect to handle screen stream in video element
+  // Start the session (READY/SCHEDULED → INPROGRESS) before the socket dials in.
   useEffect(() => {
-    if (screenVideoRef.current) {
-      screenVideoRef.current.srcObject = screenStream;
-    }
-  }, [screenStream]);
-
-  useEffect(() => () => {
-    screenStreamRef.current?.getTracks().forEach((track) => track.stop())
-    screenStreamRef.current = null
-    setScreenStream(null) // Clear screen stream state on unmount
-    clearMediaStream()
-  }, [clearMediaStream])
-
-  const toggleCamera = async () => {
-    const track = mediaStream?.getVideoTracks()[0]
-    if (track) {
-      track.enabled = !cameraOn
-      setCameraOn(track.enabled)
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-        setMediaStream(new MediaStream([...(mediaStream?.getTracks() ?? []), ...stream.getVideoTracks()]))
-      } catch { setMediaError('Camera permission was denied or no camera is available.') }
-    }
-  }
-
-  const toggleMic = async () => {
-    const track = mediaStream?.getAudioTracks()[0]
-    if (track) {
-      track.enabled = !micOn
-      setMicOn(track.enabled)
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        setMediaStream(new MediaStream([...(mediaStream?.getTracks() ?? []), ...stream.getAudioTracks()]))
-      } catch { setMediaError('Microphone permission was denied or no microphone is available.') }
-    }
-  }
-
-  const toggleScreenShare = async () => {
-    if (sharing) {
-      screenStreamRef.current?.getTracks().forEach((track) => track.stop())
-      screenStreamRef.current = null
-      setScreenStream(null) // Clear screen stream state when stopping
-      setSharing(false)
+    const session = interviewQuery.data
+    if (!session || roomEnabled) return
+    if (session.status === 'in-progress') {
+      setRoomEnabled(true)
       return
     }
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      setMediaError('Screen sharing is not supported by this browser.')
+    if (session.status !== 'scheduled' && session.status !== 'draft') {
+      // Completed or abandoned sessions have no room to enter.
       return
     }
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
-      screenStreamRef.current = stream
-      setScreenStream(stream) // Set screen stream in state
-      setSharing(true)
-      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-        screenStreamRef.current = null
-        setScreenStream(null) // Clear screen stream state when sharing ends
-        setSharing(false)
+    let cancelled = false
+    interviewService
+      .start(session.id)
+      .then(() => {
+        if (!cancelled) setRoomEnabled(true)
       })
-    } catch {
-      setMediaError('Screen sharing was cancelled or permission was denied.')
+      .catch(() => {
+        if (!cancelled) toast.error('Could not start this interview')
+      })
+    return () => {
+      cancelled = true
     }
+  }, [interviewQuery.data, roomEnabled])
+
+  const endMutation = useMutation({
+    mutationFn: () => interviewService.end(id),
+    onSuccess: () => {
+      endInterview()
+      navigate(`/interviews/${id}/completed`)
+    },
+    onError: () => toast.error('Could not end the interview'),
+  })
+
+  function handleSubmit(answer: string) {
+    if (!current) return
+    setAnswer(current.id, answer)
+    // The gateway persists it and answers with `answer:accepted`; the next
+    // question arrives as `question:delivered`.
+    submitAnswer(current.id, answer)
+    toast.success('Answer submitted')
   }
 
-  useEffect(() => {
-    if (!interview) return
-    // Every terminal state has to take the candidate somewhere. TIMED_OUT and
-    // ABANDONED are reachable while this room is open — the maintenance sweep
-    // times out a session whose wall-clock window has passed — and a room that
-    // navigated for CANCELLED/COMPLETED only was left sitting on a dead session.
-    if (interviewStatus === 'CANCELLED' || interviewStatus === 'TIMED_OUT' || interviewStatus === 'ABANDONED' || interviewStatus === 'EXPIRED') {
-      clearMediaStream()
-      navigate(`/interviews/${interview.id}`, { replace: true })
-    }
-    if (interviewStatus === 'COMPLETED') {
-      clearMediaStream()
-      navigate(`/interviews/${interview.id}/completed`, { replace: true })
-    }
-  }, [interviewStatus, interview, navigate, clearMediaStream])
-
-  if (notFound) return <RoomNotice title="Interview not found" body="This interview doesn't exist or was removed." />
-  if (ended)
-    return (
-      <RoomNotice
-        title="Interview unavailable"
-        body="This interview has already ended, so the live room can't be opened."
-      />
-    )
-
-  // The not-loaded / waiting / live-room states are handled below; each keeps the
-  // same room chrome so transitions between them stay within one layout.
-
-  // The first question's arrival must not feel like a page change. The two
-  // full-page states below ("interview not loaded yet" / "waiting for the first
-  // question") used to be separate screens, so the room mounting over them was a
-  // hard cut — header, panels and controls all popping in at once. Mounting the
-  // room early with the question area as a skeleton keeps the chrome (top bar,
-  // status row, side panel, controls) perfectly still, and only the question card
-  // animates when the question actually arrives. `animate-fade-in` + `animate-reveal`
-  // on the question container carry that one transition.
-  const qIndex = questionNumber || 1
-  const qTotal = totalQuestions ?? null
-
-  // ── Not-yet-loaded interview: full-page shell with the same room chrome ─────
-  // (interview metadata is unknown here, so the title block is a skeleton too.)
-  if (!interview) {
-    return (
-      <div className="flex h-dvh flex-col bg-background text-foreground">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-              <Activity className="size-4 animate-pulse text-primary" strokeWidth={2.5} />
-            </span>
-            <div className="min-w-0 space-y-1">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-2.5 w-56" />
-            </div>
-          </div>
-        </header>
-        <div className="flex flex-1 flex-col items-center justify-center gap-4">
-          <Loader2 className="size-5 animate-spin text-primary" />
-          <p className="font-mono text-xs text-muted-foreground">Loading session…</p>
-        </div>
-      </div>
-    )
+  /** Code answers go out on `code:submit` so language and code are stored separately. */
+  function handleCodeSubmit(code: string, language: string) {
+    if (!current) return
+    submitCode(current.id, language, code)
+    setAnswer(current.id, code)
+    toast.success('Answer submitted')
   }
 
-  if (loadError) return <RoomNotice title="Interview unavailable" body={loadError} />
-
-  if (socketError && !question) {
-    return <RoomNotice title="Live session unavailable" body={socketError} />
-  }
-
-  // ── Waiting for the first question: the real room, minus the question ────────
-  if (!question) {
+  if (interviewQuery.isLoading) {
     return (
-      <div className="flex h-dvh flex-col bg-background text-foreground">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-              <Activity className="size-4 text-primary" strokeWidth={2.5} />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{interview.roleTitle}</p>
-              <p className="truncate font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                {interview.type} · {interview.difficulty} · Session #{interview.id}
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="hidden text-xs text-muted-foreground sm:inline">Live interview</span>
-          </div>
-        </header>
-
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_300px] lg:overflow-hidden lg:p-5">
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5">
-              <div className="min-w-0 flex-1"><AiStatusBar state={ai} /></div>
-              <ConnectionIndicator state={conn} />
-              <LiveTimer />
-            </div>
-            {/* Skeleton shaped like the question card that will replace it — the
-                page height does not jump when the real card arrives. */}
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-4 rounded-2xl border border-border bg-card p-5 sm:p-6">
-              <div className="flex flex-wrap items-center gap-2">
-                <Skeleton className="h-5 w-28" />
-                <Skeleton className="h-5 w-16" />
-                <Skeleton className="h-5 w-20" />
-              </div>
-              <Skeleton className="h-7 w-3/4 max-w-xl" />
-              <Skeleton className="h-7 w-1/2 max-w-md" />
-              <Skeleton className="mt-2 h-44 w-full" />
-            </div>
-          </div>
-
-          <aside className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
-            <VideoTile
-              cameraOn={cameraOn}
-              sharing={false}
-              stream={mediaStream}
-              name={user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username : 'Candidate'}
-            />
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Progress
-                </p>
-                <p className="font-mono text-[11px] tabular-nums text-muted-foreground">Q1/…</p>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: '0%' }} />
-              </div>
-            </div>
-            {SHOW_SESSION_NOTES ? (
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Session notes
-                </p>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  The interviewer adapts after every answer — strong responses raise
-                  difficulty, and vague ones trigger follow-ups. Your next question is
-                  prepared while the current answer is evaluated.
-                </p>
-              </div>
-            ) : null}
-          </aside>
-        </div>
-
-        <CandidateControls
-          cameraOn={cameraOn}
-          micOn={micOn}
-          sharing={sharing}
-          onToggleCamera={toggleCamera}
-          onToggleMic={toggleMic}
-          onToggleShare={() => void toggleScreenShare()}
-          onEnd={() => setEndOpen(true)}
-        />
-
-        <EndInterviewDialog
-          open={endOpen}
-          answeredCount={answeredCount}
-          onClose={() => setEndOpen(false)}
-          onConfirm={() => { setEndOpen(false); endInterview() }}
-        />
+      <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+        <Skeleton className="h-[32rem] rounded-2xl" />
+        <Skeleton className="h-96 rounded-2xl" />
       </div>
     )
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground">
-      {/* top bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-            <Activity className="size-4 text-primary" strokeWidth={2.5} />
+    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4">
+      {/* room header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/25">
+            <Activity className="size-4.5 text-primary" />
           </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{interview.roleTitle}</p>
-            <p className="truncate font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {interview.type} · {interview.difficulty} · Session #{interview.id}
+          <div>
+            <p className="text-sm font-semibold tracking-tight">{interview?.roleTitle ?? 'Interview'}</p>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {interview?.code} · {interview?.field} · {interview ? DIFFICULTY_LABEL[interview.difficulty] : ''}
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="hidden text-xs text-muted-foreground sm:inline">Live interview</span>
+        <div className="flex items-center gap-2">
+          <ConnectionChip state={connection} />
+          <Badge variant="weak" dot>
+            Live interview
+          </Badge>
         </div>
-      </header>
+      </div>
 
-      {/* body */}
-      <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_300px] lg:overflow-hidden lg:p-5">
-        {/* main column */}
-        <div className="flex min-h-0 flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5">
-            <div className="min-w-0 flex-1"><AiStatusBar state={ai} /></div>
-            <ConnectionIndicator state={conn} />
-            <LiveTimer />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:p-6">
-            {/* The backend decides the answer surface per question: a CODE question
-                gets the editor, everything else the prose panel. Keying on the question
-                id remounts the panel (and reloads that question's draft) on every new
-                question. */}
-            <div key={question.id} className="animate-fade-in h-full">
-              {question.kind === 'code' ? (
-                <CodeAnswerPanel
-                  question={question}
-                  index={qIndex}
-                  total={qTotal}
-                  busy={busy}
-                  paused={timeExpired}
-                  onSubmit={(code, language) => submitCode(question.id, language, code)}
-                />
-              ) : (
-                <QuestionPanel
-                  question={question}
-                  index={qIndex}
-                  total={qTotal}
-                  busy={busy}
-                  paused={timeExpired}
-                  onSubmit={(text) => submitAnswer(question.id, text)}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* side panel */}
-        <aside className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
-          {/* Camera tile */}
-          <VideoTile 
-            cameraOn={cameraOn} 
-            sharing={false} 
-            stream={mediaStream} 
-            name={user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username : 'Candidate'} 
+      <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_300px]">
+        <div className="flex flex-col gap-4">
+          <AiStatusBar
+            status={status}
+            elapsedSeconds={elapsed}
+            muted={muted}
+            paused={paused}
+            onToggleMute={() => setMuted((value) => !value)}
+            onTogglePause={() => setPaused((value) => !value)}
+            onEnd={() => setEndOpen(true)}
           />
-          
-          {/* Screen share tile - only show when actively sharing */}
-          {sharing && screenStream && (
-            <div className="animate-fade-in relative flex aspect-video flex-col items-center justify-center overflow-hidden rounded-xl border border-border bg-secondary/40">
-              <video 
-                ref={screenVideoRef}
-                autoPlay 
-                muted 
-                playsInline 
-                className="absolute inset-0 size-full object-contain" 
-              />
-              <span className="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-md bg-background/80 px-2 py-1 font-mono text-[10px] text-signal-weak ring-1 ring-(--signal-weak)/30">
-                <span className="size-1.5 animate-pulse rounded-full bg-signal-weak" />
-                SCREEN SHARE
+
+          {isCodeQuestion && current ? (
+            <CodeAnswerPanel
+              question={current}
+              index={index}
+              total={questionTotal}
+              busy={status === 'evaluating'}
+              paused={paused}
+              onSubmit={handleCodeSubmit}
+            />
+          ) : current ? (
+            <QuestionPanel
+              question={current}
+              index={index}
+              total={questionTotal}
+              streamed={streamed}
+              streaming={status === 'generating' || status === 'listening'}
+              answering={status === 'listening' && !paused}
+              onSubmit={handleSubmit}
+              onSkip={() => handleSubmit('(skipped)')}
+            />
+          ) : (
+            <Panel className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/25">
+                <Activity className="size-4 text-primary" />
               </span>
-              <span className="absolute bottom-2.5 left-2.5 rounded-md bg-background/80 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                Screen
-              </span>
-            </div>
+              <p className="text-sm text-muted-foreground">
+                The interviewer is preparing your first question…
+              </p>
+            </Panel>
           )}
-          
-          {mediaError ? <p className="animate-fade-in text-xs text-signal-weak">{mediaError}</p> : null}
+        </div>
 
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="flex items-center justify-between">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Progress
-              </p>
-              <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                Q{qIndex}/{qTotal ?? '…'}
-              </p>
+        {/* aside */}
+        <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+          <Panel className="flex flex-col items-center gap-2 py-6">
+            <AiOrb status={status} size={136} />
+            <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Interviewer
+            </p>
+            <p className="text-sm font-medium tracking-tight">{STATUS_LABEL[status]}</p>
+          </Panel>
+
+          <CameraTile active={!muted} />
+
+          <Panel flush>
+            <PanelHeader title="Progress" />
+            <div className="space-y-4 p-5">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Question
+                  </span>
+                  <span className="font-mono text-[11px] tabular-nums">
+                    Q{Math.min(index + 1, questionTotal)}/{questionTotal}
+                  </span>
+                </div>
+                <Meter
+                  value={((index + 1) / questionTotal) * 100}
+                  label="Question progress"
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/30 px-3 py-2">
+                <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <Gauge className="size-3.5" />
+                  Difficulty
+                </span>
+                <span className="font-mono text-[11px]">
+                  {current ? DIFFICULTY_LABEL[current.difficulty] : '—'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/30 px-3 py-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Elapsed
+                </span>
+                <span className="font-mono text-[11px] tabular-nums">{formatClock(elapsed)}</span>
+              </div>
             </div>
-            {/* One semantic for both the bar and the label: how far into the
-                session the candidate is, counting the question on screen. They
-                used to disagree — the label counted the current question (Q3/3)
-                while the bar counted only completed ones (2/3), so the last
-                question of a three-question interview showed a two-thirds bar
-                next to a 3/3 label. The server keeps the total at or above the
-                current position, so this can never exceed 100%. */}
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-              <div
-                className="h-full rounded-full bg-primary transition-[width] duration-500"
-                style={{
-                  width: qTotal ? `${Math.min(100, (qIndex / qTotal) * 100)}%` : '0%',
-                }}
+          </Panel>
+
+          <Panel flush>
+            <PanelHeader
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <Notebook className="size-3.5 text-muted-foreground" />
+                  Session notes
+                </span>
+              }
+            />
+            <div className="p-5 pt-4">
+              <Textarea
+                value={notes}
+                onChange={(e) => setNote(e.target.value)}
+                rows={5}
+                placeholder="Jot down anything you want to revisit…"
+                aria-label="Session notes"
               />
+              <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                private · not scored
+              </p>
             </div>
-            <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-              <span>
-                Round {interview.currentRound}/{interview.rounds}
-              </span>
-              <span>{interview.type}</span>
-            </div>
-          </div>
+          </Panel>
 
-          {SHOW_SESSION_NOTES ? (
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Session notes
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                The interviewer adapts after every answer — strong responses raise
-                difficulty, and vague ones trigger follow-ups. Your next question is
-                prepared while the current answer is evaluated.
-              </p>
-            </div>
-          ) : null}
+          <Button
+            variant="destructive"
+            size="lg"
+            className="w-full"
+            onClick={() => setEndOpen(true)}
+          >
+            <PhoneOff className="size-4" />
+            End interview
+          </Button>
+
+          <p className="flex items-start gap-2 rounded-xl border border-dashed border-border bg-card/50 p-3 text-xs leading-relaxed text-muted-foreground">
+            <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+            Leaving now keeps the session resumable. Nothing you have answered is lost.
+          </p>
         </aside>
       </div>
 
-      {/* controls */}
-      <CandidateControls
-        cameraOn={cameraOn}
-        micOn={micOn}
-        sharing={sharing}
-        onToggleCamera={toggleCamera}
-        onToggleMic={toggleMic}
-        onToggleShare={() => void toggleScreenShare()}
-        onEnd={() => setEndOpen(true)}
-      />
-
-      <EndInterviewDialog
-        open={endOpen}
-        answeredCount={answeredCount}
-        onClose={() => setEndOpen(false)}
-        onConfirm={() => { setEndOpen(false); endInterview() }}
-      />
-
-      {/* Rendered inside the room rather than as its own screen: the room stays
-          mounted, so the prompt appears the instant the timer reaches 00:00 —
-          no unmount, no blank frame, and the question the candidate was on is
-          still on screen behind it. */}
-      <TimeUpDialog
-        open={timeExpired}
-        durationMinutes={interview.durationMin}
-        socketError={socketError}
-        onExtend={extendTime}
-        onEnd={endInterview}
-      />
+      <Dialog open={endOpen} onOpenChange={setEndOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>End the interview?</DialogTitle>
+            <DialogDescription>
+              You are on question {index + 1} of {questionTotal}. Ending early still produces a
+              report, but the score is partial.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEndOpen(false)}>
+              Keep going
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={endMutation.isPending}
+              onClick={() => endMutation.mutate()}
+            >
+              <PhoneOff className="size-4" />
+              End and see results
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-
-function RoomNotice({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
-      <div className="animate-auth-card-in w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
-        <div className="mt-6 flex justify-center">
-          <Link to="/interviews" className={cn(buttonVariants({ variant: 'outline' }))}>
-            Back to interviews
-          </Link>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LiveTimer() {
-  const seconds = useLiveInterviewStore((state) => state.remainingSeconds)
-  return <InterviewTimer seconds={seconds} />}

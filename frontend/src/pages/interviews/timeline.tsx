@@ -1,165 +1,142 @@
-import { useParams } from 'react-router-dom'
-import {
-  Award,
-  Brain,
-  Code2,
-  CornerDownRight,
-  Layers,
-  Play,
-  Plus,
-  RotateCcw,
-  Send,
-  Sparkles,
-  TrendingUp,
-  X,
-} from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
-import type { TimelineEvent, TimelineEventType } from '@/lib/types'
-import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
-import { useEffect, useState } from 'react'
-import {
-  DetailSkeleton,
-  InterviewHeader,
-  InterviewNotFound,
-  useInterview,
-} from './shared'
+import { Link, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Clock, History } from 'lucide-react'
+import { PageHeader } from '@/components/page-header'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { Badge, SignalBadge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { buttonVariants } from '@/components/ui/button'
+import { EmptyState } from '@/components/empty-state'
+import { ScoreChip, bandOf } from '@/components/stat-card'
+import { DifficultyLineChart } from '@/components/charts'
+import { interviewService } from '@/lib/services'
+import { DIFFICULTY_LABEL, formatClock } from '@/lib/format'
 
-const EVENT_META: Record<
-  TimelineEventType,
-  { icon: typeof Plus; cls: string }
-> = {
-  created: { icon: Plus, cls: 'bg-primary/10 text-primary ring-primary/25' },
-  started: { icon: Play, cls: 'bg-primary/10 text-primary ring-primary/25' },
-  question_delivered: { icon: Sparkles, cls: 'bg-primary/10 text-primary ring-primary/25' },
-  answer_submitted: {
-    icon: Send,
-    cls: 'bg-[var(--signal-good)]/10 text-[var(--signal-good)] ring-[var(--signal-good)]/30',
-  },
-  evaluation_completed: {
-    icon: Brain,
-    cls: 'bg-[var(--signal-strong)]/10 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30',
-  },
-  difficulty_changed: {
-    icon: TrendingUp,
-    cls: 'bg-[var(--signal-vague)]/10 text-[var(--signal-vague)] ring-[var(--signal-vague)]/30',
-  },
-  topic_changed: {
-    icon: Layers,
-    cls: 'bg-[var(--signal-vague)]/10 text-[var(--signal-vague)] ring-[var(--signal-vague)]/30',
-  },
-  followup_generated: {
-    icon: CornerDownRight,
-    cls: 'bg-[var(--signal-vague)]/10 text-[var(--signal-vague)] ring-[var(--signal-vague)]/30',
-  },
-  code_submitted: { icon: Code2, cls: 'bg-primary/10 text-primary ring-primary/25' },
-  resumed: { icon: RotateCcw, cls: 'bg-primary/10 text-primary ring-primary/25' },
-  cancelled: {
-    icon: X,
-    cls: 'bg-[var(--signal-weak)]/10 text-[var(--signal-weak)] ring-[var(--signal-weak)]/30',
-  },
-  completed: {
-    icon: Award,
-    cls: 'bg-[var(--signal-strong)]/10 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30',
-  },
-}
+export default function TimelinePage() {
+  const { id = '' } = useParams()
 
-const fmtDateTime = (iso: string) =>
-  new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+  const interviewQuery = useQuery({
+    queryKey: ['interview', id],
+    queryFn: () => interviewService.get(id),
   })
 
-export function InterviewTimelinePage() {
-  const { id } = useParams()
-  const { interview, loading } = useInterview(id)
-  const [events, setEvents] = useState<TimelineEvent[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const questionsQuery = useQuery({
+    queryKey: ['interview', id, 'questions'],
+    queryFn: () => interviewService.questions(id),
+  })
 
-  useEffect(() => {
-    if (!id) return
-    let alive = true
-    api.getHistory(id).then((ev) => {
-      if (alive) setEvents(ev)
-    }).catch(() => {
-      if (alive) {
-        setEvents([])
-        setError('Unable to load interview history.')
-      }
-    })
-    return () => {
-      alive = false
-    }
-  }, [id])
-
-  if (loading || !events) {
-    return (
-      <AppShell title="Event Timeline">
-        <DetailSkeleton />
-      </AppShell>
-    )
-  }
-  if (error) {
-    return <AppShell title="Event Timeline"><p className="p-6 text-sm text-destructive">{error}</p></AppShell>
-  }
-  if (!interview) {
-    return (
-      <AppShell title="Event Timeline">
-        <InterviewNotFound />
-      </AppShell>
-    )
-  }
+  const questions = (questionsQuery.data ?? []).filter((q) => q.score !== null)
 
   return (
-    <AppShell title="Event Timeline">
-      <div className="animate-slide-up mx-auto flex max-w-5xl flex-col gap-5">
-        <InterviewHeader interview={interview} active="history" />
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={interviewQuery.data?.code}
+        title="Question timeline"
+        lede="Every answered question in order, with the signal it produced and how difficulty moved afterwards."
+        actions={
+          <Link to={`/interviews/${id}/report`} className={buttonVariants({ variant: 'outline' })}>
+            Open report
+          </Link>
+        }
+      />
 
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">What happened in this interview</h2>
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {events.length} events
-            </span>
-          </div>
-
-          <ol className="relative mt-6 flex flex-col gap-4">
-            <span
-              aria-hidden="true"
-              className="absolute bottom-4 left-4.25 top-4 w-px bg-border"
+      {questionsQuery.isLoading ? (
+        <Skeleton className="h-72 rounded-2xl" />
+      ) : questions.length === 0 ? (
+        <EmptyState
+          icon={History}
+          title="Nothing has been answered yet"
+          description="Once you submit an answer, it appears here with its evaluation and adaptive decision."
+          action={
+            <Link to={`/interviews/${id}/lobby`} className={buttonVariants({})}>
+              Enter the room
+            </Link>
+          }
+        />
+      ) : (
+        <>
+          <Panel flush>
+            <PanelHeader
+              title="Score by question"
+              description="Difficulty moves with your answers"
+              aside={
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                  {questions.length} answered
+                </span>
+              }
             />
-            {events.map((e) => {
-              const meta = EVENT_META[e.type]
-              const Icon = meta.icon
-              return (
-                <li key={e.id} className="relative flex gap-4">
-                  <span
-                    className={cn(
-                      'relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full bg-card ring-1',
-                      meta.cls,
-                    )}
-                  >
-                    <Icon className="size-4" />
+            <div className="p-5">
+              <DifficultyLineChart
+                data={questions.map((q) => ({ label: `Q${q.index}`, score: q.score ?? 0 }))}
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-border px-5 py-4">
+              {questions.map((question) => {
+                const band = bandOf(question.score)
+                return (
+                  <span key={question.id} className="inline-flex items-center gap-2">
+                    <ScoreChip score={question.score} size="sm" showMax={false} />
+                    <SignalBadge band={band} className="hidden sm:inline-flex">
+                      Q{question.index}
+                    </SignalBadge>
                   </span>
-                  <div className="min-w-0 flex-1 rounded-xl border border-border bg-background/50 px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">{e.label}</p>
-                      <p className="font-mono text-[10px] text-muted-foreground">
-                        {fmtDateTime(e.at)}
-                      </p>
-                    </div>
-                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      {e.detail}
-                    </p>
+                )
+              })}
+            </div>
+          </Panel>
+
+          <ol className="space-y-4">
+            {questions.map((question, index) => (
+              <li
+                key={question.id}
+                className="animate-rise-in"
+                style={{ '--stagger-i': index } as React.CSSProperties}
+              >
+                <Panel className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[11px] text-muted-foreground">Q{question.index}</span>
+                    <Badge variant="neutral">{question.topic}</Badge>
+                    <Badge variant="outline">{DIFFICULTY_LABEL[question.difficulty]}</Badge>
+                    <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <Clock className="size-3" />
+                      {formatClock(question.durationSeconds)}
+                    </span>
+                    <ScoreChip score={question.score} />
                   </div>
-                </li>
-              )
-            })}
+
+                  <p className="text-base leading-snug font-medium tracking-tight">{question.prompt}</p>
+
+                  {question.answer ? (
+                    <div className="rounded-xl border border-border bg-secondary/30 p-4">
+                      <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Your answer
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed">{question.answer}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {question.headline ? (
+                      <SignalBadge band={bandOf(question.score)}>{question.headline}</SignalBadge>
+                    ) : null}
+                    {question.decision ? (
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-primary">
+                        → {question.decision}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {question.feedback ? (
+                    <p className="border-t border-border pt-4 text-sm leading-relaxed text-muted-foreground">
+                      {question.feedback}
+                    </p>
+                  ) : null}
+                </Panel>
+              </li>
+            ))}
           </ol>
-        </section>
-      </div>
-    </AppShell>
+        </>
+      )}
+    </div>
   )
 }

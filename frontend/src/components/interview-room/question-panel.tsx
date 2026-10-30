@@ -1,13 +1,26 @@
-import { useRef, useState } from 'react'
-import { ArrowRight, Eraser } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useRef, useState } from 'react'
+import { Check, Eraser, Mic, Send, SkipForward, Sparkles } from 'lucide-react'
+import { Panel } from '@/components/ui/panel'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
+import { DIFFICULTY_LABEL } from '@/lib/format'
 import type { Question } from '@/lib/types'
 
+const KIND_LABEL: Record<Question['kind'], string> = {
+  behavioral: 'Behavioral',
+  technical: 'Technical',
+  situational: 'Situational',
+  mcq: 'Multiple choice',
+  rating: 'Self rating',
+  structured: 'Structured answer',
+  code: 'Code',
+}
+
 /**
- * The question's header badges. Shared by the prose and code panels so a candidate
- * sees the same position, type and difficulty whichever answer surface is shown.
+ * The badges + index row every answer surface puts above its prompt. Shared by
+ * the prose panel and the code panel so the two cannot drift apart.
  */
 export function QuestionMeta({
   question,
@@ -16,36 +29,28 @@ export function QuestionMeta({
 }: {
   question: Question
   index: number
-  /** `null` when the total number of questions isn't known yet. */
+  /** `null` when the number of questions isn't known yet. */
   total: number | null
 }) {
   return (
-    <div className="animate-fade-in flex flex-wrap items-center gap-2">
-      {question.isFollowUp ? (
-        <Badge variant="vague" dot>
-          Adaptive follow-up
-        </Badge>
-      ) : (
-        <Badge variant="default" dot>
-          AI-generated
-        </Badge>
-      )}
-      <Badge variant="outline">
-        Q{index}{total !== null ? ` of ${total}` : ' of …'}
-      </Badge>
-      <Badge variant="outline">{question.topic}</Badge>
-      <Badge
-        variant={
-          question.difficulty === 'Hard'
-            ? 'weak'
-            : question.difficulty === 'Easy'
-              ? 'strong'
-              : 'vague'
-        }
-      >
-        {question.difficulty}
-      </Badge>
+    <div className="flex flex-wrap items-center gap-2">
+      <Badge variant="neutral">{KIND_LABEL[question.kind] ?? 'Question'}</Badge>
+      <Badge variant="outline">{DIFFICULTY_LABEL[question.difficulty]}</Badge>
+      <Badge variant="default">{question.topic}</Badge>
+      <span className="ml-auto font-mono text-[10px] uppercase tracking-wider text-muted-foreground tabular-nums">
+        Q{index + 1} / {total ?? '—'}
+      </span>
     </div>
+  )
+}
+
+/** Typewriter effect for streamed interviewer text. */
+function StreamingText({ text, active }: { text: string; active: boolean }) {
+  return (
+    <span>
+      {text}
+      {active ? <span className="ml-0.5 inline-block h-5 w-0.5 animate-caret bg-primary align-middle" /> : null}
+    </span>
   )
 }
 
@@ -53,98 +58,185 @@ export function QuestionPanel({
   question,
   index,
   total,
-  busy,
-  paused = false,
+  streamed,
+  streaming,
+  answering,
   onSubmit,
+  onSkip,
 }: {
   question: Question
   index: number
-  /** `null` when the total number of questions isn't known yet. */
-  total: number | null
-  busy: boolean
-  /**
-   * The session's duration ran out and the candidate has not decided yet. The
-   * panel stays on screen (a question they can still read) but accepts nothing —
-   * this is not the same state as busy, which means work is already in flight.
-   */
-  paused?: boolean
-  onSubmit: (text: string) => void
+  total: number
+  streamed: string
+  streaming: boolean
+  answering: boolean
+  onSubmit: (answer: string) => void
+  onSkip: () => void
 }) {
-  const [text, setText] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [answer, setAnswer] = useState('')
+  const [mcq, setMcq] = useState<string | null>(null)
+  const [rating, setRating] = useState<number | null>(null)
+  const [voice, setVoice] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const submit = () => {
-    if (!text.trim() || busy || paused) return
-    onSubmit(text)
-  }
+  useEffect(() => {
+    setAnswer('')
+    setMcq(null)
+    setRating(null)
+  }, [question.id])
 
-  // Keyboard shortcuts: Ctrl+Enter submits, Escape clears. (FR-15.3)
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      submit()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setText('')
-      textareaRef.current?.focus()
-    }
-  }
+  useEffect(() => {
+    if (answering) textareaRef.current?.focus()
+  }, [answering, question.id])
+
+  const value =
+    question.kind === 'mcq' ? (mcq ?? '') : question.kind === 'rating' ? (rating ? String(rating) : '') : answer
 
   return (
-    <div className="flex h-full flex-col rounded-xl bg-card/30 p-1">
-      {/* meta — fades with the rest of the card on question change instead of popping in */}
-      <QuestionMeta question={question} index={index} total={total} />
+    <div className="space-y-4">
+      <Panel className="space-y-4">
+        <QuestionMeta question={question} index={index} total={total} />
 
-      {/* question */}
-      <div className="mt-5 flex items-start gap-2 max-w-3xl text-pretty">
-        <h2 className="animate-reveal mt-5 max-w-3xl text-pretty text-xl font-medium leading-relaxed sm:text-2xl">
-          {question.text}
-        </h2>
-      </div>
+        <div className="flex gap-3">
+          <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/25">
+            <Sparkles className="size-3.5 text-primary" />
+          </span>
+          <p className="text-xl leading-snug font-medium tracking-tight sm:text-2xl">
+            <StreamingText text={streaming ? streamed || question.prompt : question.prompt} active={streaming} />
+          </p>
+        </div>
+      </Panel>
 
-      {/* answer form (FR-15) */}
-      <div className="animate-fade-in mt-5 flex flex-1 flex-col" style={{ animationDelay: '0.1s' }}>
-        <label
-          htmlFor="answer"
-          className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
-        >
-          Your answer
-        </label>
-        <Textarea
-          ref={textareaRef}
-          id="answer"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Be specific — the interviewer adapts to what you say…"
-          className="min-h-44 flex-1 resize-none rounded-xl bg-background/60 p-4 text-sm leading-relaxed"
-        />
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {paused
-                ? 'Paused — decide how to continue'
-                : text.trim()
-                  ? `${text.trim().split(/\s+/).length} words`
-                  : 'Structured, specific answers score higher'}
-            </span>
+      <Panel className="space-y-3">
+        {question.kind === 'mcq' && question.options ? (
+          <fieldset className="space-y-2">
+            <legend className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              Choose one
+            </legend>
+            {question.options.map((option, i) => (
+              <label
+                key={option}
+                className={cn(
+                  'flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-2.5 text-sm transition-colors',
+                  mcq === option ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
+                )}
+              >
+                <input
+                  type="radio"
+                  name={`mcq-${question.id}`}
+                  value={option}
+                  checked={mcq === option}
+                  onChange={() => setMcq(option)}
+                  className="mt-0.5 size-4 accent-primary"
+                />
+                <span className="flex-1">
+                  <span className="mr-2 font-mono text-[10px] text-muted-foreground">
+                    {String.fromCharCode(65 + i)}
+                  </span>
+                  {option}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
+
+        {question.kind === 'rating' ? (
+          <div className="space-y-2">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              Rate 1 – 5, then justify it
+            </p>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4, 5].map((score) => (
+                <button
+                  key={score}
+                  type="button"
+                  onClick={() => setRating(score)}
+                  aria-pressed={rating === score}
+                  className={cn(
+                    'size-10 rounded-xl border font-mono text-sm tabular-nums transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    rating === score
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/30',
+                  )}
+                >
+                  {score}
+                </button>
+              ))}
+            </div>
+            <Textarea
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              rows={4}
+              placeholder="Why that rating?"
+              aria-label="Justification"
+            />
           </div>
+        ) : null}
+
+        {question.kind !== 'mcq' && question.kind !== 'rating' ? (
+          <div className="space-y-2">
+            <Textarea
+              ref={textareaRef}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              rows={question.kind === 'structured' ? 8 : 6}
+              placeholder={
+                question.kind === 'structured'
+                  ? 'Answer in numbered steps…'
+                  : 'Type your answer, or use the microphone below…'
+              }
+              aria-label="Your answer"
+            />
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground tabular-nums">
+                {answer.length} characters
+              </span>
+              <Button
+                variant={voice ? 'default' : 'outline'}
+                size="sm"
+                aria-pressed={voice}
+                onClick={() => setVoice((v) => !v)}
+              >
+                <Mic className="size-3.5" />
+                {voice ? 'Listening…' : 'Voice input'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => {
+              setAnswer('')
+              setMcq(null)
+              setRating(null)
+            }}
+          >
+            <Eraser className="size-4" />
+            Clear
+          </Button>
+
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setText('')}
-              disabled={!text || busy || paused}
-            >
-              <Eraser className="size-3.5" />
-              Clear
+            <Button variant="outline" size="sm" onClick={onSkip}>
+              <SkipForward className="size-4" />
+              Skip
             </Button>
-            <Button size="sm" onClick={submit} disabled={!text.trim() || busy || paused}>
-              {paused ? 'Paused' : busy ? 'Sending…' : 'Submit answer'}
-              {!busy && !paused ? <ArrowRight className="size-3.5" /> : null}
+            <Button size="default" disabled={!value.trim()} onClick={() => onSubmit(value.trim())}>
+              <Send className="size-4" />
+              Submit answer
             </Button>
           </div>
         </div>
+      </Panel>
+
+      <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-4 py-3">
+        <Check className="size-3.5 shrink-0 text-primary" />
+        <p className="text-xs text-muted-foreground">
+          Answers are evaluated the moment you submit. The next question adapts to what you wrote.
+        </p>
       </div>
     </div>
   )
