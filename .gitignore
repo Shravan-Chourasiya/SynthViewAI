@@ -51,7 +51,6 @@ yarn-error.log*
 
 # Frontend
 /frontend/node_modules/
-/frontend/package-lock.json
 /frontend/.vite/
 /frontend/.nyc_output/
 /frontend/coverage/

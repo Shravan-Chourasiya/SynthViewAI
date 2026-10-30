@@ -1,35 +1,37 @@
-import * as React from 'react'
+import type * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const alertVariants = cva(
-  'flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm leading-relaxed ring-1 ring-inset',
+  'relative grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-xl border px-4 py-3 text-sm has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] has-[>svg]:gap-x-3 [&>svg]:size-4 [&>svg]:translate-y-0.5',
   {
     variants: {
       variant: {
-        default: 'bg-primary/10 text-primary ring-primary/25',
-        strong:
-          'bg-[var(--signal-strong)]/10 text-[var(--signal-strong)] ring-[var(--signal-strong)]/30',
-        warning:
-          'bg-[var(--signal-vague)]/10 text-[var(--signal-vague)] ring-[var(--signal-vague)]/30',
-        destructive: 'bg-destructive/10 text-destructive ring-destructive/30',
+        default: 'border-border bg-card text-card-foreground',
+        info: 'border-primary/30 bg-primary/5 text-foreground',
+        warning: 'border-signal-vague/30 bg-signal-vague/5 text-foreground',
+        destructive: 'border-destructive/30 bg-destructive/5 text-foreground [&>svg]:text-destructive',
+        success: 'border-signal-strong/30 bg-signal-strong/5 text-foreground',
       },
     },
     defaultVariants: { variant: 'default' },
   },
 )
 
-export interface AlertProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof alertVariants> {
-  icon?: React.ReactNode
+export function Alert({
+  className,
+  variant,
+  ...props
+}: React.ComponentProps<'div'> & VariantProps<typeof alertVariants>) {
+  return <div role="alert" className={cn(alertVariants({ variant }), className)} {...props} />
 }
 
-export function Alert({ className, variant, icon, children, ...props }: AlertProps) {
+export function AlertTitle({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div className={cn('col-start-2 text-sm font-medium tracking-tight', className)} {...props} />
+}
+
+export function AlertDescription({ className, ...props }: React.ComponentProps<'div'>) {
   return (
-    <div role="alert" className={cn(alertVariants({ variant }), className)} {...props}>
-      {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
-      <div className="min-w-0">{children}</div>
-    </div>
+    <div className={cn('col-start-2 text-sm text-muted-foreground [&_p]:leading-relaxed', className)} {...props} />
   )
 }

@@ -1,132 +1,73 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from 'react'
-import { flushSync } from 'react-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { configureThemeStorageKey, ThemeContext, publishThemeSnapshot, readStoredTheme, resolveTheme, type Theme } from './theme-context'
+export { useTheme } from './theme-context'
 
-type Theme = 'dark' | 'light'
-type ThemeOrigin = { x: number; y: number }
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => void) => unknown
-}
-
-type ThemeContextValue = {
-  theme: Theme
-  toggleTheme: (origin?: ThemeOrigin) => void
-  setTheme: (theme: Theme, origin?: ThemeOrigin) => void
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null)
 const STORAGE_KEY = 'synthview-theme'
-let transitionTimer: ReturnType<typeof window.setTimeout> | undefined
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+let transitionGeneration = 0
 
-function applyTheme(theme: Theme) {
+function applyRootTheme(theme: Theme) {
   const root = document.documentElement
-  root.classList.toggle('dark', theme === 'dark')
-  root.classList.toggle('light', theme === 'light')
-  root.style.colorScheme = theme
+  const resolvedTheme = resolveTheme(theme)
+  root.classList.toggle('dark', resolvedTheme === 'dark')
+  root.classList.toggle('light', resolvedTheme === 'light')
+  root.dataset.theme = resolvedTheme
+  publishThemeSnapshot({ theme, resolvedTheme })
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark')
-  const [transitionPhase, setTransitionPhase] = useState<'idle' | 'covering' | 'revealing'>('idle')
-  const [transitionColor, setTransitionColor] = useState('transparent')
-  const [transitionOrigin, setTransitionOrigin] = useState<ThemeOrigin>({ x: 0, y: 0 })
-  const [transitionRadius, setTransitionRadius] = useState(0)
-
-  // Sync with whatever the no-flash inline script already applied.
-  useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY) as Theme | null
-    const initial: Theme =
-      stored ?? (document.documentElement.classList.contains('light')
-        ? 'light'
-        : 'dark')
-    setThemeState(initial)
-    applyTheme(initial)
-  }, [])
-
-  const setTheme = useCallback((next: Theme, origin?: ThemeOrigin) => {
-    if (next === theme) return
-    const commitTheme = () => {
-      setThemeState(next)
-      applyTheme(next)
-      try {
-        window.localStorage.setItem(STORAGE_KEY, next)
-      } catch {
-        // ignore write failures (private mode, etc.)
-      }
-    }
-
-    const root = document.documentElement
-    const fallbackOrigin = { x: window.innerWidth - 44, y: 44 }
-    const resolvedOrigin = origin ?? fallbackOrigin
-    const radius = Math.hypot(
-      Math.max(resolvedOrigin.x, window.innerWidth - resolvedOrigin.x),
-      Math.max(resolvedOrigin.y, window.innerHeight - resolvedOrigin.y),
-    ) + 2
-
-    // Chromium's View Transition API snapshots the real old and new page. This
-    // avoids the solid-color frame produced by an overlay at the end of a wipe.
-    const viewTransitionDocument = document as ViewTransitionDocument
-    if (typeof viewTransitionDocument.startViewTransition === 'function') {
-      root.style.setProperty('--theme-origin-x', `${resolvedOrigin.x}px`)
-      root.style.setProperty('--theme-origin-y', `${resolvedOrigin.y}px`)
-      root.style.setProperty('--theme-radius', `${radius}px`)
-      viewTransitionDocument.startViewTransition(() => flushSync(commitTheme))
-      return
-    }
-
-    // Read the next theme's color without painting it yet. The overlay then grows
-    // from the actual toggle position over the still-visible current page.
-    applyTheme(next)
-    const nextBackground = getComputedStyle(document.documentElement)
-      .getPropertyValue('--background')
-      .trim()
-    applyTheme(theme)
-    const oldBackground = getComputedStyle(document.documentElement)
-      .getPropertyValue('--background')
-      .trim()
-    flushSync(() => {
-      setTransitionColor(nextBackground || oldBackground)
-      setTransitionOrigin(resolvedOrigin)
-      setTransitionRadius(radius)
-      setTransitionPhase('covering')
+function withoutThemeTransitions(commit: () => void) {
+  const root = document.documentElement
+  const generation = ++transitionGeneration
+  root.classList.add('theme-switching')
+  commit()
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (generation === transitionGeneration) root.classList.remove('theme-switching')
     })
-    window.requestAnimationFrame(() => {
-      setTransitionPhase('revealing')
-      if (transitionTimer) window.clearTimeout(transitionTimer)
-      transitionTimer = window.setTimeout(() => {
-        // Commit while the final pixels are still covered, then remove the
-        // overlay on the following paint so no solid-color flash is visible.
-        flushSync(commitTheme)
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => setTransitionPhase('idle'))
-        })
-      }, 960)
-    })
+  })
+}
+
+export function ThemeProvider({
+  children,
+  defaultTheme = 'dark',
+  storageKey = STORAGE_KEY,
+}: {
+  children: React.ReactNode
+  defaultTheme?: Theme
+  storageKey?: string
+}) {
+  const [theme, setThemeState] = useState<Theme>(() => readStoredTheme(storageKey, defaultTheme))
+
+  // The pre-paint script handles reloads; layout effects are the only runtime
+  // path that changes the document theme, before the browser can paint a toggle.
+  useIsomorphicLayoutEffect(() => {
+    configureThemeStorageKey(storageKey)
+    applyRootTheme(theme)
+    try {
+      window.localStorage.setItem(storageKey, theme)
+    } catch {
+      // The in-memory and document theme still work when persistence is unavailable.
+    }
+  }, [theme, storageKey])
+
+  useIsomorphicLayoutEffect(() => {
+    if (theme !== 'system') return
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = () => withoutThemeTransitions(() => applyRootTheme('system'))
+    media.addEventListener('change', handleChange)
+    return () => media.removeEventListener('change', handleChange)
   }, [theme])
 
-  const toggleTheme = useCallback((origin?: ThemeOrigin) => {
-    setTheme(theme === 'dark' ? 'light' : 'dark', origin)
-  }, [theme, setTheme])
+  const setTheme = useCallback((next: Theme) => {
+    withoutThemeTransitions(() => setThemeState(next))
+  }, [])
 
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {children}
-      {transitionPhase !== 'idle' ? <div aria-hidden="true" className={`theme-transition-layer${transitionPhase === 'revealing' ? ' is-revealing' : ''}`} style={{ backgroundColor: transitionColor, '--theme-origin-x': `${transitionOrigin.x}px`, '--theme-origin-y': `${transitionOrigin.y}px`, '--theme-radius': `${transitionRadius}px` } as React.CSSProperties} /> : null}
-    </ThemeContext.Provider>
-  )
-}
+  const toggle = useCallback(() => {
+    const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark'
+    setTheme(next)
+  }, [setTheme])
 
-export default ThemeProvider;
+  const value = useMemo(() => ({ setTheme, toggle }), [setTheme, toggle])
 
-export function useTheme() {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) {
-    throw new Error('useTheme must be used within a ThemeProvider')
-  }
-  return ctx
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

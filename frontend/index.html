@@ -1,43 +1,60 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SynthView AI — An AI interview that adapts to you</title>
+    <meta
+      name="description"
+      content="SynthView AI runs realistic, adaptive mock interviews that listen, evaluate and adjust in real time — then hand you a detailed, honest report."
+    />
+    <link rel="icon" type="image/svg+xml" href="/brand-mark.svg" />
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SynthView AI — An AI interview that adapts to you</title>
-  <meta name="description"
-    content="Practice realistic interviews with an AI interviewer that evaluates your answers, adapts the conversation, and challenges you based on how you actually perform." />
-  <link rel="icon" type="image/svg+xml" href="/brand-mark.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
 
-  <!-- Fonts: replace next/font from the original project -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-    rel="stylesheet" />
-
-  <script>
-    // No-flash theme bootstrap — identical logic to the Next.js root layout.
-    ; (function () {
-      try {
-        var t = localStorage.getItem('synthview-theme')
-        if (!t) {
-          t = 'dark'
+    <script>
+      // No-flash theme application: runs before first paint.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('synthview-theme') || 'dark'
+          if (stored !== 'dark' && stored !== 'light' && stored !== 'system') stored = 'dark'
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          var isDark = stored === 'dark' || (stored === 'system' && prefersDark)
+          var root = document.documentElement
+          root.classList.toggle('dark', isDark)
+          root.classList.toggle('light', !isDark)
+          root.dataset.theme = isDark ? 'dark' : 'light'
+        } catch (e) {
+          document.documentElement.classList.add('dark')
         }
-        var r = document.documentElement
-        r.classList.remove('light', 'dark')
-        r.classList.add(t)
-        r.style.colorScheme = t
-      } catch (e) {
-        document.documentElement.classList.add('dark')
-      }
-    })()
-  </script>
-</head>
+      })()
+    </script>
 
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
-
+    <script>
+      // No-flash motion application: runs before first paint. The OS reduce-motion
+      // flag is a hint, not a hard override, so the app's own preference wins —
+      // see src/lib/motion.ts for why.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('synthview-motion') || 'full'
+          var followsOs = stored === 'system'
+          var prefersReduced =
+            stored === 'reduced' ||
+            (followsOs && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+          document.documentElement.dataset.motion = prefersReduced ? 'reduced' : 'full'
+        } catch (e) {
+          document.documentElement.dataset.motion = 'full'
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

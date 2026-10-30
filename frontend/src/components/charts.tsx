@@ -1,171 +1,283 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import { useTheme } from './theme-context'
 import { cn } from '@/lib/utils'
 
-export function Sparkline({
-  values,
-  height = 64,
-  stroke = 'var(--chart-1)',
-  className,
-}: {
-  values: number[]
-  height?: number
-  stroke?: string
-  className?: string
-}) {
-  const geometry = useMemo(() => {
-    if (values.length < 2) return null
-    const w = 240
-    const min = Math.min(...values)
-    const max = Math.max(...values)
-    const range = max - min || 1
-    const pad = 6
-    const pts = values.map((v, i) => [
-      pad + (i * (w - pad * 2)) / (values.length - 1),
-      pad + (height - pad * 2) * (1 - (v - min) / range),
-    ])
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
-    const area = `${line} L${pts[pts.length - 1][0].toFixed(1)},${height - pad} L${pts[0][0].toFixed(1)},${height - pad} Z`
-    return { w, pts, line, area }
-  }, [height, values])
-
-  if (values.length < 2) {
-    return (
-      <div
-        className={cn(
-          'flex items-center justify-center rounded-lg bg-secondary/40 font-mono text-[10px] uppercase tracking-wider text-muted-foreground',
-          className,
-        )}
-        style={{ height }}
-      >
-        Not enough data yet
-      </div>
-    )
+export function useChartTheme() {
+  // useTheme is backed by useSyncExternalStore. Recharts receives CSS variable
+  // references, so its SVG colors resolve directly against the root theme.
+  useTheme()
+  return {
+    series: ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'],
+    grid: 'var(--grid-line)',
+    axis: 'var(--muted-foreground)',
   }
-
-  const { w, pts, line, area } = geometry!
-
-  return (
-    <svg
-      viewBox={`0 0 ${w} ${height}`}
-      className={cn('w-full', className)}
-      style={{ height }}
-      role="img"
-      aria-label={`Score trend from ${values[0]} to ${values[values.length - 1]}`}
-    >
-      <path d={area} fill={stroke} opacity={0.12} />
-      <path
-        d={line}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx={pts[pts.length - 1][0]}
-        cy={pts[pts.length - 1][1]}
-        r={3}
-        fill={stroke}
-      />
-    </svg>
-  )
 }
 
-export function Bars({
-  data,
-  height = 140,
-  color = 'var(--chart-1)',
-  className,
-}: {
-  data: { label: string; value: number }[]
-  height?: number
-  color?: string
-  className?: string
-}) {
-  const max = useMemo(() => Math.max(...data.map((d) => d.value), 1), [data])
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const CHART_SWATCHES = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5']
+
+function ChartTooltip({ active, payload, label, unit = '' }: any) {
+  const { series } = useChartTheme()
+  if (!active || !payload?.length) return null
   return (
-    <div className={cn('flex items-end gap-3', className)} style={{ height }}>
-      {data.map((d) => (
-        <div key={d.label} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-            {d.value}
-          </span>
-          <div
-            className="print-chart-bar w-full max-w-10 rounded-t-md"
-            style={{
-              height: `${(d.value / max) * 78}%`,
-              backgroundColor: color,
-              opacity: 0.55 + 0.45 * (d.value / max),
-            }}
-          />
-          <span className="max-w-full truncate font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-            {d.label}
-          </span>
-        </div>
-      ))}
+    <div className="rounded-xl border border-border bg-popover px-3 py-2 shadow-lg">
+      {label ? (
+        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      ) : null}
+      <div className="mt-1 space-y-0.5">
+        {payload.map((entry: any, i: number) => (
+          <p key={i} className="flex items-center gap-2 text-xs">
+            <span className={cn('size-2 rounded-full', CHART_SWATCHES[Math.max(0, series.indexOf(entry.color ?? entry.fill))])} />
+            <span className="text-muted-foreground">{entry.name}</span>
+            <span className="font-mono tabular-nums">{entry.value}{unit}</span>
+          </p>
+        ))}
+      </div>
     </div>
   )
 }
 
-export function ScoreRing({
-  value,
-  size = 120,
-  stroke = 10,
+const axisProps = (color: string) => ({
+  stroke: color,
+  tick: { fill: color, fontSize: 10, fontFamily: 'var(--font-mono)' },
+  tickLine: false,
+  axisLine: false,
+})
+
+export function ScoreTrendChart({
+  data,
+  height = 240,
+  showBenchmark = true,
+  className,
 }: {
-  value: number
-  size?: number
-  stroke?: number
+  data: { label: string; score: number; benchmark?: number }[]
+  height?: number
+  showBenchmark?: boolean
+  className?: string
 }) {
-  const clamped = Math.max(0, Math.min(100, value))
-  const r = (size - stroke) / 2
-  const circ = 2 * Math.PI * r
-  const offset = circ * (1 - clamped / 100)
-  // Draw the arc in on mount: the ring is the hero number of the report, and it
-  // previously jumped to its final value while every other metric on the page
-  // eased in. The CSS transition animates strokeDashoffset from empty to the
-  // value one frame after mount. The early-return branch for reduced motion
-  // relies on the same rAF callback (the flag just makes it a no-op), so there is
-  // exactly one setState site and it never runs synchronously in the effect body.
-  const [drawn, setDrawn] = useState(false)
-  useEffect(() => {
-    if (drawn) return
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const raf = requestAnimationFrame(() => setDrawn(!reduce))
-    return () => cancelAnimationFrame(raf)
-  }, [drawn])
+  const { series, grid, axis } = useChartTheme()
   return (
-    <div
-      className="relative inline-flex items-center justify-center"
-      style={{ width: size, height: size }}
-    >
-      <svg width={size} height={size} className="-rotate-90" role="img" aria-label={`Score: ${value} out of 100`}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--secondary)"
-          strokeWidth={stroke}
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--primary)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circ}
-          strokeDashoffset={drawn ? offset : circ}
-          style={{ transition: 'stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-        />
-      </svg>
-      <div className="absolute flex flex-col items-center">
-        <span className="font-mono font-semibold tabular-nums" style={{ fontSize: size / 4.5 }}>
-          {value}
-        </span>
-        <span className="font-mono text-[10px] text-muted-foreground">/ 100</span>
-      </div>
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+          <defs>
+            <linearGradient id="score-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={series[0]} stopOpacity={0.28} />
+              <stop offset="100%" stopColor={series[0]} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={grid} vertical={false} />
+          <XAxis dataKey="label" {...axisProps(axis)} />
+          <YAxis domain={[40, 100]} {...axisProps(axis)} />
+          <Tooltip content={<ChartTooltip />} />
+          <Area
+            type="monotone"
+            dataKey="score"
+            name="Score"
+            stroke={series[0]}
+            strokeWidth={2}
+            fill="url(#score-fill)"
+            dot={false}
+            activeDot={{ r: 3 }}
+          />
+          {showBenchmark ? (
+            <Line
+              type="monotone"
+              dataKey="benchmark"
+              name="Cohort"
+              stroke={axis}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              dot={false}
+            />
+          ) : null}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function Sparkline({
+  data,
+  height = 48,
+  className,
+}: {
+  data: number[]
+  height?: number
+  className?: string
+}) {
+  const { series } = useChartTheme()
+  const rows = data.map((score, i) => ({ i, score }))
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={rows} margin={{ top: 4, right: 2, bottom: 2, left: 2 }}>
+          <Line type="monotone" dataKey="score" stroke={series[0]} strokeWidth={2} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function CategoryBarChart({
+  data,
+  height = 240,
+  className,
+}: {
+  data: { category: string; score: number }[]
+  height?: number
+  className?: string
+}) {
+  const { series, grid, axis } = useChartTheme()
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+          <CartesianGrid stroke={grid} vertical={false} />
+          <XAxis dataKey="category" {...axisProps(axis)} interval={0} angle={-12} dy={8} height={48} />
+          <YAxis domain={[0, 100]} {...axisProps(axis)} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: grid }} />
+          <Bar dataKey="score" name="Score" radius={[4, 4, 0, 0]} className="chart-bar">
+            {data.map((entry, i) => (
+              <Cell
+                key={entry.category}
+                fill={entry.score >= 82 ? series[1] : entry.score >= 70 ? series[0] : entry.score >= 58 ? series[2] : series[3]}
+                opacity={0.9 - i * 0.02}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function SkillRadarChart({
+  data,
+  height = 280,
+  className,
+}: {
+  data: { skill: string; score: number }[]
+  height?: number
+  className?: string
+}) {
+  const { series, grid, axis } = useChartTheme()
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <RadarChart data={data} outerRadius="72%">
+          <PolarGrid stroke={grid} />
+          <PolarAngleAxis dataKey="skill" tick={{ fill: axis, fontSize: 10, fontFamily: 'var(--font-mono)' }} />
+          <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+          <Tooltip content={<ChartTooltip />} />
+          <Radar dataKey="score" name="Score" stroke={series[0]} fill={series[0]} fillOpacity={0.22} />
+        </RadarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function DifficultyLineChart({
+  data,
+  height = 220,
+  className,
+}: {
+  data: { label: string; score: number }[]
+  height?: number
+  className?: string
+}) {
+  const { series, grid, axis } = useChartTheme()
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+          <CartesianGrid stroke={grid} vertical={false} />
+          <XAxis dataKey="label" {...axisProps(axis)} />
+          <YAxis domain={[40, 100]} {...axisProps(axis)} />
+          <Tooltip content={<ChartTooltip />} />
+          <Line
+            type="monotone"
+            dataKey="score"
+            name="Score"
+            stroke={series[1]}
+            strokeWidth={2}
+            dot={{ r: 2.5, strokeWidth: 0, fill: series[1] }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function StatusDonut({
+  data,
+  height = 220,
+  className,
+}: {
+  data: { status: string; count: number }[]
+  height?: number
+  className?: string
+}) {
+  const { series, axis } = useChartTheme()
+  const total = data.reduce((sum, d) => sum + d.count, 0)
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 24 }}>
+          <XAxis type="number" hide />
+          <YAxis type="category" dataKey="status" width={92} {...axisProps(axis)} />
+          <Tooltip content={<ChartTooltip />} cursor={false} />
+          <Bar dataKey="count" name="Sessions" radius={[0, 4, 4, 0]} className="chart-bar">
+            {data.map((entry, i) => (
+              <Cell key={entry.status} fill={series[i % series.length]} opacity={total ? 0.9 : 1} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function CohortChart({
+  data,
+  height = 240,
+  className,
+}: {
+  data: { label: string; users: number; interviews: number }[]
+  height?: number
+  className?: string
+}) {
+  const { series, grid, axis } = useChartTheme()
+  return (
+    <div className={cn('w-full', className)} style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+          <CartesianGrid stroke={grid} vertical={false} />
+          <XAxis dataKey="label" {...axisProps(axis)} />
+          <YAxis {...axisProps(axis)} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: grid }} />
+          <Bar dataKey="users" name="Signups" fill={series[0]} radius={[4, 4, 0, 0]} className="chart-bar" />
+          <Bar dataKey="interviews" name="Sessions" fill={series[1]} radius={[4, 4, 0, 0]} className="chart-bar" />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   )
 }
