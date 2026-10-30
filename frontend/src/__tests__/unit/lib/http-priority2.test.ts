@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import axios from 'axios';
-import { httpGet, httpPost, httpPut, httpPatch, httpDelete, ApiError, setOnAuthExpired, axiosInstance } from '@/lib/http';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { httpGet, httpPost, httpPut, httpPatch, httpDelete, ApiError, setOnAuthExpired } from '@/lib/http';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../mocks/node';
 

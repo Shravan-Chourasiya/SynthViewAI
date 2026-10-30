@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import { useAuthStore } from '@/lib/stores/auth-store';
 
 // Mock the auth store
-vi.mock('@/lib/stores/auth.store');
+vi.mock('@/lib/stores/auth-store');
 
 // Create wrapper components that include both ThemeProvider and Router
 const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/login']) => {

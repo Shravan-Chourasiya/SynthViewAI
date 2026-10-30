@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildFullReportPdf, pdfSafe, safeFilename } from '@/lib/pdf-export'
-import type { Interview, InterviewReport, TimelineEvent } from '@/lib/types'
+import type { Interview, InterviewReport, TimelineEvent } from '@/lib/pdf-export'
 
 /**
  * Regression coverage for two defects that only showed up in a real export:
@@ -162,6 +162,7 @@ describe('buildFullReportPdf', () => {
     expect(text).not.toContain('\u2014')
 
     // No control characters: their presence is the signature of the corruption.
+    // eslint-disable-next-line no-control-regex -- asserting their absence is the point
     expect(text).not.toMatch(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/)
 
     // Out-of-range characters are visible placeholders, never silently dropped.

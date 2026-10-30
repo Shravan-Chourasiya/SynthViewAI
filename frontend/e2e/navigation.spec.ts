@@ -8,18 +8,18 @@ test.describe('Basic Navigation', () => {
     // Verify homepage loads
     await expect(page.getByRole('heading', { name: /An AI interview that adapts to you\./i })).toBeVisible();
     
-    // Test navigation to various sections
-    await page.getByRole('link', { name: 'Dashboard' }).click();
-    await page.waitForURL('**/dashboard');
-    await expect(page.url()).toContain('/dashboard');
-    
+    // Authenticated-only destinations bounce a signed-out visitor to login
+    await page.getByRole('link', { name: 'Dashboard' }).first().click();
+    await page.waitForURL('**/login');
+    await expect(page.url()).toContain('/login');
+
     // Go back to home
     await page.goto('/');
     await expect(page.getByRole('heading', { name: /An AI interview that adapts to you\./i })).toBeVisible();
-    
-    // Test another navigation
-    await page.getByRole('link', { name: 'Interviews' }).click();
-    await page.waitForURL('**/interviews');
-    await expect(page.url()).toContain('/interviews');
+
+    // Public sections stay reachable for a guest
+    await page.getByRole('link', { name: 'About' }).first().click();
+    await page.waitForURL('**/about');
+    await expect(page.url()).toContain('/about');
   });
 });

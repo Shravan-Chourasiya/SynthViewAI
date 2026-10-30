@@ -2,113 +2,82 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { LoginForm } from '@/components/auth/login-form';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import LoginPage from '@/pages/auth/login';
+import { useAuthStore } from '@/lib/stores/auth-store';
 
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
+vi.mock('@/lib/stores/auth-store', () => ({ useAuthStore: vi.fn() }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
+const mockLogin = vi.fn();
+
+const mockState = () => ({
+  status: 'unauthenticated',
+  user: null,
+  pendingEmail: null,
+  error: null,
+  login: mockLogin,
+  register: vi.fn(),
+  verifyOtp: vi.fn(),
+  logout: vi.fn(),
+  bootstrap: vi.fn(),
 });
 
-// Mock the auth store
-vi.mock('@/lib/stores/auth.store', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...(actual as any),
-    useAuthStore: vi.fn(),
-  };
-});
+const mockStore = (overrides: Record<string, unknown> = {}) => {
+  vi.mocked(useAuthStore).mockImplementation((selector) => {
+    const state = { ...mockState(), ...overrides };
+    return selector ? selector(state as never) : (state as never);
+  });
+};
 
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement) => {
-  return render(
+const renderWithProviders = (ui: React.ReactElement) =>
+  render(
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter>
-        {ui}
-      </MemoryRouter>
+      <MemoryRouter>{ui}</MemoryRouter>
     </ThemeProvider>
   );
-};
 
 describe('Login Form Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
-    
-    // Mock the auth store with login function
-    vi.mocked(useAuthStore).mockReturnValue({
-      login: vi.fn(),
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
+    mockLogin.mockReset();
+    mockStore();
   });
 
   it('renders login form with email and password fields', () => {
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
+    renderWithProviders(<LoginPage />);
 
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
-  it('shows validation errors for empty fields', async () => {
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-    fireEvent.click(submitButton);
+  // Validation is delegated to the browser (`required`, `type="email"`), so the
+  // constraints themselves are what the form relies on.
+  it('marks both fields required and rejects a malformed email', () => {
+    renderWithProviders(<LoginPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText(/email is required\./i)).toBeInTheDocument();
-      expect(screen.getByText(/password is required\./i)).toBeInTheDocument();
-    });
-  });
+    const emailInput = screen.getByLabelText('Email') as HTMLInputElement;
+    const passwordInput = screen.getByLabelText('Password') as HTMLInputElement;
 
-  it('shows validation error for invalid email format', async () => {
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    fireEvent.change(emailInput, { target: { value: 'invalid-email' } });
+    expect(emailInput).toBeRequired();
+    expect(passwordInput).toBeRequired();
+    expect(emailInput.checkValidity()).toBe(false);
 
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-    fireEvent.click(submitButton);
+    emailInput.value = 'not-an-email';
+    expect(emailInput.checkValidity()).toBe(false);
 
-    await waitFor(() => {
-      expect(screen.getByText(/invalid email format\./i)).toBeInTheDocument();
-    });
+    emailInput.value = 'test@example.com';
+    expect(emailInput.checkValidity()).toBe(true);
   });
 
   it('calls login store action with correct credentials on successful submission', async () => {
-    const mockLogin = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(useAuthStore).mockReturnValue({
-      login: mockLogin,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
+    mockLogin.mockResolvedValue(undefined);
 
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    renderWithProviders(<LoginPage />);
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'password123' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123');
@@ -117,84 +86,23 @@ describe('Login Form Component', () => {
 
   it('handles login errors gracefully', async () => {
     const errorMessage = 'Invalid credentials';
-    const mockLogin = vi.fn().mockRejectedValue(new Error(errorMessage));
-    vi.mocked(useAuthStore).mockReturnValue({
-      login: mockLogin,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
+    mockLogin.mockRejectedValue(new Error(errorMessage));
 
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    renderWithProviders(<LoginPage />);
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'wrongpass' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrongpass' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
       expect(screen.getByText(errorMessage)).toBeInTheDocument();
     });
   });
 
-  it('redirects after successful login', async () => {
-    const mockLogin = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(useAuthStore).mockReturnValue({
-      login: mockLogin,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
+  it('offers a way to the registration form', () => {
+    renderWithProviders(<LoginPage />);
 
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'password123' } });
-    fireEvent.click(submitButton);
-
-    // Wait for the success state and navigation
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith();
-    });
-  });
-
-  it('disables submit button during login to prevent duplicate submissions', async () => {
-    const loginPromise = new Promise(() => {}); // Never resolves, simulates loading
-    const mockLogin = vi.fn().mockReturnValue(loginPromise as any);
-    vi.mocked(useAuthStore).mockReturnValue({
-      login: mockLogin,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-
-    renderWithProviders(<LoginForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'password123' } });
-    fireEvent.click(submitButton);
-
-    // Button should be disabled during submission
-    expect(submitButton).toBeDisabled();
+    expect(screen.getByText(/don't have an account\?/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument();
   });
 });

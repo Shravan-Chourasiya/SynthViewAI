@@ -1,23 +1,28 @@
 /**
- * live-room-panels.test.tsx — the live room chooses its answer surface per question
+ * live-room-panels.test.tsx - the live room chooses its answer surface per question
  *
- * The backend decides a question's answerFormat; the room must render the code editor
- * for CODE and the prose panel for everything else, and route each submission to the
- * matching socket event. This drives the real LiveRoomPage with the transport, API and
- * heavy media widgets mocked out.
+ * The backend decides a question's answerFormat; the room must render the code
+ * editor for CODE and the prose panel for everything else, and route each
+ * submission to the matching socket call. This drives the real LiveRoomPage with
+ * the transport, API and heavy media widgets mocked out.
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Question } from '@/lib/types';
+import { renderRoute } from '@/__tests__/test-utils';
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
+// ---- Mocks -----------------------------------------------------------------
 
-const { storeState, socket, api } = vi.hoisted(() => ({
-  storeState: {} as Record<string, unknown>,
+const { socket, submitted } = vi.hoisted(() => ({
   socket: {
-    connectionState: 'connected',
+    activeQuestion: null as Question | null,
+    answerFormat: null as string | null,
+    status: 'listening',
+    connection: 'connected',
+    streamed: '',
+    totalQuestions: 5,
+    complete: false,
     submitAnswer: vi.fn(),
     submitCode: vi.fn(),
     requestNextQuestion: vi.fn(),
@@ -25,166 +30,164 @@ const { storeState, socket, api } = vi.hoisted(() => ({
     endInterview: vi.fn(),
     extendTime: vi.fn(),
   },
-  api: { getInterview: vi.fn() },
+  submitted: { answers: [] as string[], codes: [] as { code: string; language: string }[] },
 }));
-
-vi.mock('@/lib/api', () => ({ api }));
 
 vi.mock('@/hooks/use-interview-socket', () => ({
   useInterviewSocket: () => socket,
 }));
 
-vi.mock('@/lib/stores/live-interview.store', () => ({
-  useLiveInterviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector(storeState),
-  remainingSecondsFor: () => 0,
+vi.mock('@/lib/services', () => ({
+  interviewService: {
+    get: vi.fn(),
+    start: vi.fn().mockResolvedValue(undefined),
+    end: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
-vi.mock('@/lib/stores/auth.store', () => ({
-  useAuthStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      user: { id: 'user-1', username: 'candidate', firstName: 'Cand', lastName: 'Idate' },
-    }),
-}));
-
-// The room's media widgets are irrelevant here and pull in browsers APIs jsdom lacks.
-vi.mock('@/components/interview-room/widgets', () => ({
+// The orb and the camera tile animate against APIs jsdom does not implement.
+vi.mock('@/components/ai-orb', () => ({ AiOrb: () => null }));
+vi.mock('@/components/interview-room/room-parts', () => ({
   AiStatusBar: () => null,
-  CandidateControls: () => null,
-  ConnectionIndicator: () => null,
-  EndInterviewDialog: () => null,
-  InterviewTimer: () => null,
-  TimeUpDialog: () => null,
-  VideoTile: () => null,
+  CameraTile: () => null,
+  ConnectionChip: () => null,
 }));
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-    useParams: () => ({ id: 'interview-1' }),
-  };
-});
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-const { LiveRoomPage } = await import('@/pages/interviews/live');
+const { default: LiveRoomPage } = await import('@/pages/interviews/live');
+const { interviewService } = await import('@/lib/services');
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
+const interview = {
+  id: 'interview-1',
+  code: 'ABC123',
+  roleTitle: 'Backend Engineer',
+  field: 'Engineering',
+  difficulty: 'medium',
+  status: 'in-progress',
+  questionCount: 5,
+};
 
 function question(overrides: Partial<Question> = {}): Question {
   return {
     id: 'q-text-1',
+    interviewId: 'interview-1',
     index: 0,
     kind: 'text',
     category: 'Technical',
     topic: 'react',
+    prompt: 'Explain how React schedules renders.',
     difficulty: 'Medium',
-    text: 'What is a closure?',
+    answer: null,
+    score: null,
+    band: null,
+    headline: null,
+    feedback: null,
+    strengths: [],
+    improvements: [],
+    decision: null,
+    durationSeconds: 0,
+    answerFormat: 'TEXT',
+    codeLanguage: null,
+    starter: null,
     ...overrides,
   };
 }
 
-function baseState(currentQuestion: Question | null) {
-  return {
-    connectionState: 'connected',
-    aiStatus: 'idle',
-    currentQuestion,
-    questionNumber: 1,
-    answeredCount: 0,
-    totalQuestions: 3,
-    interviewStatus: 'INPROGRESS',
-    error: null,
-    mediaStream: null,
-    clearMediaStream: vi.fn(),
-    setMediaStream: vi.fn(),
-    timeExpired: false,
-    remainingSeconds: 600,
-  };
-}
-
-function renderRoom() {
-  return render(
-    <MemoryRouter>
-      <LiveRoomPage />
-    </MemoryRouter>,
-  );
-}
+const renderRoom = () =>
+  renderRoute(<LiveRoomPage />, {
+    path: '/interviews/:id/live',
+    params: [{ pattern: ':id', value: 'interview-1' }],
+  });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  submitted.answers.length = 0;
+  submitted.codes.length = 0;
   window.localStorage.clear();
-  Object.assign(storeState, baseState(question()));
-  api.getInterview.mockResolvedValue({
-    id: 'interview-1',
-    roleTitle: 'Backend Engineer',
-    type: 'TECHNICAL',
-    difficulty: 'MEDIUM',
-    durationMin: 30,
-    currentRound: 1,
-    rounds: [],
-  });
+  socket.activeQuestion = null;
+  socket.answerFormat = null;
+  vi.mocked(interviewService.get).mockResolvedValue(interview as never);
+  socket.submitAnswer.mockImplementation((_id: string, answer: string) =>
+    submitted.answers.push(answer),
+  );
+  socket.submitCode.mockImplementation((_id: string, language: string, code: string) =>
+    submitted.codes.push({ code, language }),
+  );
 });
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('LiveRoomPage — answer surface by question kind', () => {
+describe('LiveRoomPage - answer surface by question kind', () => {
   it('renders the prose panel for a text question', async () => {
+    socket.activeQuestion = question();
+
     renderRoom();
 
-    expect(
-      await screen.findByRole('textbox', { name: /your answer/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId('code-answer-panel')).toBeNull();
+    expect(await screen.findByLabelText('Your answer')).toBeInTheDocument();
+    expect(screen.queryByTestId('code-answer-panel')).not.toBeInTheDocument();
   });
 
   it('renders the code panel for a code question', async () => {
-    Object.assign(
-      storeState,
-      baseState(
-        question({
-          id: 'q-code-1',
-          kind: 'code',
-          text: 'Write a function that reverses a linked list.',
-          codeLanguage: 'python',
-        }),
-      ),
-    );
+    socket.activeQuestion = question({
+      id: 'q-code-1',
+      kind: 'code',
+      answerFormat: 'CODE',
+      codeLanguage: 'javascript',
+      prompt: 'Reverse a linked list.',
+    });
 
     renderRoom();
 
     expect(await screen.findByTestId('code-answer-panel')).toBeInTheDocument();
-    expect(screen.getByLabelText('Answer language')).toHaveValue('python');
-    expect(screen.queryByRole('textbox', { name: /your answer/i })).toBeNull();
+    expect(screen.queryByLabelText('Your answer')).not.toBeInTheDocument();
+  });
+
+  it('treats answerFormat CODE as code even when kind says text', async () => {
+    // The backend decides the surface; the client must not infer it from text.
+    socket.activeQuestion = question({ id: 'q-code-2', kind: 'text', answerFormat: 'CODE' });
+
+    renderRoom();
+
+    expect(await screen.findByTestId('code-answer-panel')).toBeInTheDocument();
   });
 
   it('submits a text answer through answer:submit', async () => {
-    renderRoom();
-    const editor = await screen.findByRole('textbox', { name: /your answer/i });
+    socket.activeQuestion = question();
 
-    fireEvent.change(editor, { target: { value: 'A closure captures its scope.' } });
+    renderRoom();
+
+    fireEvent.change(await screen.findByLabelText('Your answer'), {
+      target: { value: 'React batches updates in a scheduler.' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
 
-    expect(socket.submitAnswer).toHaveBeenCalledWith('q-text-1', 'A closure captures its scope.');
+    await waitFor(() => {
+      expect(socket.submitAnswer).toHaveBeenCalledWith(
+        'q-text-1',
+        'React batches updates in a scheduler.',
+      );
+    });
+    expect(submitted.answers).toEqual(['React batches updates in a scheduler.']);
     expect(socket.submitCode).not.toHaveBeenCalled();
   });
 
   it('submits a code answer through code:submit with the language', async () => {
-    Object.assign(
-      storeState,
-      baseState(question({ id: 'q-code-1', kind: 'code', codeLanguage: 'python' })),
-    );
+    socket.activeQuestion = question({
+      id: 'q-code-3',
+      kind: 'code',
+      answerFormat: 'CODE',
+      codeLanguage: 'python',
+      prompt: 'Print the Fibonacci sequence.',
+    });
 
     renderRoom();
+
     const editor = await screen.findByTestId('code-answer-input');
+    fireEvent.change(editor, { target: { value: 'print(1)' } });
+    fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
 
-    fireEvent.change(editor, { target: { value: 'def reverse(head):\n    return head' } });
-    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
-
-    expect(socket.submitCode).toHaveBeenCalledWith(
-      'q-code-1',
-      'python',
-      'def reverse(head):\n    return head',
-    );
+    await waitFor(() => {
+      expect(socket.submitCode).toHaveBeenCalledWith('q-code-3', 'python', 'print(1)');
+    });
     expect(socket.submitAnswer).not.toHaveBeenCalled();
   });
 });

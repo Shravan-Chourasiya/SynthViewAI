@@ -1,386 +1,151 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, useParams } from 'react-router-dom';
-import { ThemeProvider } from '@/components/theme-provider';
-import { LobbyPage } from '@/pages/interviews/lobby';
-import { useAuthStore } from '@/lib/stores/auth.store';
-import { useLiveInterviewStore } from '@/lib/stores/live-interview.store';
+/**
+ * lobby.test.tsx - pre-flight gate for the live room
+ *
+ * The lobby reads the interview through the API and gates "Start interview" on
+ * the camera and microphone checks, so a candidate never enters the room blind.
+ */
 
-// Define mockNavigate at module level
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderRoute } from '@/__tests__/test-utils';
+
 const mockNavigate = vi.fn();
 
-// Mock the services and navigation
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-    useParams: () => ({ id: 'interview-123' }),
-  };
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
 });
 
-vi.mock('@/lib/stores/auth.store');
-vi.mock('@/lib/stores/live-interview.store');
-
-// Mock the clearMediaStream function that's used in the component
-vi.mock('@/lib/utils/media', () => ({
-  clearMediaStream: vi.fn(),
-  setupMediaStream: vi.fn(),
+vi.mock('@/lib/services', () => ({
+  interviewService: { get: vi.fn(), start: vi.fn().mockResolvedValue(undefined) },
 }));
 
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/interviews/interview-123/lobby']) => {
-  return render(
-    <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter initialEntries={initialEntries}>
-        {ui}
-      </MemoryRouter>
-    </ThemeProvider>
-  );
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+const { default: LobbyPage } = await import('@/pages/interviews/lobby');
+const { interviewService } = await import('@/lib/services');
+
+const interview = {
+  id: 'interview-123',
+  code: 'ABC123',
+  roleTitle: 'Frontend Engineer',
+  field: 'Engineering',
+  company: 'Acme',
+  type: 'technical',
+  difficulty: 'medium',
+  experienceLevel: 'mid',
+  status: 'scheduled',
+  topics: ['react'],
+  questionCount: 5,
+  rounds: 1,
+  durationMinutes: 30,
+  score: null,
+  band: null,
+  summary: null,
+  createdAt: '2026-02-01T00:00:00.000Z',
+  updatedAt: '2026-02-01T00:00:00.000Z',
+  completedAt: null,
+  progress: 0,
+  currentRound: 1,
+  answeredCount: 0,
+  candidateId: 'u1',
 };
 
-describe('Interview Lobby Component', () => {
+const renderLobby = () =>
+  renderRoute(<LobbyPage />, {
+    path: '/interviews/:id/lobby',
+    params: [{ pattern: ':id', value: 'interview-123' }],
+  });
+
+describe('Interview Lobby', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    
-    // Mock the auth store
-    vi.mocked(useAuthStore).mockReturnValue({
-      user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
-      status: 'authenticated',
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      register: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-    
-    // Mock the live interview store
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'CREATED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'DISCONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: null,
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 0,
-      timer: null,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+    vi.mocked(interviewService.get).mockResolvedValue(interview as never);
   });
 
-  it('renders lobby with interview details', () => {
-    renderWithProviders(<LobbyPage />);
-    
-    expect(screen.getByText(/front-end developer interview/i)).toBeInTheDocument();
-    expect(screen.getByText(/google/i)).toBeInTheDocument();
-    expect(screen.getByText(/technology/i)).toBeInTheDocument();
-    expect(screen.getByText(/frontend engineer/i)).toBeInTheDocument();
-    expect(screen.getByText(/technical/i)).toBeInTheDocument();
-    expect(screen.getByText(/medium/i)).toBeInTheDocument();
+  it('renders the interview summary the candidate is about to sit', async () => {
+    renderLobby();
+
+    expect(await screen.findByText('Your room is ready.')).toBeInTheDocument();
+    expect(screen.getByText('Frontend Engineer')).toBeInTheDocument();
+    expect(screen.getByText('30 minutes')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
   });
 
-  it('displays media permissions check', () => {
-    renderWithProviders(<LobbyPage />);
-    
-    // Check for media-related elements
-    expect(screen.getByText(/camera/i)).toBeInTheDocument();
-    expect(screen.getByText(/microphone/i)).toBeInTheDocument();
+  it('blocks the start button until the environment checks pass', async () => {
+    renderLobby();
+
+    const start = await screen.findByRole('button', { name: /start interview/i });
+    expect(start).toBeDisabled();
+    expect(screen.getByText(/checks required/i)).toBeInTheDocument();
   });
 
-  it('allows user to start interview', async () => {
-    const mockSetConnectionState = vi.fn();
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'CREATED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'DISCONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: null,
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 0,
-      timer: null,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: mockSetConnectionState,
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+  it('unlocks the start button once both checks pass', async () => {
+    renderLobby();
 
-    renderWithProviders(<LobbyPage />);
-    
-    const startButton = screen.getByRole('button', { name: /start interview/i });
-    fireEvent.click(startButton);
-    
-    // Wait for the state change
+    fireEvent.click(await screen.findByRole('button', { name: /run all checks/i }));
+
     await waitFor(() => {
-      expect(mockSetConnectionState).toHaveBeenCalledWith('CONNECTING');
+      expect(screen.getByRole('button', { name: /start interview/i })).toBeEnabled();
     });
+    expect(screen.getByText(/all checks passed/i)).toBeInTheDocument();
   });
 
-  it('shows error state if media permissions are denied', () => {
-    renderWithProviders(<LobbyPage />);
-    
-    // Simulate media permission error
-    // In a real scenario, this would be tested by mocking mediaDevices
-    expect(screen.queryByText(/permission denied/i)).not.toBeInTheDocument();
-  });
+  it('surfaces a denied permission instead of pretending the check passed', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(
+      new Error('Permission denied'),
+    );
 
-  it('shows loading state while connecting to interview', () => {
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'CREATED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'CONNECTING',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: null,
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 0,
-      timer: null,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+    renderLobby();
 
-    renderWithProviders(<LobbyPage />);
-    
-    expect(screen.getByText(/connecting to interview/i)).toBeInTheDocument();
-  });
+    fireEvent.click(await screen.findByRole('button', { name: /run all checks/i }));
 
-  it('navigates to live interview room when connection succeeds', async () => {
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'CREATED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'CONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: null,
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 0,
-      timer: null,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
-
-    renderWithProviders(<LobbyPage />);
-    
-    // Wait for navigation to occur
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/interviews/interview-123/live');
+      expect(screen.getByText(/permission denied/i)).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: /start interview/i })).toBeDisabled();
   });
 
-  it('shows error message if connection fails', () => {
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'CREATED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'DISCONNECTED',
-      error: 'Connection failed: Network error',
-      answeredQuestionIds: [],
-      startTime: null,
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 0,
-      timer: null,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+  it('opens the rules dialog and only enters the room after the countdown', async () => {
+    renderLobby();
 
-    renderWithProviders(<LobbyPage />);
-    
-    expect(screen.getByText(/connection failed: network error/i)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /run all checks/i }));
+    const start = await screen.findByRole('button', { name: /start interview/i });
+    await waitFor(() => expect(start).toBeEnabled());
+
+    fireEvent.click(start);
+
+    expect(await screen.findByText('Before you begin')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm in 7s/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /not yet/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Before you begin')).not.toBeInTheDocument();
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing interview rather than an empty lobby', async () => {
+    vi.mocked(interviewService.get).mockResolvedValue(null);
+
+    renderLobby();
+
+    expect(await screen.findByText('That session no longer exists')).toBeInTheDocument();
+  });
+
+  it('offers the resume copy for an in-progress session', async () => {
+    vi.mocked(interviewService.get).mockResolvedValue({
+      ...interview,
+      status: 'in-progress',
+      progress: 40,
+      answeredCount: 2,
+    } as never);
+
+    renderLobby();
+
+    expect(await screen.findByText('Ready to continue?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resume interview/i })).toBeInTheDocument();
   });
 });

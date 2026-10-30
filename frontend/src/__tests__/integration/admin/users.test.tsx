@@ -1,101 +1,89 @@
-import { render, screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { ThemeProvider } from '@/components/theme-provider';
-import { AdminUsersPage } from '@/pages/admin/users';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import AdminUsersPage from '@/pages/admin/users';
+import { adminService } from '@/lib/services';
+import { renderWithProviders } from '@/__tests__/test-utils';
 
-// Mock the auth store (selector-honoring)
-vi.mock('@/lib/stores/auth.store', () => ({
-  useAuthStore: vi.fn(),
-}));
-
-// Mock the admin service so no real HTTP calls are made
-vi.mock('@/lib/services/admin.service', () => ({
+vi.mock('@/lib/services', () => ({
   adminService: {
-    getUsers: vi.fn().mockResolvedValue({ users: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getUserById: vi.fn().mockResolvedValue(null),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    suspendUser: vi.fn().mockResolvedValue(undefined),
-    reinstateUser: vi.fn().mockResolvedValue(undefined),
-    getInterviews: vi.fn().mockResolvedValue({ interviews: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getOverviewStats: vi.fn().mockResolvedValue({
-      totalUsers: 0,
-      totalInterviews: 0,
-      interviewsByStatus: {},
-      recentSignups: 0,
-      activeUsers: 0,
-    }),
+    users: vi.fn(),
+    stats: vi.fn(),
+    interviews: vi.fn(),
+    setStatus: vi.fn(),
+    setRole: vi.fn(),
   },
 }));
 
-const mockAuthUser = (userrole?: string) => {
-  (useAuthStore as unknown as vi.Mock).mockImplementation((selector?: (s: unknown) => unknown) => {
-    const state = {
-      status: 'authenticated',
-      user: userrole
-        ? {
-            id: '1',
-            firstName: 'Admin',
-            lastName: 'User',
-            email: 'admin@example.com',
-            username: 'admin',
-            userrole,
-            accountStatus: 'active',
-            createdAt: '2023-01-01T00:00:00Z',
-          }
-        : null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    };
-    return selector ? selector(state) : state;
-  });
-};
-
-const renderPage = () =>
-  render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={['/admin/users']}>
-        <AdminUsersPage />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
+const ROWS = [
+  {
+    id: 'u1',
+    name: 'Ada Lovelace',
+    username: 'ada',
+    email: 'ada@example.com',
+    role: 'candidate' as const,
+    status: 'active' as const,
+    interviews: 7,
+    avgScore: 82,
+    joinedAt: '2026-01-04T00:00:00.000Z',
+    lastActiveAt: '2026-02-01T00:00:00.000Z',
+  },
+  {
+    id: 'u2',
+    name: 'Grace Hopper',
+    username: 'grace',
+    email: 'grace@example.com',
+    role: 'reviewer' as const,
+    status: 'suspended' as const,
+    interviews: 2,
+    avgScore: null,
+    joinedAt: '2026-01-11T00:00:00.000Z',
+    lastActiveAt: '2026-01-20T00:00:00.000Z',
+  },
+];
 
 describe('Admin Users Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(adminService.users).mockResolvedValue(ROWS);
   });
 
-  it('renders the user management page for admin users', () => {
-    mockAuthUser('admin');
-    renderPage();
+  it('lists accounts returned by the admin service', async () => {
+    renderWithProviders(<AdminUsersPage />, { route: '/admin/users' });
 
-    expect(screen.getByText('User Management')).toBeInTheDocument();
-    expect(screen.queryByText('Admin access required')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Users.' })).toBeInTheDocument();
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('grace@example.com')).toBeInTheDocument();
+    expect(screen.getByText('2 shown')).toBeInTheDocument();
+    expect(adminService.users).toHaveBeenCalledWith({ search: '', role: 'all', status: 'all' });
   });
 
-  it('renders nothing for unauthenticated users', () => {
-    mockAuthUser(undefined);
-    renderPage();
+  it('exposes search and filter controls', async () => {
+    renderWithProviders(<AdminUsersPage />, { route: '/admin/users' });
 
-    expect(screen.queryByText('User Management')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Search users')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by role')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by status')).toBeInTheDocument();
   });
 
-  it('shows access denied for non-admin users', () => {
-    mockAuthUser('user');
-    renderPage();
+  it('shows an empty state rather than a fake row', async () => {
+    vi.mocked(adminService.users).mockResolvedValue([]);
 
-    expect(screen.getByText('Admin access required')).toBeInTheDocument();
-    expect(screen.getByText("Your account doesn't have administrator permissions.")).toBeInTheDocument();
-    expect(screen.queryByText('User Management')).not.toBeInTheDocument();
+    renderWithProviders(<AdminUsersPage />, { route: '/admin/users' });
+
+    expect(await screen.findByText('No users match')).toBeInTheDocument();
+    expect(screen.getByText('0 shown')).toBeInTheDocument();
   });
 
-  it('admits owners and moderators (admin area is role-hierarchy based)', () => {
-    mockAuthUser('owner');
-    renderPage();
-    expect(screen.getByText('User Management')).toBeInTheDocument();
+  it('asks the service again when the search term changes', async () => {
+    const { container } = renderWithProviders(<AdminUsersPage />, { route: '/admin/users' });
+    const input = await screen.findByLabelText('Search users');
+
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.change(input, { target: { value: 'ada' } });
+
+    await waitFor(() => {
+      expect(adminService.users).toHaveBeenLastCalledWith({ search: 'ada', role: 'all', status: 'all' });
+    });
+    expect(container).toBeTruthy();
   });
 });

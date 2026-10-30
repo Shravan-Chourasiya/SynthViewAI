@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useInterviewSocket } from '@/hooks/use-interview-socket';
 import { useLiveInterviewStore } from '@/lib/stores/live-interview.store';
-import { useAuthStore } from '@/lib/stores/auth.store';
-import { createFakeSocket } from '../../mocks/fake-socket';
-import * as authService from '@/lib/services/auth.service';
+import { useAuthStore } from '@/lib/stores/auth-store';
+import { createFakeSocket, type FakeSocket } from '../../mocks/fake-socket';
+import { authService } from '@/lib/services/auth';
 import { SOCKET_EVENTS } from '@/lib/constants/socket-events';
 
 // Mock the createInterviewSocket function to return our fake socket
@@ -13,16 +13,16 @@ vi.mock('@/lib/socket/interview-socket', () => ({
 }));
 
 // Mock the auth service
-vi.mock('@/lib/services/auth.service');
+vi.mock('@/lib/services/auth');
 
 // Create a wrapper component to access the hook's internal state
-let capturedSocket: any = null;
+let capturedSocket: FakeSocket | null = null;
 
 // Re-mock after imports to capture the socket
 vi.mock('@/lib/socket/interview-socket', async (importOriginal) => {
   const actual = await importOriginal();
   return {
-    ...(actual as any),
+    ...(actual as Record<string, unknown>),
     createInterviewSocket: () => {
       capturedSocket = createFakeSocket();
       return capturedSocket;
@@ -81,7 +81,7 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       
       // Check that join event was emitted
       const joinEvents = capturedSocket.emittedEvents.filter(
-        (event: any) => event.event === SOCKET_EVENTS.client.join
+        (event) => event.event === SOCKET_EVENTS.client.join
       );
       expect(joinEvents).toHaveLength(1);
       expect(joinEvents[0].data).toMatchObject({
@@ -212,7 +212,7 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       
       // Check that the correct event was emitted
       const answerSubmitEvents = capturedSocket.emittedEvents.filter(
-        (event: any) => event.event === SOCKET_EVENTS.client.answerSubmit
+        (event) => event.event === SOCKET_EVENTS.client.answerSubmit
       );
       expect(answerSubmitEvents).toHaveLength(1);
       expect(answerSubmitEvents[0].data).toMatchObject({
@@ -347,7 +347,7 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       
       // Check that the correct event was emitted
       const cancelEvents = capturedSocket.emittedEvents.filter(
-        (event: any) => event.event === SOCKET_EVENTS.client.cancel
+        (event) => event.event === SOCKET_EVENTS.client.cancel
       );
       expect(cancelEvents).toHaveLength(1);
       expect(cancelEvents[0].data).toMatchObject({
@@ -375,7 +375,7 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
       
       // Check that the correct event was emitted
       const endEvents = capturedSocket.emittedEvents.filter(
-        (event: any) => event.event === SOCKET_EVENTS.client.end
+        (event) => event.event === SOCKET_EVENTS.client.end
       );
       expect(endEvents).toHaveLength(1);
       expect(endEvents[0].data).toMatchObject({
@@ -426,7 +426,7 @@ describe('use-interview-socket hook - Priority 3 tests', () => {
     vi.spyOn(useAuthStore, 'getState').mockReturnValue({
       bootstrap: vi.fn(),
       logout: vi.fn()
-    } as any);
+    } as unknown as ReturnType<typeof useAuthStore.getState>);
     
     renderHook(() => useInterviewSocket(mockInterviewId));
     

@@ -10,6 +10,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Unit + integration only. `e2e/` holds Playwright specs and is owned by
+    // `npm run test:e2e`; letting Vitest pick them up makes Playwright's
+    // test.describe() throw at import time.
+    include: ['src/__tests__/**/*.{test,spec}.{ts,tsx}'],
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     globals: true,

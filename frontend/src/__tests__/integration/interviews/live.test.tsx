@@ -1,415 +1,167 @@
+/**
+ * live.test.tsx - session controls in the live room
+ *
+ * Drives the real LiveRoomPage with the real room chrome (status bar, end
+ * dialog) and only the transport, API and canvas widgets mocked out, so the
+ * pause / mute / end paths are exercised as they ship.
+ */
+
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, useParams } from 'react-router-dom';
-import { ThemeProvider } from '@/components/theme-provider';
-import { LiveRoomPage } from '@/pages/interviews/live';
-import { useAuthStore } from '@/lib/stores/auth.store';
-import { useLiveInterviewStore } from '@/lib/stores/live-interview.store';
+import type { Question } from '@/lib/types';
+import { renderRoute } from '@/__tests__/test-utils';
 
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
+const { socket } = vi.hoisted(() => ({
+  socket: {
+    activeQuestion: null as Question | null,
+    status: 'listening',
+    connection: 'connected',
+    streamed: '',
+    totalQuestions: 5,
+    complete: false,
+    submitAnswer: vi.fn(),
+    submitCode: vi.fn(),
+    requestNextQuestion: vi.fn(),
+    cancelInterview: vi.fn(),
+    endInterview: vi.fn(),
+    extendTime: vi.fn(),
+  },
+}));
 
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-    useParams: () => ({ id: 'interview-123' }),
-  };
-});
+vi.mock('@/hooks/use-interview-socket', () => ({ useInterviewSocket: () => socket }));
+vi.mock('@/lib/services', () => ({
+  interviewService: {
+    get: vi.fn(),
+    start: vi.fn().mockResolvedValue(undefined),
+    end: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+vi.mock('@/components/ai-orb', () => ({ AiOrb: () => null }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-vi.mock('@/lib/stores/auth.store');
-vi.mock('@/lib/stores/live-interview.store');
+const { default: LiveRoomPage } = await import('@/pages/interviews/live');
+const { interviewService } = await import('@/lib/services');
 
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/interviews/interview-123/live']) => {
-  return render(
-    <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter initialEntries={initialEntries}>
-        {ui}
-      </MemoryRouter>
-    </ThemeProvider>
-  );
+const interview = {
+  id: 'interview-123',
+  code: 'ABC123',
+  roleTitle: 'Frontend Developer Interview',
+  field: 'Engineering',
+  difficulty: 'medium',
+  status: 'in-progress',
+  questionCount: 5,
 };
 
-describe('Live Interview Room Component', () => {
+const question: Question = {
+  id: 'q-1',
+  interviewId: 'interview-123',
+  index: 0,
+  kind: 'text',
+  category: 'Technical',
+  topic: 'react',
+  prompt: 'Walk me through how you would optimise a slow list render.',
+  difficulty: 'Medium',
+  answer: null,
+  score: null,
+  band: null,
+  headline: null,
+  feedback: null,
+  strengths: [],
+  improvements: [],
+  decision: null,
+  durationSeconds: 0,
+  answerFormat: 'TEXT',
+  codeLanguage: null,
+  starter: null,
+};
+
+const renderRoom = () =>
+  renderRoute(<LiveRoomPage />, {
+    path: '/interviews/:id/live',
+    params: [{ pattern: ':id', value: 'interview-123' }],
+  });
+
+describe('Live Interview Room', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
-    
-    // Mock the auth store
-    vi.mocked(useAuthStore).mockReturnValue({
-      user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
-      status: 'authenticated',
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      register: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-    
-    // Mock the live interview store
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'IN_PROGRESS',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: {
-        id: 'q-1',
-        text: 'What is React?',
-        type: 'TECHNICAL',
-        skill: 'React',
-        difficulty: 'MEDIUM',
-        expectedAnswer: 'React is a JavaScript library...'
-      },
-      connectionState: 'CONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: new Date().toISOString(),
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 5,
-      timer: 1800, // 30 minutes in seconds
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+    socket.activeQuestion = question;
+    socket.complete = false;
+    socket.status = 'listening';
+    vi.mocked(interviewService.get).mockResolvedValue(interview as never);
   });
 
-  it('renders live interview room with current question', () => {
-    renderWithProviders(<LiveRoomPage />);
-    
-    expect(screen.getByText(/what is react\?/i)).toBeInTheDocument();
-    expect(screen.getByText(/react is a javascript library\.\.\./i)).toBeInTheDocument();
-    expect(screen.getByText(/technical/i)).toBeInTheDocument();
-    expect(screen.getByText(/medium/i)).toBeInTheDocument();
+  it('renders the current question and room chrome', async () => {
+    renderRoom();
+
+    expect(
+      await screen.findByText(/how you would optimise a slow list render/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Frontend Developer Interview')).toBeInTheDocument();
+    expect(screen.getByText('Q1/5')).toBeInTheDocument();
   });
 
-  it('shows timer countdown', () => {
-    renderWithProviders(<LiveRoomPage />);
-    
-    // Check for timer display (should show 30 minutes as formatted time)
-    expect(screen.getByText(/00:30:00/i)).toBeInTheDocument();
+  it('shows the elapsed clock advancing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderRoom();
+      expect(await screen.findByText('00:00 elapsed')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('allows user to submit answer', async () => {
-    const mockMarkAnswered = vi.fn();
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'IN_PROGRESS',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: {
-        id: 'q-1',
-        text: 'What is React?',
-        type: 'TECHNICAL',
-        skill: 'React',
-        difficulty: 'MEDIUM',
-        expectedAnswer: 'React is a JavaScript library...'
-      },
-      connectionState: 'CONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: new Date().toISOString(),
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 5,
-      timer: 1800,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: mockMarkAnswered,
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+  it('toggles pause without losing the question', async () => {
+    renderRoom();
 
-    renderWithProviders(<LiveRoomPage />);
-    
-    const answerInput = screen.getByPlaceholderText(/type your answer/i);
-    fireEvent.change(answerInput, { target: { value: 'My answer to this question' } });
-    
-    const submitButton = screen.getByRole('button', { name: /submit answer/i });
-    fireEvent.click(submitButton);
-    
+    const pause = await screen.findByRole('button', { name: 'Pause session' });
+    fireEvent.click(pause);
+
+    expect(screen.getByRole('button', { name: 'Resume session' })).toBeInTheDocument();
+    expect(screen.getByText(/how you would optimise a slow list render/i)).toBeInTheDocument();
+  });
+
+  it('toggles the microphone label', async () => {
+    renderRoom();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mute microphone' }));
+
+    expect(screen.getByRole('button', { name: 'Unmute microphone' })).toBeInTheDocument();
+  });
+
+  it('ends the interview only after confirming the dialog', async () => {
+    renderRoom();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^end interview$/i }));
+
+    expect(await screen.findByText('End the interview?')).toBeInTheDocument();
+    expect(interviewService.end).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /end and see results/i }));
+
     await waitFor(() => {
-      expect(mockMarkAnswered).toHaveBeenCalledWith('q-1');
+      expect(interviewService.end).toHaveBeenCalledWith('interview-123');
     });
   });
 
-  it('shows next question after submitting answer', async () => {
-    const mockSetQuestion = vi.fn();
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'IN_PROGRESS',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: {
-        id: 'q-2',
-        text: 'How do you manage state in React?',
-        type: 'TECHNICAL',
-        skill: 'React',
-        difficulty: 'MEDIUM',
-        expectedAnswer: 'Using useState, useContext, useReducer...'
-      },
-      connectionState: 'CONNECTED',
-      error: null,
-      answeredQuestionIds: ['q-1'],
-      startTime: new Date().toISOString(),
-      endTime: null,
-      currentQuestionIndex: 1,
-      totalQuestions: 5,
-      timer: 1700,
-      setInterview: vi.fn(),
-      setQuestion: mockSetQuestion,
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+  it('keeps the session when the user backs out of the dialog', async () => {
+    renderRoom();
 
-    renderWithProviders(<LiveRoomPage />);
-    
-    expect(screen.getByText(/how do you manage state in react\?/i)).toBeInTheDocument();
-  });
+    fireEvent.click(await screen.findByRole('button', { name: /^end interview$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /keep going/i }));
 
-  it('allows pausing and resuming interview', async () => {
-    const mockApplyStateChange = vi.fn();
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'IN_PROGRESS',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: {
-        id: 'q-1',
-        text: 'What is React?',
-        type: 'TECHNICAL',
-        skill: 'React',
-        difficulty: 'MEDIUM',
-        expectedAnswer: 'React is a JavaScript library...'
-      },
-      connectionState: 'CONNECTED',
-      error: null,
-      answeredQuestionIds: [],
-      startTime: new Date().toISOString(),
-      endTime: null,
-      currentQuestionIndex: 0,
-      totalQuestions: 5,
-      timer: 1800,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: mockApplyStateChange,
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
-
-    renderWithProviders(<LiveRoomPage />);
-    
-    const pauseButton = screen.getByRole('button', { name: /pause interview/i });
-    fireEvent.click(pauseButton);
-    
     await waitFor(() => {
-      expect(mockApplyStateChange).toHaveBeenCalledWith({ status: 'PAUSED' });
+      expect(screen.queryByText('End the interview?')).not.toBeInTheDocument();
     });
+    expect(interviewService.end).not.toHaveBeenCalled();
   });
 
-  it('allows cancelling interview', async () => {
-    renderWithProviders(<LiveRoomPage />);
-    
-    const cancelButton = screen.getByRole('button', { name: /cancel interview/i });
-    fireEvent.click(cancelButton);
-    
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/interviews');
-    });
-  });
+  it('waits for the next question instead of showing a stale one', async () => {
+    socket.activeQuestion = null;
 
-  it('shows completion screen when all questions are answered', () => {
-    vi.mocked(useLiveInterviewStore).mockReturnValue({
-      // Add all required store properties
-      interview: {
-        id: 'interview-123',
-        title: 'Frontend Developer Interview',
-        status: 'COMPLETED',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        scheduledAt: new Date().toISOString(),
-        duration: 30,
-        type: 'TECHNICAL',
-        difficulty: 'MEDIUM',
-        style: 'REGULAR',
-        experienceLevel: 'MID',
-        targetCompany: 'Google',
-        industry: 'Technology',
-        role: 'Frontend Engineer',
-        skills: ['React', 'TypeScript'],
-        questions: [],
-        metadata: {},
-        report: null,
-        userId: 'user-123'
-      },
-      question: null,
-      connectionState: 'DISCONNECTED',
-      error: null,
-      answeredQuestionIds: ['q-1', 'q-2', 'q-3', 'q-4', 'q-5'], // All questions answered
-      startTime: new Date().toISOString(),
-      endTime: new Date().toISOString(),
-      currentQuestionIndex: 5,
-      totalQuestions: 5,
-      timer: 0,
-      setInterview: vi.fn(),
-      setQuestion: vi.fn(),
-      setConnectionState: vi.fn(),
-      setError: vi.fn(),
-      markAnswered: vi.fn(),
-      setStartTime: vi.fn(),
-      setEndTime: vi.fn(),
-      setCurrentQuestionIndex: vi.fn(),
-      setTotalQuestions: vi.fn(),
-      setTimer: vi.fn(),
-      reset: vi.fn(),
-      applyJoined: vi.fn(),
-      applyQuestion: vi.fn(),
-      applyStateChange: vi.fn(),
-      startTimer: vi.fn(),
-      pauseTimer: vi.fn(),
-      resumeTimer: vi.fn(),
-      cancelTimer: vi.fn(),
-      initializeFromInterview: vi.fn(),
-    });
+    renderRoom();
 
-    renderWithProviders(<LiveRoomPage />);
-    
-    expect(screen.getByText(/interview completed/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /view report/i })).toBeInTheDocument();
+    expect(
+      await screen.findByText(/preparing your first question/i),
+    ).toBeInTheDocument();
   });
 });

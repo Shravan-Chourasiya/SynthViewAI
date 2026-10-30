@@ -1,198 +1,112 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Navigate, useLocation } from 'react-router-dom';
+import { render, screen } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { RequireAuth } from '@/components/require-auth';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import { RequireAuth } from '@/components/route-guards';
+import { useAuthStore } from '@/lib/stores/auth-store';
 
 // Mock the auth store
-vi.mock('@/lib/stores/auth.store');
+vi.mock('@/lib/stores/auth-store');
 
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/protected']) => {
-  return render(
+// The guard redirects to /login, so /login must be a real route: rendering
+// <Navigate> inside a router that falls back to the guarded element again
+// re-triggers the redirect on every commit and never settles.
+const renderGuarded = (initialEntries: string[] = ['/dashboard']) =>
+  render(
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
       <MemoryRouter initialEntries={initialEntries}>
-        {ui}
+        <Routes>
+          <Route path="/login" element={<div>Login Page</div>} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <ProtectedContent />
+              </RequireAuth>
+            }
+          />
+        </Routes>
       </MemoryRouter>
-    </ThemeProvider>
+    </ThemeProvider>,
   );
-};
 
-// Simple component to test redirection
-const ProtectedComponent = () => <div>Protected Content</div>;
+const ProtectedContent = () => <div>Protected Content</div>;
+
+const mockStateWith = (overrides: Record<string, unknown>) => {
+  vi.mocked(useAuthStore).mockImplementation((selector) => {
+    const mockState = {
+      status: 'unauthenticated',
+      user: null,
+      pendingEmail: null,
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      bootstrap: vi.fn(),
+      ...overrides,
+    };
+    return selector ? selector(mockState as never) : mockState;
+  });
+};
 
 describe('RequireAuth Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    
-    // Reset the mocked store to default state
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'unauthenticated',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
   });
 
-  it('shows loading skeleton when status is idle', () => {
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'idle',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
+  it('shows the route fallback while status is idle', () => {
+    mockStateWith({ status: 'idle' });
 
-    renderWithProviders(
-      <RequireAuth>
-        <ProtectedComponent />
-      </RequireAuth>
-    );
+    renderGuarded();
 
-    expect(screen.getByRole('status')).toBeInTheDocument(); // Skeleton component
-  });
-
-  it('shows loading skeleton when status is loading', () => {
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'loading',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
-
-    renderWithProviders(
-      <RequireAuth>
-        <ProtectedComponent />
-      </RequireAuth>
-    );
-
-    expect(screen.getByRole('status')).toBeInTheDocument(); // Skeleton component
-  });
-
-  it('redirects to login when user is unauthenticated', () => {
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'unauthenticated',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
-
-    renderWithProviders(
-      <RequireAuth>
-        <ProtectedComponent />
-      </RequireAuth>,
-      ['/dashboard']
-    );
-
-    // Check if redirect happens by verifying login page would be rendered
-    // In testing environment, we can't actually navigate, so we check if the redirect component is rendered
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 
+  it('shows the route fallback while status is loading', () => {
+    mockStateWith({ status: 'loading' });
+
+    renderGuarded();
+
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  });
+
+  it('redirects to login when user is unauthenticated', () => {
+    mockStateWith({ status: 'unauthenticated' });
+
+    renderGuarded();
+
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+    expect(screen.getByText('Login Page')).toBeInTheDocument();
+  });
+
   it('renders children when user is authenticated', () => {
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'authenticated',
-        user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
+    mockStateWith({
+      status: 'authenticated',
+      user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
     });
 
-    renderWithProviders(
-      <RequireAuth>
-        <ProtectedComponent />
-      </RequireAuth>
-    );
+    renderGuarded();
 
     expect(screen.getByText('Protected Content')).toBeInTheDocument();
   });
 
-  it('passes location state when redirecting to login', () => {
-    // For this test, we'll verify that the location state is properly handled
-    // by creating a custom component that displays location state
-    const TestComponent = () => {
-      const location = useLocation();
-      return <div data-location={location.state ? JSON.stringify(location.state) : 'no-state'} />;
-    };
+  it('bootstraps the session once while idle', () => {
+    const bootstrap = vi.fn();
+    mockStateWith({ status: 'idle', bootstrap });
 
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'unauthenticated',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
+    renderGuarded();
 
-    renderWithProviders(
-      <>
-        <RequireAuth>
-          <TestComponent />
-        </RequireAuth>
-        <Navigate to="/login" replace state={{ from: '/dashboard' }} />
-      </>,
-      ['/dashboard']
-    );
-
-    // Check that the location contains the original path
-    expect(screen.getByTestId).toBeDefined(); // Placeholder - actual implementation depends on how redirects are handled in tests
+    expect(bootstrap).toHaveBeenCalledTimes(1);
   });
 
-  it('does not flash redirect while loading', () => {
-    vi.mocked(useAuthStore).mockImplementation((selector) => {
-      const mockState = {
-        status: 'loading',
-        user: null,
-        pendingEmail: null,
-        error: null,
-        login: vi.fn(),
-        logout: vi.fn(),
-        bootstrap: vi.fn(),
-      };
-      return selector ? selector(mockState) : mockState;
-    });
+  it('does not flash a redirect while loading', () => {
+    mockStateWith({ status: 'loading' });
 
-    renderWithProviders(
-      <RequireAuth>
-        <ProtectedComponent />
-      </RequireAuth>
-    );
+    renderGuarded();
 
-    // Should show loading state, not redirect
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toBeInTheDocument(); // Loading skeleton
+    expect(screen.queryByText('Login Page')).not.toBeInTheDocument();
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 });

@@ -58,7 +58,7 @@ describe('Shared Components', () => {
       );
 
       // Find the button by its aria-label or title
-      const toggleButton = screen.getByLabelText(/switch to (light|dark) mode/i);
+      const toggleButton = screen.getByLabelText(/switch to (light|dark) theme/i);
       expect(toggleButton).toBeInTheDocument();
     });
   });

@@ -2,150 +2,99 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { VerifyEmailPage } from '@/pages/auth/verify-email';
-import * as authService from '@/lib/services/auth.service';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import { AuthPage } from '@/components/auth/auth-page';
+import { useAuthStore } from '@/lib/stores/auth-store';
 
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
+vi.mock('@/lib/stores/auth-store', () => ({ useAuthStore: vi.fn() }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
+const mockVerifyOtp = vi.fn();
 
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/verify-email']) => {
-  return render(
+const mockStore = (pendingEmail: string | null) => {
+  vi.mocked(useAuthStore).mockImplementation((selector) => {
+    const state = {
+      status: 'unauthenticated',
+      user: null,
+      pendingEmail,
+      error: null,
+      login: vi.fn(),
+      register: vi.fn(),
+      verifyOtp: mockVerifyOtp,
+      logout: vi.fn(),
+      bootstrap: vi.fn(),
+    };
+    return selector ? selector(state as never) : (state as never);
+  });
+};
+
+const renderWithProviders = (ui: React.ReactElement) =>
+  render(
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter initialEntries={initialEntries}>
-        {ui}
-      </MemoryRouter>
+      <MemoryRouter>{ui}</MemoryRouter>
     </ThemeProvider>
   );
-};
 
 describe('Verify Email Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
-    
-    // Reset auth store state
-    useAuthStore.setState({
-      user: null,
-      pendingEmail: 'test@example.com',
-      status: "idle",
-      error: null,
-    });
+    mockVerifyOtp.mockReset();
+    mockStore('ada@example.com');
   });
 
-  it('renders verify email form with OTP input', () => {
-    renderWithProviders(<VerifyEmailPage />);
-    
-    expect(screen.getByText(/verify your email/i)).toBeInTheDocument();
-    expect(screen.getByText(/we sent a verification code to test@example.com/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Enter 6-digit code')).toBeInTheDocument();
+  it('renders the verification form with the pending address', () => {
+    renderWithProviders(<AuthPage initialMode="verify" />);
+
+    expect(screen.getByText(/confirm it's really you/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/verification code/i)).toBeInTheDocument();
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /verify email/i })).toBeInTheDocument();
   });
 
-  it('shows validation error for incomplete OTP', async () => {
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const otpInput = screen.getByPlaceholderText('Enter 6-digit code');
-    fireEvent.change(otpInput, { target: { value: '123' } }); // Only 3 digits
+  it('keeps the verify button disabled until a six-digit code is entered', () => {
+    renderWithProviders(<AuthPage initialMode="verify" />);
 
-    const verifyButton = screen.getByRole('button', { name: /verify email/i });
-    fireEvent.click(verifyButton);
+    const submit = screen.getByRole('button', { name: /verify email/i });
+    expect(submit).toBeDisabled();
+
+    const code = screen.getByLabelText(/verification code/i);
+    fireEvent.change(code, { target: { value: '12345' } });
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(code, { target: { value: '123456' } });
+    expect(submit).toBeEnabled();
+  });
+
+  it('drops non-numeric characters from the code', () => {
+    renderWithProviders(<AuthPage initialMode="verify" />);
+
+    const code = screen.getByLabelText(/verification code/i) as HTMLInputElement;
+    fireEvent.change(code, { target: { value: '12-ab34cd56' } });
+    expect(code.value).toBe('123456');
+  });
+
+  it('calls verifyOtp with the pending email and the entered code', async () => {
+    mockVerifyOtp.mockResolvedValue(undefined);
+
+    renderWithProviders(<AuthPage initialMode="verify" />);
+
+    fireEvent.change(screen.getByLabelText(/verification code/i), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: /verify email/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter the full 6-digit code/i)).toBeInTheDocument();
+      expect(mockVerifyOtp).toHaveBeenCalledWith('ada@example.com', '123456');
     });
   });
 
-  it('calls verify service with correct parameters on OTP submission', async () => {
-    vi.spyOn(authService, 'verifyEmail').mockResolvedValue(undefined);
+  it('surfaces a rejected code in the form', async () => {
+    mockVerifyOtp.mockRejectedValue(new Error('That code is not valid'));
 
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const otpInput = screen.getByPlaceholderText('Enter 6-digit code');
-    const verifyButton = screen.getByRole('button', { name: /verify email/i });
+    renderWithProviders(<AuthPage initialMode="verify" />);
 
-    fireEvent.change(otpInput, { target: { value: '123456' } });
-    fireEvent.click(verifyButton);
+    fireEvent.change(screen.getByLabelText(/verification code/i), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: /verify email/i }));
 
     await waitFor(() => {
-      expect(authService.verifyEmail).toHaveBeenCalledWith({
-        email: 'test@example.com',
-        otp: '123456'
-      });
+      expect(screen.getByText('That code is not valid')).toBeInTheDocument();
     });
-  });
-
-  it('redirects to login after successful OTP verification', async () => {
-    vi.spyOn(authService, 'verifyEmail').mockResolvedValue(undefined);
-
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const otpInput = screen.getByPlaceholderText('Enter 6-digit code');
-    const verifyButton = screen.getByRole('button', { name: /verify email/i });
-
-    fireEvent.change(otpInput, { target: { value: '123456' } });
-    fireEvent.click(verifyButton);
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/login');
-    });
-  });
-
-  it('shows error message for invalid/expired OTP', async () => {
-    const errorMessage = 'Invalid or expired verification code';
-    vi.spyOn(authService, 'verifyEmail').mockRejectedValue(new Error(errorMessage));
-
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const otpInput = screen.getByPlaceholderText('Enter 6-digit code');
-    const verifyButton = screen.getByRole('button', { name: /verify email/i });
-
-    fireEvent.change(otpInput, { target: { value: '123456' } });
-    fireEvent.click(verifyButton);
-
-    await waitFor(() => {
-      expect(screen.getByText(errorMessage)).toBeInTheDocument();
-    });
-  });
-
-  it('handles resend OTP functionality', async () => {
-    vi.spyOn(authService, 'resendVerification').mockResolvedValue(undefined);
-
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const resendButton = screen.getByRole('button', { name: /resend code/i });
-    fireEvent.click(resendButton);
-
-    await waitFor(() => {
-      expect(authService.resendVerification).toHaveBeenCalledWith('test@example.com');
-    });
-
-    expect(screen.getByText(/verification code resent!/i)).toBeInTheDocument();
-  });
-
-  it('disables verify button during verification to prevent duplicate submissions', async () => {
-    const verificationPromise = new Promise(() => {}); // Never resolves, simulates loading
-    vi.spyOn(authService, 'verifyEmail').mockReturnValue(verificationPromise as any);
-
-    renderWithProviders(<VerifyEmailPage />);
-    
-    const otpInput = screen.getByPlaceholderText('Enter 6-digit code');
-    const verifyButton = screen.getByRole('button', { name: /verify email/i });
-
-    fireEvent.change(otpInput, { target: { value: '123456' } });
-    fireEvent.click(verifyButton);
-
-    // Button should be disabled during verification
-    expect(verifyButton).toBeDisabled();
   });
 });

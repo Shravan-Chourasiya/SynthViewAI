@@ -1,102 +1,109 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { waitFor } from '@testing-library/react';
-import { ThemeProvider, useTheme } from '@/components/theme-provider';
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ThemeProvider, useTheme } from '@/components/theme-provider'
 
-// Mock localStorage
-const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-};
+let storedTheme: string | null = null
+let mediaMatches = false
+let mediaChange: ((event: MediaQueryListEvent) => void) | undefined
+let frames: FrameRequestCallback[] = []
 
 Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
-  writable: true,
-});
+  configurable: true,
+  value: {
+    getItem: vi.fn(() => storedTheme),
+    setItem: vi.fn((_key: string, value: string) => { storedTheme = value }),
+  },
+})
 
-// Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
+  configurable: true,
+  value: vi.fn(() => ({
+    get matches() { return mediaMatches },
+    media: '(prefers-color-scheme: dark)',
     onchange: null,
-    addListener: vi.fn(), // Deprecated
-    removeListener: vi.fn(), // Deprecated
-    addEventListener: vi.fn(),
+    addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => { mediaChange = listener }),
     removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })),
-});
+})
 
-describe('ThemeProvider Component', () => {
+function Probe() {
+  const { theme, resolvedTheme, setTheme } = useTheme()
+  return (
+    <div>
+      <span data-testid="theme">{theme}</span>
+      <span data-testid="resolved">{resolvedTheme}</span>
+      <button onClick={() => setTheme('light')}>Set light</button>
+      <button onClick={() => setTheme('system')}>Set system</button>
+    </div>
+  )
+}
+
+function renderProvider() {
+  return render(<ThemeProvider><Probe /></ThemeProvider>)
+}
+
+describe('ThemeProvider', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    // Reset document classes and mock localStorage to return null initially
-    localStorageMock.getItem.mockReturnValue(null);
-    document.documentElement.className = '';
-    document.documentElement.classList.add('dark'); // Add default dark class initially
-  });
+    vi.clearAllMocks()
+    storedTheme = null
+    mediaMatches = false
+    mediaChange = undefined
+    frames = []
+    document.documentElement.className = 'dark'
+    document.documentElement.dataset.theme = 'dark'
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+  })
 
-  it('renders children correctly', () => {
-    render(
-      <ThemeProvider>
-        <div>Test Child</div>
-      </ThemeProvider>
-    );
+  it('applies the pre-paint stored theme to html during initial layout', () => {
+    storedTheme = 'light'
+    renderProvider()
 
-    expect(screen.getByText('Test Child')).toBeInTheDocument();
-  });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.documentElement).toHaveClass('light')
+    expect(document.documentElement).not.toHaveClass('dark')
+    expect(screen.getByTestId('resolved')).toHaveTextContent('light')
+  })
 
-  it('provides theme context to child components', () => {
-    const TestComponent = () => {
-      const theme = useTheme();
-      return (
-        <div>
-          <span data-testid="theme">{theme.theme}</span>
-          <button onClick={() => theme.toggleTheme()}>Toggle</button>
-        </div>
-      );
-    };
+  it('applies a toggle before paint and removes transition suppression after two frames', () => {
+    renderProvider()
+    fireEvent.click(screen.getByRole('button', { name: 'Set light' }))
 
-    render(
-      <ThemeProvider>
-        <TestComponent />
-      </ThemeProvider>
-    );
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.documentElement).toHaveClass('theme-switching')
+    expect(screen.getByTestId('resolved')).toHaveTextContent('light')
+    expect(frames).toHaveLength(1)
 
-    // Initially should be dark theme (default)
-    expect(screen.getByTestId('theme')).toHaveTextContent('dark');
-  });
+    act(() => frames.shift()?.(0))
+    expect(document.documentElement).toHaveClass('theme-switching')
+    act(() => frames.shift()?.(16))
+    expect(document.documentElement).not.toHaveClass('theme-switching')
+  })
 
-  it('uses stored theme from localStorage if available', () => {
-    localStorageMock.getItem.mockReturnValue('light');
+  it('persists the theme while remaining functional when storage is unavailable', () => {
+    renderProvider()
+    fireEvent.click(screen.getByRole('button', { name: 'Set light' }))
+    expect(window.localStorage.setItem).toHaveBeenCalledWith('synthview-theme', 'light')
 
-    render(
-      <ThemeProvider>
-        <div>Test Child</div>
-      </ThemeProvider>
-    );
+    vi.mocked(window.localStorage.setItem).mockImplementationOnce(() => { throw new Error('blocked') })
+    expect(() => fireEvent.click(screen.getByRole('button', { name: 'Set system' }))).not.toThrow()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+  })
 
-    // Should use light theme from localStorage
-    expect(localStorageMock.getItem).toHaveBeenCalledWith('synthview-theme');
-  });
+  it('follows system color-scheme changes when system mode is selected', () => {
+    renderProvider()
+    fireEvent.click(screen.getByRole('button', { name: 'Set system' }))
+    expect(mediaChange).toBeTypeOf('function')
 
-  it('applies theme classes to document element', async () => {
-    // Ensure localStorage returns null so it defaults to dark
-    localStorageMock.getItem.mockReturnValue(null);
-    
-    render(
-      <ThemeProvider>
-        <div>Test Child</div>
-      </ThemeProvider>
-    );
-
-    // Wait for the useEffect to run and apply the default theme
-    await waitFor(() => {
-      expect(document.documentElement.classList.contains('dark')).toBe(true);
-    });
-  });
-});
+    mediaMatches = true
+    act(() => mediaChange?.({} as MediaQueryListEvent))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(screen.getByTestId('resolved')).toHaveTextContent('dark')
+    expect(document.documentElement).toHaveClass('theme-switching')
+  })
+})

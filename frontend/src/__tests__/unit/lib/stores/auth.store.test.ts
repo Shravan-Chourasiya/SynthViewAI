@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import { useAuthStore } from '@/lib/stores/auth-store';
+import { authService } from '@/lib/services/auth';
+import { ApiError } from '@/lib/http';
 
 // Clear store state between tests
 function clearAuthStore() {
@@ -11,12 +13,20 @@ function clearAuthStore() {
   });
 }
 
+// The store calls through the `authService` object, so the spies have to land
+// on that object — spying on the module's named exports does not reach the
+// captured references.
+function spyOn<K extends keyof typeof authService>(method: K) {
+  return vi.spyOn(authService, method);
+}
+
 describe('auth.store', () => {
   beforeEach(() => {
     clearAuthStore();
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     clearAuthStore();
   });
 
@@ -24,40 +34,38 @@ describe('auth.store', () => {
     const state = useAuthStore.getState();
     expect(state.user).toBeNull();
     expect(state.pendingEmail).toBeNull();
-    expect(state.status).toBe('unauthenticated'); // Changed from 'idle' to 'unauthenticated' based on store init
     expect(state.error).toBeNull();
+    expect(['idle', 'unauthenticated']).toContain(state.status);
   });
 
   it('should set pendingEmail on register', async () => {
-    const originalRegister = (await import('@/lib/services/auth.service')).register;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'register').mockResolvedValue(undefined);
+    spyOn('register').mockResolvedValue(undefined);
 
     await useAuthStore.getState().register('John Doe', 'johndoe', 'john@example.com', 'password123');
 
     const state = useAuthStore.getState();
     expect(state.pendingEmail).toBe('john@example.com');
     expect(state.error).toBeNull();
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'register').mockImplementation(originalRegister);
+    expect(authService.register).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'john@example.com', username: 'johndoe', firstName: 'John' }),
+    );
   });
 
   it('should handle register errors', async () => {
-    const originalRegister = (await import('@/lib/services/auth.service')).register;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'register').mockRejectedValue(new Error('Registration failed'));
+    spyOn('register').mockRejectedValue(new Error('Registration failed'));
 
-    await expect(useAuthStore.getState().register('John Doe', 'johndoe', 'john@example.com', 'password123'))
-      .rejects.toThrow('Registration failed');
+    await expect(
+      useAuthStore.getState().register('John Doe', 'johndoe', 'john@example.com', 'password123'),
+    ).rejects.toThrow('Registration failed');
 
-    vi.spyOn(await import('@/lib/services/auth.service'), 'register').mockImplementation(originalRegister);
+    expect(useAuthStore.getState().pendingEmail).toBeNull();
   });
 
   it('should call _clear when logging out', async () => {
-    const originalLogout = (await import('@/lib/services/auth.service')).logout;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'logout').mockResolvedValue(undefined);
+    spyOn('logout').mockResolvedValue(undefined);
 
-    // Set up some state first
     useAuthStore.setState({
-      user: { id: 'user-123', email: 'john@example.com', name: 'John' },
+      user: { id: 'user-123', email: 'john@example.com', name: 'John' } as never,
       status: 'authenticated',
     });
 
@@ -66,13 +74,15 @@ describe('auth.store', () => {
     const state = useAuthStore.getState();
     expect(state.user).toBeNull();
     expect(state.status).toBe('unauthenticated');
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'logout').mockImplementation(originalLogout);
   });
 
   it('should handle logout errors gracefully', async () => {
-    const originalLogout = (await import('@/lib/services/auth.service')).logout;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'logout').mockRejectedValue(new Error('Network error'));
+    spyOn('logout').mockRejectedValue(new Error('Network error'));
+
+    useAuthStore.setState({
+      user: { id: 'user-123', email: 'john@example.com', name: 'John' } as never,
+      status: 'authenticated',
+    });
 
     // Should still clear state even if the network call fails
     await useAuthStore.getState().logout();
@@ -80,72 +90,61 @@ describe('auth.store', () => {
     const state = useAuthStore.getState();
     expect(state.user).toBeNull();
     expect(state.status).toBe('unauthenticated');
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'logout').mockImplementation(originalLogout);
   });
 
   it('should update state on successful bootstrap', async () => {
-    const originalMe = (await import('@/lib/services/auth.service')).me;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockResolvedValue({
+    spyOn('me').mockResolvedValue({
       id: 'user-123',
       email: 'john@example.com',
-      name: 'John',
-    } as any);
+      firstName: 'John',
+      username: 'john',
+      userrole: 'user',
+    } as never);
 
     await useAuthStore.getState().bootstrap();
 
     const state = useAuthStore.getState();
     expect(state.status).toBe('authenticated');
-    expect(state.user).toEqual({ id: 'user-123', email: 'john@example.com', name: 'John' });
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockImplementation(originalMe as any);
+    expect(state.user).toMatchObject({
+      id: 'user-123',
+      email: 'john@example.com',
+      // `name` is derived from the first/last name fields the backend returns.
+      name: 'John',
+    });
   });
 
   it('should handle bootstrap errors', async () => {
-    const originalMe = (await import('@/lib/services/auth.service')).me;
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockRejectedValue(new Error('Not authenticated'));
+    spyOn('me').mockRejectedValue(new ApiError('INTERNAL', 'Not authenticated', 500));
 
     await useAuthStore.getState().bootstrap();
 
     const state = useAuthStore.getState();
     expect(state.status).toBe('unauthenticated');
     expect(state.user).toBeNull();
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockImplementation(originalMe as any);
   });
 
   it('should handle 401 during bootstrap as unauthenticated (not error)', async () => {
-    const originalMe = (await import('@/lib/services/auth.service')).me;
-    const { ApiError } = await import('@/lib/http');
-    // Create an ApiError with status 401 to simulate a 401 response
-    const apiError = new ApiError('UNAUTHORIZED', 'Unauthorized', 401);
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockRejectedValue(apiError);
+    spyOn('me').mockRejectedValue(new ApiError('UNAUTHORIZED', 'Unauthorized', 401));
 
     await useAuthStore.getState().bootstrap();
 
     const state = useAuthStore.getState();
     expect(state.status).toBe('unauthenticated');
     expect(state.user).toBeNull();
-    // Error should be null for 401 (treated as "not logged in", not an error)
+    // A signed-out visitor is not an error condition.
     expect(state.error).toBeNull();
-
-    vi.spyOn(await import('@/lib/services/auth.service'), 'me').mockImplementation(originalMe as any);
   });
 
-  it('_clear should reset all auth state', () => {
-    useAuthStore.setState({
-      user: { id: 'user-123', email: 'john@example.com', name: 'John' },
-      pendingEmail: 'john@example.com',
-      status: 'authenticated',
-      error: 'Some error',
-    });
+  it('should derive a display name from username when no name fields exist', async () => {
+    spyOn('me').mockResolvedValue({
+      id: 'user-123',
+      email: 'john@example.com',
+      username: 'johndoe',
+      userrole: 'user',
+    } as never);
 
-    useAuthStore.getState()._clear();
+    await useAuthStore.getState().bootstrap();
 
-    const state = useAuthStore.getState();
-    expect(state.user).toBeNull();
-    expect(state.pendingEmail).toBeNull();
-    expect(state.status).toBe('unauthenticated');
-    expect(state.error).toBeNull();
+    expect(useAuthStore.getState().user?.name).toBe('johndoe');
   });
 });

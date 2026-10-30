@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { httpGet, httpPost, httpPatch, httpDelete } from '@/lib/http';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { httpGet, httpGetNoRefresh, httpPost, httpPatch, httpDelete } from '@/lib/http';
 import { 
   register,
   verifyOtp,
@@ -19,11 +19,7 @@ import {
   updateEmailVerify,
   updateProfile,
   deleteAccount
-} from '@/lib/services/auth.service';
-import { http, HttpResponse } from 'msw';
-import { server } from '../../../mocks/node';
-
-const API_BASE_URL = 'http://localhost:4000/api/v1';
+} from '@/lib/services/auth';
 
 // Mock the http functions to track calls
 vi.mock('@/lib/http', async () => {
@@ -31,6 +27,7 @@ vi.mock('@/lib/http', async () => {
   return {
     ...actual,
     httpGet: vi.fn(),
+    httpGetNoRefresh: vi.fn(),
     httpPost: vi.fn(),
     httpPatch: vi.fn(),
     httpDelete: vi.fn(),
@@ -106,11 +103,13 @@ describe('auth.service.ts - Priority 2 tests', () => {
     it('should call me endpoint', async () => {
       const mockResponse = { id: '1', email: 'test@example.com', firstName: 'Test', lastName: 'User' };
       
-      vi.mocked(httpGet).mockResolvedValue(mockResponse);
+      vi.mocked(httpGetNoRefresh).mockResolvedValue(mockResponse);
       
       const result = await me();
       
-      expect(httpGet).toHaveBeenCalledWith('/usr/me');
+      // `/usr/me` is the one read that must not retry through the refresh
+      // interceptor: a 401 here means "no session", not "expired token".
+      expect(httpGetNoRefresh).toHaveBeenCalledWith('/usr/me');
       expect(result).toEqual(mockResponse);
     });
 

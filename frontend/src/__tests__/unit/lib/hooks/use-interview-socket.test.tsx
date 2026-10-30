@@ -2,18 +2,21 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useInterviewSocket } from '@/hooks/use-interview-socket';
 import { useLiveInterviewStore } from '@/lib/stores/live-interview.store';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import { useAuthStore } from '@/lib/stores/auth-store';
 import { createFakeSocket, type FakeSocket } from '../../../mocks/fake-socket';
-import * as authService from '@/lib/services/auth.service';
+import { authService } from '@/lib/services/auth';
+import { createInterviewSocket } from '@/lib/socket/interview-socket';
 import { SOCKET_EVENTS } from '@/lib/constants/socket-events';
+import type { WsErrorPayload } from '@/lib/types/ws';
 
-// Mock the socket creation function
+// Mock the socket creation function — the hook must reach the transport only
+// through this module, never through socket.io-client directly.
 vi.mock('@/lib/socket/interview-socket', () => ({
-  createInterviewSocket: () => createFakeSocket()
+  createInterviewSocket: vi.fn(),
 }));
 
 // Mock the auth service
-vi.mock('@/lib/services/auth.service');
+vi.mock('@/lib/services/auth');
 
 describe('useInterviewSocket hook - Priority 3 tests', () => {
   let mockSocket: FakeSocket;
@@ -27,7 +30,7 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
     
     // Create a fresh fake socket for each test
     mockSocket = createFakeSocket();
-    vi.mocked(require('@/lib/socket/interview-socket').createInterviewSocket).mockReturnValue(mockSocket);
+    vi.mocked(createInterviewSocket).mockReturnValue(mockSocket as never);
   });
 
   afterEach(() => {
@@ -39,8 +42,9 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
     it('should transition connection states correctly: connecting → connected → joined', async () => {
       const { result } = renderHook(() => useInterviewSocket('interview-123'));
       
-      // Initially should be in default state
-      expect(result.current.connectionState).toBe('idle');
+      // The effect dials the socket immediately, so the hook reports
+      // "connecting" until the transport lands — not the store's "idle" seed.
+      expect(result.current.connectionState).toBe('connecting');
       
       // Trigger connect event
       act(() => {
@@ -427,7 +431,7 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
       });
       
       // Test each error code mentioned in the plan
-      const errorCodes = [
+      const errorCodes: WsErrorPayload['code'][] = [
         'AUTH_UNAUTHORIZED',
         'AUTH_SESSION_EXPIRED', 
         'AUTH_FORBIDDEN',
@@ -441,7 +445,7 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
       
       for (const errorCode of errorCodes) {
         const errorPayload = {
-          code: errorCode as any,
+          code: errorCode,
           message: 'Test error message'
         };
         
@@ -460,27 +464,32 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
     });
 
     it('should handle auth expiration during connection', async () => {
-      const { result } = renderHook(() => useInterviewSocket('interview-123'));
+      renderHook(() => useInterviewSocket('interview-123'));
       
-      // Mock the refresh and bootstrap functions
-      const mockRefresh = vi.fn().mockResolvedValue(undefined);
-      const mockBootstrap = vi.fn().mockResolvedValue(undefined);
-      const mockLogout = vi.fn().mockResolvedValue(undefined);
-      
-      vi.mocked(authService.refresh).mockImplementation(mockRefresh);
-      vi.mocked(useAuthStore.getState().bootstrap).mockImplementation(mockBootstrap);
-      vi.mocked(useAuthStore.getState().logout).mockImplementation(mockLogout);
-      
+      // The store's actions are plain functions, not mocks — spy on the
+      // instance so the recovery path can be observed without replacing it.
+      const bootstrapSpy = vi
+        .spyOn(useAuthStore.getState(), 'bootstrap')
+        .mockResolvedValue(undefined);
+      const logoutSpy = vi
+        .spyOn(useAuthStore.getState(), 'logout')
+        .mockResolvedValue(undefined);
+      vi.mocked(authService.refresh).mockResolvedValue(undefined);
+
       // Simulate connection error with auth issue
       const error = new Error('AUTH_UNAUTHORIZED');
       act(() => {
         mockSocket.emit('connect_error', error);
       });
-      
+
       // Wait for auth recovery to complete
       await waitFor(() => {
-        expect(mockRefresh).toHaveBeenCalled();
+        expect(authService.refresh).toHaveBeenCalled();
       });
+      expect(bootstrapSpy).toHaveBeenCalled();
+
+      bootstrapSpy.mockRestore();
+      logoutSpy.mockRestore();
     });
   });
 
@@ -508,11 +517,9 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
 
     afterEach(() => {
       vi.useRealTimers();
-    });
-
-    it('should manage timer correctly when joined event occurs', async () => {
+    });    it('should manage timer correctly when joined event occurs', () => {
       const { result } = renderHook(() => useInterviewSocket('interview-123'));
-      
+
       const startTime = new Date();
       const mockJoinedPayload = {
         interviewId: 'interview-123',
@@ -523,30 +530,26 @@ describe('useInterviewSocket hook - Priority 3 tests', () => {
         currentQuestionIndex: 1,
         totalQuestions: 10
       };
-      
+
+      // Drive the transport synchronously: `waitFor` polls through the real
+      // event loop, which fake timers have frozen for this block.
       act(() => {
         mockSocket.emit('connect');
       });
-      
-      await waitFor(() => {
-        expect(result.current.connectionState).toBe('connected');
-      });
-      
+      expect(result.current.connectionState).toBe('connected');
+
       act(() => {
         mockSocket.emit(SOCKET_EVENTS.server.joined, mockJoinedPayload);
       });
-      
+
       // Advance timer by 10 seconds
       act(() => {
         vi.advanceTimersByTime(10000); // 10 seconds
       });
-      
+
       // Check that remaining time decreased
       const storeState = useLiveInterviewStore.getState();
       expect(storeState.remainingSeconds).toBeLessThanOrEqual(50); // 60 - 10 = 50
-      
-      // Cleanup timer
-      vi.useRealTimers();
     });
   });
 });

@@ -66,7 +66,6 @@ describe('UI Components', () => {
         </>
       );
       const label = screen.getByText('Connected Label');
-      const input = screen.getByRole('textbox');
       expect(label).toHaveAttribute('for', 'connected-input');
     });
   });

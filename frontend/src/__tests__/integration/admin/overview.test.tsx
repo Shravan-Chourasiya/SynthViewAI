@@ -1,116 +1,74 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { ThemeProvider } from '@/components/theme-provider';
-import { AdminOverviewPage } from '@/pages/admin/overview';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import AdminOverviewPage from '@/pages/admin/index';
+import { adminService } from '@/lib/services';
+import { renderWithProviders } from '@/__tests__/test-utils';
 
-// Mock the auth store (selector-honoring)
-vi.mock('@/lib/stores/auth.store', () => ({
-  useAuthStore: vi.fn(),
-}));
-
-// Mock the admin service so no real HTTP calls are made
-vi.mock('@/lib/services/admin.service', () => ({
+vi.mock('@/lib/services', () => ({
   adminService: {
-    getUsers: vi.fn().mockResolvedValue({ users: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getUserById: vi.fn().mockResolvedValue(null),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    suspendUser: vi.fn().mockResolvedValue(undefined),
-    reinstateUser: vi.fn().mockResolvedValue(undefined),
-    getInterviews: vi.fn().mockResolvedValue({ interviews: [], total: 0, page: 1, limit: 10, totalPages: 0 }),
-    getOverviewStats: vi.fn().mockResolvedValue({
-      totalUsers: 12,
-      totalInterviews: 34,
-      interviewsByStatus: { COMPLETED: 30, ACTIVE: 4 },
-      recentSignups: 5,
-      activeUsers: 8,
-    }),
+    stats: vi.fn(),
+    users: vi.fn(),
+    interviews: vi.fn(),
   },
 }));
 
-// Mock window.scrollTo to prevent errors
-Object.defineProperty(window, 'scrollTo', {
-  value: vi.fn(),
-  writable: true,
-});
-
-const mockAuthUser = (userrole?: string) => {
-  (useAuthStore as unknown as vi.Mock).mockImplementation((selector?: (s: unknown) => unknown) => {
-    const state = {
-      status: 'authenticated',
-      user: userrole
-        ? {
-            id: 'admin-user-id',
-            firstName: 'Admin',
-            lastName: 'User',
-            email: 'admin@example.com',
-            username: 'admin',
-            userrole,
-            accountStatus: 'active',
-            createdAt: new Date().toISOString(),
-          }
-        : null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    };
-    return selector ? selector(state) : state;
-  });
+const STATS = {
+  kpis: [
+    { label: 'Total accounts', value: 12, delta: '+3 this week', hint: 'all time' },
+    { label: 'Sessions run', value: 34, delta: '+8 this week', hint: 'all time' },
+    { label: 'Live now', value: 2, delta: 'steady', hint: 'in the last hour' },
+    { label: 'Average score', value: 72, delta: '+4', hint: 'last 30 days' },
+  ],
+  signups: [
+    { label: 'W1', users: 3, interviews: 4 },
+    { label: 'W2', users: 5, interviews: 7 },
+  ],
+  statusMix: [
+    { status: 'Completed', count: 30 },
+    { status: 'In progress', count: 4 },
+  ],
+  scoreBands: [
+    { band: 'Strong', count: 10 },
+    { band: 'Good', count: 14 },
+    { band: 'Vague', count: 6 },
+  ],
+  topRoles: [{ role: 'Backend Engineer', count: 11, avgScore: 78 }],
 };
-
-const renderPage = () =>
-  render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={['/admin']}>
-        <AdminOverviewPage />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
 
 describe('Admin Overview Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(adminService.stats).mockResolvedValue(STATS);
   });
 
-  it('renders the platform overview for admin users with real stats', async () => {
-    mockAuthUser('admin');
-    renderPage();
+  it('renders the platform overview from the service, not hardcoded values', async () => {
+    renderWithProviders(<AdminOverviewPage />, { route: '/admin' });
 
-    expect(screen.getByText('Platform Overview')).toBeInTheDocument();
-    expect(screen.queryByText('Admin access required')).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Platform overview.' }),
+    ).toBeInTheDocument();
 
-    // Stats come from the (mocked) service, not hardcoded zeros
     await waitFor(() => {
-      expect(screen.getByText('12')).toBeInTheDocument();
       expect(screen.getByText('34')).toBeInTheDocument();
     });
+    expect(screen.getByText('Total accounts')).toBeInTheDocument();
+    expect(screen.getByText('Backend Engineer')).toBeInTheDocument();
+    expect(adminService.stats).toHaveBeenCalledTimes(1);
   });
 
-  it('renders nothing for unauthenticated users', () => {
-    mockAuthUser(undefined);
-    renderPage();
+  it('shows the session mix total from the status rows', async () => {
+    renderWithProviders(<AdminOverviewPage />, { route: '/admin' });
 
-    expect(screen.queryByText('Platform Overview')).not.toBeInTheDocument();
+    expect(await screen.findByText('34 sessions')).toBeInTheDocument();
   });
 
-  it('shows access denied for non-admin users', () => {
-    mockAuthUser('user');
-    renderPage();
+  it('reports a load failure instead of inventing statistics', async () => {
+    vi.mocked(adminService.stats).mockRejectedValue(new Error('boom'));
 
-    expect(screen.getByText('Admin access required')).toBeInTheDocument();
-    expect(screen.getByText("Your account doesn't have administrator permissions.")).toBeInTheDocument();
-  });
+    renderWithProviders(<AdminOverviewPage />, { route: '/admin' });
 
-  it('admits owners (apex) and moderators via the role hierarchy', async () => {
-    mockAuthUser('owner');
-    renderPage();
-
-    expect(screen.getByText('Platform Overview')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText('12')).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText('Could not load platform statistics.'),
+    ).toBeInTheDocument();
   });
 });

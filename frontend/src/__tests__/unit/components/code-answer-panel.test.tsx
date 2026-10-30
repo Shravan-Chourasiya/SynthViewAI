@@ -14,7 +14,7 @@ function makeQuestion(overrides: Partial<Question> = {}): Question {
     category: 'Technical',
     topic: 'linked-list',
     difficulty: 'Medium',
-    text: 'Write a function that reverses a singly linked list.',
+    prompt: 'Write a function that reverses a singly linked list.',
     starter: 'Return the new head.',
     ...overrides,
   };

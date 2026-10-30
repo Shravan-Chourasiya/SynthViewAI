@@ -9,7 +9,7 @@ test.describe('Public Navigation', () => {
     await expect(page.getByRole('heading', { name: /An AI interview that adapts to you\./i })).toBeVisible();
     
     // Test navigation to About page (likely public)
-    await page.getByRole('link', { name: 'About' }).click();
+    await page.getByRole('link', { name: 'About' }).first().click();
     await page.waitForURL('**/about');
     await expect(page.url()).toContain('/about');
     
@@ -18,7 +18,7 @@ test.describe('Public Navigation', () => {
     await expect(page.getByRole('heading', { name: /An AI interview that adapts to you\./i })).toBeVisible();
     
     // Test navigation to Contact page (likely public)
-    await page.getByRole('link', { name: 'Contact' }).click();
+    await page.getByRole('link', { name: 'Contact' }).first().click();
     await page.waitForURL('**/contact');
     await expect(page.url()).toContain('/contact');
     
@@ -26,13 +26,11 @@ test.describe('Public Navigation', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: /An AI interview that adapts to you\./i })).toBeVisible();
     
-    // Test the main CTA - Start an Interview
-    await page.getByRole('button', { name: /Start an Interview/i }).click();
+    // Test the main CTA - Start an Interview (a link on the redesigned hero)
+    await page.getByRole('link', { name: /Start an Interview/i }).click();
     
-    // This should either start an interview or redirect to login/registration
-    // Wait for either the interview page or auth page
-    await expect(
-      page.locator('text=Live').or(page.locator('text=Sign In')).or(page.locator('text=Sign Up'))
-    ).toBeVisible();
+    // The CTA routes a signed-out visitor to registration
+    await page.waitForURL('**/register');
+    await expect(page.getByRole('heading', { name: /Start your first interview/i })).toBeVisible();
   });
 });

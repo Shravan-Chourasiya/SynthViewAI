@@ -10,24 +10,29 @@ interface SocketOptions {
   // Add other options as needed
 }
 
+/** Anything the hook registers with `socket.on` / `off`. */
+type Listener = (...args: unknown[]) => void;
+
 export class FakeSocket extends EventEmitter {
   connected: boolean = false;
   disconnected: boolean = false;
   id: string | null = null;
   
   // Track emitted events for testing
-  emittedEvents: Array<{event: string, data: any}> = [];
+  emittedEvents: Array<{event: string, data: unknown}> = [];
+  /** Payloads grouped by event name — lets a test read what the hook sent. */
+  emitted: Record<string, unknown[]> = {};
   
   // Store event handlers
-  eventHandlers: Record<string, Function[]> = {};
+  eventHandlers: Record<string, Listener[]> = {};
   
   // IO manager properties
   io: {
     opts: SocketOptions & { reconnection: boolean };
-    on: (event: string, fn: Function) => void;
-    off: (event: string, fn?: Function) => void;
+    on: (event: string, fn: Listener) => void;
+    off: (event: string, fn?: Listener) => void;
     removeAllListeners: (event?: string) => void;
-    listeners: (event: string) => Function[];
+    listeners: (event: string) => Listener[];
   };
   
   constructor(private url?: string, private options?: SocketOptions) {
@@ -39,10 +44,10 @@ export class FakeSocket extends EventEmitter {
         ...options,
         reconnection: options?.reconnection ?? true,
       },
-      on: (event: string, fn: Function) => {
+      on: (event: string, fn: Listener) => {
         this.on(`io:${event}`, fn);
       },
-      off: (event: string, fn?: Function) => {
+      off: (event: string, fn?: Listener) => {
         if (fn) {
           this.off(`io:${event}`, fn);
         } else {
@@ -58,7 +63,7 @@ export class FakeSocket extends EventEmitter {
         }
       },
       listeners: (event: string) => {
-        return this.listeners(`io:${event}`) as Function[];
+        return this.listeners(`io:${event}`) as unknown as Listener[];
       }
     };
   }
@@ -77,24 +82,29 @@ export class FakeSocket extends EventEmitter {
     this.disconnected = true;
     this.emit('disconnect', close ? 'io client disconnect' : undefined);
     return this;
-  }
-
-  emit(event: string, ...args: any[]): boolean {
+  }  emit(event: string, ...args: unknown[]): boolean {
     // Track emitted events for testing
     if (args.length > 0) {
       this.emittedEvents.push({ event, data: args[0] });
+      this.emitted[event] = [...(this.emitted[event] ?? []), args[0]];
     }
-    
+
     return super.emit(event, ...args);
   }
 
-  send(...args: any[]): this {
+  /** Emit on the manager (io) channel, e.g. `reconnect_attempt`. */
+  ioEmit(event: string, ...args: unknown[]): boolean {
+    return super.emit(`io:${event}`, ...args);
+  }
+
+
+  send(...args: unknown[]): this {
     this.emit('message', ...args);
     return this;
   }
 
   // Method to simulate server sending an event to client
-  simulateServerEvent(event: string, data: any) {
+  simulateServerEvent(event: string, data: unknown) {
     setImmediate(() => {
       this.emit(event, data);
     });
@@ -141,10 +151,11 @@ export class FakeSocket extends EventEmitter {
   // Method to clear emitted events
   clearEmittedEvents() {
     this.emittedEvents = [];
+    this.emitted = {};
   }
 
   // Override on to track handlers
-  on(event: string, fn: Function): this {
+  on(event: string, fn: Listener): this {
     if (!this.eventHandlers[event]) {
       this.eventHandlers[event] = [];
     }
@@ -154,7 +165,7 @@ export class FakeSocket extends EventEmitter {
   }
 
   // Override off to remove from tracked handlers
-  off(event: string, fn?: Function): this {
+  off(event: string, fn?: Listener): this {
     if (fn && this.eventHandlers[event]) {
       const index = this.eventHandlers[event].indexOf(fn);
       if (index !== -1) {

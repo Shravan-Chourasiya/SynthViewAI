@@ -57,7 +57,7 @@ Element.prototype.scrollIntoView = vi.fn();
 HTMLCanvasElement.prototype.toBlob = function (
   callback,
   type = 'image/png',
-  quality
+  _quality
 ) {
   callback(new Blob([''], { type }));
 };

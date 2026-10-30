@@ -2,147 +2,91 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { ForgotPasswordPage } from '@/pages/auth/forgot-password';
-import * as authService from '@/lib/services/auth.service';
+import ForgotPasswordPage from '@/pages/auth/forgot-password';
+import { authService } from '@/lib/services/auth';
 
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
+vi.mock('@/lib/services/auth');
 
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
-
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement, initialEntries: string[] = ['/forgot-password']) => {
-  return render(
+const renderWithProviders = (ui: React.ReactElement) =>
+  render(
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter initialEntries={initialEntries}>
-        {ui}
-      </MemoryRouter>
+      <MemoryRouter>{ui}</MemoryRouter>
     </ThemeProvider>
   );
-};
 
 describe('Forgot Password Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
   });
 
   it('renders forgot password form with email input', () => {
     renderWithProviders(<ForgotPasswordPage />);
-    
-    expect(screen.getByText(/forgot password\?/i)).toBeInTheDocument();
+
+    expect(screen.getByText(/we'll email you a link/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send reset link/i })).toBeInTheDocument();
   });
 
-  it('shows validation error for invalid email format', async () => {
-    renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    fireEvent.change(emailInput, { target: { value: 'invalid-email' } });
-
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(screen.getByText(/invalid email format/i)).toBeInTheDocument();
-    });
-  });
-
-  it('calls forgotPassword service with correct email on submission', async () => {
+  it('calls forgotPassword service with the entered email on submission', async () => {
     vi.spyOn(authService, 'forgotPassword').mockResolvedValue(undefined);
 
     renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
 
     await waitFor(() => {
-      expect(authService.forgotPassword).toHaveBeenCalledWith('test@example.com');
+      expect(authService.forgotPassword).toHaveBeenCalledWith({ email: 'test@example.com' });
     });
   });
 
-  it('shows success message after submitting email regardless of existence', async () => {
+  it('shows the sent confirmation after a successful request', async () => {
     vi.spyOn(authService, 'forgotPassword').mockResolvedValue(undefined);
 
     renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/if an account exists with that email, you will receive a password reset link/i)).toBeInTheDocument();
+      expect(screen.getByText(/the link is on its way/i)).toBeInTheDocument();
     });
+    // The form is replaced by the confirmation, so it cannot be resubmitted.
+    expect(screen.queryByRole('button', { name: /send reset link/i })).not.toBeInTheDocument();
   });
 
-  it('shows generic error message for service failures', async () => {
-    const errorMessage = 'Something went wrong';
-    vi.spyOn(authService, 'forgotPassword').mockRejectedValue(new Error(errorMessage));
+  // Whether an address exists must never be revealed, so a failure leaves the
+  // form in place with no confirmation.
+  it('keeps the form and hides the confirmation when the request fails', async () => {
+    vi.spyOn(authService, 'forgotPassword').mockRejectedValue(new Error('Service unavailable'));
 
     renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
 
     await waitFor(() => {
-      // Should show a generic message to avoid revealing if email exists
-      expect(screen.getByText(/something went wrong\. please try again\./i)).toBeInTheDocument();
+      expect(authService.forgotPassword).toHaveBeenCalledWith({ email: 'test@example.com' });
     });
+    expect(screen.queryByText(/the link is on its way/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send reset link/i })).toBeInTheDocument();
   });
 
-  it('disables submit button during submission to prevent duplicate requests', async () => {
-    const forgotPasswordPromise = new Promise(() => {}); // Never resolves, simulates loading
-    vi.spyOn(authService, 'forgotPassword').mockReturnValue(forgotPasswordPromise as any);
+  it('disables submit button during submission to prevent duplicate requests', () => {
+    vi.spyOn(authService, 'forgotPassword').mockReturnValue(new Promise(() => {}) as never);
 
     renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.click(submitButton);
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
 
-    // Button should be disabled during submission
-    expect(submitButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: /sending/i })).toBeDisabled();
   });
 
-  it('allows user to go back to login after submitting email', async () => {
-    vi.spyOn(authService, 'forgotPassword').mockResolvedValue(undefined);
-
+  it('offers a link back to sign in', () => {
     renderWithProviders(<ForgotPasswordPage />);
-    
-    const emailInput = screen.getByLabelText(/email/i);
-    const submitButton = screen.getByRole('button', { name: /send reset link/i });
 
-    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(screen.getByText(/if an account exists with that email, you will receive a password reset link/i)).toBeInTheDocument();
-    });
-
-    // Test navigating back to login
-    const backButton = screen.getByRole('link', { name: /back to login/i });
-    fireEvent.click(backButton);
-
-    // Since we're using MemoryRouter with initial entries, we can't truly navigate back
-    // But we can check that the link exists and has the correct destination
-    expect(backButton).toHaveAttribute('href', '/login');
+    const backLink = screen.getByRole('link', { name: /back to sign in/i });
+    expect(backLink).toHaveAttribute('href', '/login');
   });
 });

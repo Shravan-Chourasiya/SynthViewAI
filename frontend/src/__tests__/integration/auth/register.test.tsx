@@ -2,276 +2,106 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
-import { RegisterForm } from '@/components/auth/register-form';
-import { useAuthStore } from '@/lib/stores/auth.store';
+import RegisterPage from '@/pages/auth/register';
+import { useAuthStore } from '@/lib/stores/auth-store';
 
-// Define mockNavigate at module level
-const mockNavigate = vi.fn();
+vi.mock('@/lib/stores/auth-store', () => ({ useAuthStore: vi.fn() }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-// Mock the services and navigation
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
+const mockRegister = vi.fn();
 
-// Mock the auth store
-vi.mock('@/lib/stores/auth.store', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...(actual as any),
-    useAuthStore: vi.fn(),
-  };
-});
-
-// Create wrapper components that include both ThemeProvider and Router
-const renderWithProviders = (ui: React.ReactElement) => {
-  return render(
-    <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <MemoryRouter>
-        {ui}
-      </MemoryRouter>
-    </ThemeProvider>
-  );
+const mockStore = () => {
+  vi.mocked(useAuthStore).mockImplementation((selector) => {
+    const state = {
+      status: 'unauthenticated',
+      user: null,
+      pendingEmail: null,
+      error: null,
+      login: vi.fn(),
+      register: mockRegister,
+      verifyOtp: vi.fn(),
+      logout: vi.fn(),
+      bootstrap: vi.fn(),
+    };
+    return selector ? selector(state as never) : (state as never);
+  });
 };
 
-// Test setup helper
-const setupTest = () => {
-  const mockRegister = vi.fn();
-  
-  vi.mocked(useAuthStore).mockReturnValue({
-    register: mockRegister,
-    status: 'unauthenticated',
-    user: null,
-    pendingEmail: null,
-    error: null,
-    login: vi.fn(),
-    logout: vi.fn(),
-    bootstrap: vi.fn(),
-  });
+const renderWithProviders = (ui: React.ReactElement) =>
+  render(
+    <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
+      <MemoryRouter>{ui}</MemoryRouter>
+    </ThemeProvider>
+  );
 
-  const utils = renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-  
-  const inputs = {
-    name: screen.getByLabelText('Full name'),
-    username: screen.getByLabelText('Username'),
-    email: screen.getByLabelText('Email'),
-    password: screen.getByLabelText('Password'),
-    confirmPassword: screen.getByLabelText('Confirm password'),
-    submit: screen.getByRole('button', { name: /create account/i })
-  };
-  
-  return { mockRegister, mockNavigate, ...utils, ...inputs };
+const fillForm = () => {
+  fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Ada Okonkwo' } });
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'ada.o' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'longenough' } });
+  // The terms checkbox is `required`: the browser (and jsdom) refuse to submit
+  // until it is ticked, so the form's own submit path never runs without it.
+  fireEvent.click(screen.getByRole('checkbox'));
 };
 
 describe('Register Form Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockNavigate.mockClear();
-    
-    // Mock the auth store with register function
-    vi.mocked(useAuthStore).mockReturnValue({
-      register: vi.fn(),
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
+    mockRegister.mockReset();
+    mockStore();
   });
 
   it('renders registration form with all required fields', () => {
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
+    renderWithProviders(<RegisterPage />);
 
     expect(screen.getByLabelText('Full name')).toBeInTheDocument();
     expect(screen.getByLabelText('Username')).toBeInTheDocument();
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
-    expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
   });
 
-  it('shows field validation errors for empty fields', async () => {
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-    fireEvent.click(submitButton);
+  it('constrains the password and email fields', () => {
+    renderWithProviders(<RegisterPage />);
+
+    const passwordInput = screen.getByLabelText('Password') as HTMLInputElement;
+    const emailInput = screen.getByLabelText('Email') as HTMLInputElement;
+
+    expect(passwordInput.minLength).toBe(8);
+    expect(passwordInput).toBeRequired();
+    expect(emailInput).toBeRequired();
+    expect(emailInput.type).toBe('email');
+  });
+
+  it('requires accepting the terms before the form can submit', () => {
+    renderWithProviders(<RegisterPage />);
+
+    const terms = screen.getByRole('checkbox') as HTMLInputElement;
+    expect(terms).toBeRequired();
+    expect(terms.checked).toBe(false);
+  });
+
+  it('calls the register store action with the typed details', async () => {
+    mockRegister.mockResolvedValue(undefined);
+
+    renderWithProviders(<RegisterPage />);
+    fillForm();
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter your name\./i)).toBeInTheDocument();
+      expect(mockRegister).toHaveBeenCalledWith('Ada Okonkwo', 'ada.o', 'ada@example.com', 'longenough');
     });
   });
 
-  it('shows validation error for invalid email format', async () => {
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const emailInput = screen.getByLabelText('Email');
-    fireEvent.change(emailInput, { target: { value: 'invalid-email' } });
+  it('surfaces a rejected registration in the form', async () => {
+    mockRegister.mockRejectedValue(new Error('That email is already registered'));
 
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-    fireEvent.click(submitButton);
+    renderWithProviders(<RegisterPage />);
+    fillForm();
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter a valid email address\./i)).toBeInTheDocument();
+      expect(screen.getByText('That email is already registered')).toBeInTheDocument();
     });
-  });
-
-  it('shows validation errors for weak passwords', async () => {
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const nameInput = screen.getByLabelText('Full name');
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const confirmInput = screen.getByLabelText('Confirm password');
-    
-    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-    fireEvent.change(emailInput, { target: { value: 'john@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'weak' } }); // Too short
-    fireEvent.change(confirmInput, { target: { value: 'weak' } });
-
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      // Password validation error message
-      expect(screen.getByText(/password does not meet the requirements below\./i)).toBeInTheDocument();
-    });
-  });
-
-  it('calls register store action with correct parameters on successful submission', async () => {
-    const mockRegister = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(useAuthStore).mockReturnValue({
-      register: mockRegister,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const nameInput = screen.getByLabelText('Full name');
-    const usernameInput = screen.getByLabelText('Username');
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const confirmInput = screen.getByLabelText('Confirm password');
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-
-    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-    fireEvent.change(usernameInput, { target: { value: 'johndoe' } });
-    fireEvent.change(emailInput, { target: { value: 'john.doe@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.change(confirmInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(mockRegister).toHaveBeenCalledWith(
-        'John Doe',
-        'johndoe',
-        'john.doe@example.com',
-        'SecurePass123!'
-      );
-    });
-  });
-
-  it('calls onSuccess after successful registration', async () => {
-    const mockRegister = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(useAuthStore).mockReturnValue({
-      register: mockRegister,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const nameInput = screen.getByLabelText('Full name');
-    const usernameInput = screen.getByLabelText('Username');
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const confirmInput = screen.getByLabelText('Confirm password');
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-
-    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-    fireEvent.change(usernameInput, { target: { value: 'johndoe' } });
-    fireEvent.change(emailInput, { target: { value: 'john.doe@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.change(confirmInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.click(submitButton);
-
-    // Wait for the success state and navigation
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('john.doe@example.com');
-    });
-  });
-
-  it('shows error message on registration failure', async () => {
-    const errorMessage = 'Email already exists';
-    const { mockRegister, ...rest } = setupTest();
-    
-    // Mock the rejected value
-    mockRegister.mockRejectedValueOnce(new Error(errorMessage));
-    
-    const { name, username, email, password, confirmPassword, submit } = rest;
-    
-    // Fill in valid values for all fields
-    fireEvent.change(name, { target: { value: 'John Doe' } });
-    fireEvent.change(username, { target: { value: 'johndoe' } });
-    fireEvent.change(email, { target: { value: 'existing@example.com' } });
-    fireEvent.change(password, { target: { value: 'SecurePass123!' } });
-    fireEvent.change(confirmPassword, { target: { value: 'SecurePass123!' } });
-    
-    // Click submit button
-    fireEvent.click(submit);
-    
-    await waitFor(() => {
-      expect(screen.getByText(errorMessage)).toBeInTheDocument();
-    }, { timeout: 3000 });
-  });
-
-  it('shows error message on registration failure', async () => {
-    const errorMessage = 'Email already exists';
-    const mockRegister = vi.fn().mockRejectedValue(new Error(errorMessage));
-    vi.mocked(useAuthStore).mockReturnValue({
-      register: mockRegister,
-      status: 'unauthenticated',
-      user: null,
-      pendingEmail: null,
-      error: null,
-      login: vi.fn(),
-      logout: vi.fn(),
-      bootstrap: vi.fn(),
-    });
-
-    renderWithProviders(<RegisterForm onSuccess={mockNavigate} />);
-    
-    const nameInput = screen.getByLabelText('Full name');
-    const usernameInput = screen.getByLabelText('Username');
-    const emailInput = screen.getByLabelText('Email');
-    const passwordInput = screen.getByLabelText('Password');
-    const confirmInput = screen.getByLabelText('Confirm password');
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-
-    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-    fireEvent.change(usernameInput, { target: { value: 'johndoe' } });
-    fireEvent.change(emailInput, { target: { value: 'existing@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.change(confirmInput, { target: { value: 'SecurePass123!' } });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(screen.getByText(errorMessage)).toBeInTheDocument();
-    }, { timeout: 3000 });
   });
 });
