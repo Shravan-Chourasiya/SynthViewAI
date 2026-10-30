@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">SynthView AI mark</title>
+  <desc id="desc">A stylized brain joined with a circuit pattern.</desc>
+  <defs>
+    <linearGradient id="brain" x1="18" y1="22" x2="68" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5B4BFF" />
+      <stop offset="1" stop-color="#1769E0" />
+    </linearGradient>
+    <linearGradient id="circuit" x1="70" y1="22" x2="111" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#46D6B4" />
+      <stop offset="1" stop-color="#0872B9" />
+    </linearGradient>
+  </defs>
+  <path d="M62 18c-7-5-17-2-20 5-8-2-15 4-15 12-8 1-13 8-11 16-7 4-8 14-2 19-4 8 1 17 9 19-1 9 7 16 16 14 4 8 14 10 21 5 5-4 7-10 7-17V30c0-5-1-9-3-12Z" fill="none" stroke="url(#brain)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M66 18c7-5 17-2 20 5 8-2 15 4 15 12 8 1 13 8 11 16 7 4 8 14 2 19 4 8-1 17-9 19 1 9-7 16-16 14-4 8-14 10-21 5-5-4-7-10-7-17V30c0-5 1-9 3-12Z" fill="none" stroke="url(#circuit)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 16v96M48 38v10l-9 9M48 66H34m14 17-10 10M78 39v12h13m-13 10h17l8-8m-25 18v10h14m-14 7 8 9" fill="none" stroke="url(#brain)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="27" cy="57" r="4" fill="#5B4BFF"/><circle cx="34" cy="66" r="4" fill="#1769E0"/><circle cx="29" cy="95" r="4" fill="#1769E0"/>
+  <circle cx="102" cy="51" r="5" fill="#46D6B4"/><circle cx="106" cy="82" r="5" fill="#1595B6"/><circle cx="92" cy="96" r="5" fill="#0872B9"/>
+</svg>

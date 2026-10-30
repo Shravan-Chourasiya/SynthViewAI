@@ -1,0 +1,182 @@
+// WebSocket payload types for every event in both directions.
+// Field names and literal unions mirror the backend contract exactly.
+// Import EVENT_VERSION and SOCKET_EVENTS from ../constants/socket-events — never inline strings.
+
+import type { EVENT_VERSION } from "../constants/socket-events";
+import type { BackendInterviewStatus } from "./api";
+
+// ── Base ──────────────────────────────────────────────────────────────────────
+
+interface WsBase {
+  eventVersion: typeof EVENT_VERSION;
+  event: string;
+}
+
+// ── Client → Server payloads ──────────────────────────────────────────────────
+
+export interface JoinPayload extends WsBase {
+  event: "interview:join";
+  interviewId: string;
+}
+
+export interface LeavePayload extends WsBase {
+  event: "interview:leave";
+  interviewId: string;
+}
+
+export interface HeartbeatAckPayload extends WsBase {
+  event: "heartbeat:ack";
+}
+
+export interface AnswerSubmitPayload extends WsBase {
+  event: "answer:submit";
+  interviewId: string;
+  questionId: string;
+  answerData: string;
+  answerType: "TEXT" | "AUDIO" | "VIDEO";
+}
+
+// Protocol-complete for the backend contract, but not emitted by this UI yet: the
+// server stores the code and its language as separate fields on the answer. Code
+// execution (codebox) remains out of scope — the evaluator is told the code was not run.
+export interface CodeSubmitPayload extends WsBase {
+  event: "code:submit";
+  interviewId: string;
+  questionId: string;
+  language: string;
+  code: string;
+}
+
+export interface NextQuestionPayload extends WsBase {
+  event: "question:next";
+  interviewId: string;
+}
+
+export interface CancelPayload extends WsBase {
+  event: "interview:cancel";
+  interviewId: string;
+}
+
+// Sent when the candidate picks "add more time" in the duration-ended prompt.
+export interface ExtendTimePayload extends WsBase {
+  event: "interview:extend_time";
+  interviewId: string;
+  extraMinutes: number;
+}
+
+// ── Server → Client payloads ──────────────────────────────────────────────────
+
+export interface JoinedPayload extends WsBase {
+  event: "interview:joined";
+  interviewId: string;
+  reconnected: boolean;
+  timerStartedAt: string;
+  durationMinutes: number;
+  answeredQuestionIds: string[];
+}
+
+export interface LeftPayload extends WsBase {
+  event: "interview:left";
+  interviewId: string;
+}
+
+export interface AnswerAcceptedPayload extends WsBase {
+  event: "answer:accepted";
+  interviewId: string;
+  questionId: string;
+}
+
+export interface StateChangePayload extends WsBase {
+  event: "interview:state_change";
+  interviewId: string;
+  status: BackendInterviewStatus;
+  timestamp: string;
+}
+
+export interface QuestionDeliveredPayload extends WsBase {
+  event: "question:delivered";
+  interviewId: string;
+  questionId: string;
+  sequenceNumber: number;
+  totalQuestions: number | null;
+  questionTitle: string;
+  questionDescription?: string | null;
+  questionType: "BEHAVIORAL" | "TECHNICAL" | "MIXED";
+  /**
+   * Whether the candidate answers in prose or in the code editor. Always present, so
+   * the view never has to guess a default for a question already on screen.
+   */
+  answerFormat: "TEXT" | "CODE";
+  /** Suggested language for a CODE answer (e.g. "python"); absent for TEXT questions. */
+  codeLanguage?: string;
+  /** Short subdomain tag from the AI engine (e.g. "team-conflict", "url-shortener"). */
+  topic?: string;
+  /** True when the adaptive engine decided this is a follow-up to the previous question. */
+  isFollowUp?: boolean;
+  deliveredAt: string;
+  timeoutSeconds: number;
+}
+
+export interface AiStatusPayload extends WsBase {
+  event: "ai:status";
+  interviewId: string;
+  questionId: string;
+  stage: "thinking" | "generating" | "evaluating";
+  timestamp: string;
+}
+
+export interface EvaluationFeedbackPayload extends WsBase {
+  event: "evaluation:feedback";
+  interviewId: string;
+  questionId: string;
+  answerId: string;
+  /** False when the backend has already decided that no next question exists. */
+  shouldAdvance?: boolean;
+  score: number;
+  correctness: number;
+  relevance: number;
+  clarity: number;
+  technicalDepth: number;
+  feedback: string;
+  strengths: string[];
+  weaknesses: string[];
+  timestamp: string;
+}
+
+export interface TimerExpiredPayload extends WsBase {
+  event: "timer:expired";
+  interviewId: string;
+  expiredAt: string;
+}
+
+export interface TimerExtendedPayload extends WsBase {
+  event: "interview:timer_extended";
+  interviewId: string;
+  timerStartedAt: string;
+  durationMinutes: number;
+  extraMinutes: number;
+  totalQuestions: number | null;
+}
+
+export interface HeartbeatPingPayload extends WsBase {
+  event: "heartbeat:ping";
+  timestamp: string;
+}
+
+export interface WsErrorPayload extends WsBase {
+  event: "ws:error";
+  code:
+    | "AUTH_UNAUTHORIZED"
+    | "AUTH_SESSION_EXPIRED"
+    | "AUTH_FORBIDDEN"
+    | "INTERVIEW_NOT_FOUND"
+    | "INTERVIEW_INVALID_STATE"
+    | "QUESTION_NOT_FOUND"
+    | "QUESTION_NOT_COMPLETED"
+    | "ANSWER_REJECTED"
+    | "CONTEXT_MISSING"
+    | "INTERNAL_ERROR";
+  message: string;
+  interviewId?: string;
+  timestamp: string;
+}
