@@ -1,187 +1,239 @@
-// Domain types for SynthView AI. These normalize backend responses for the UI.
+export type InterviewStatus = 'draft' | 'scheduled' | 'in-progress' | 'completed' | 'abandoned'
 
-/** "Coding" is reserved: the backend interview-type enum is BEHAVIORAL | TECHNICAL | MIXED,
- * so no picker offers it and the create service maps it to MIXED. */
-export type InterviewType = "Behavioral" | "Technical" | "Coding" | "Mixed";
-export type Difficulty = "Easy" | "Medium" | "Hard" | "Adaptive";
-export type ExperienceLevel = "Entry" | "Junior" | "Mid-level" | "Senior";
-export type InterviewStyle = "FAANG" | "MAANG" | "STARTUP" | "REGULAR";
-export type EndingCriteria = "QUESTION_COUNT" | "DURATION";
-export type SignalTone = "strong" | "good" | "vague" | "weak";
+export type InterviewType = 'behavioral' | 'technical' | 'mixed'
 
-export const INTERVIEW_STATUSES = [
-  "CREATED",
-  "READY",
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CANCELLED",
-  "ABANDONED",
-  "EXPIRED",
-] as const;
-export type InterviewStatus = (typeof INTERVIEW_STATUSES)[number];
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert'
+
+export type ExperienceLevel = 'intern' | 'junior' | 'mid' | 'senior' | 'staff' | 'lead'
+
+/** Functional signal mapping — strong=green, good=blue, vague=amber, weak=red. */
+export type SignalBand = 'strong' | 'good' | 'vague' | 'weak'
+
+export type UserRole = 'candidate' | 'reviewer' | 'admin'
+
+export type UserStatus = 'active' | 'invited' | 'suspended'
+
+export type QuestionKind = 'behavioral' | 'technical' | 'situational' | 'mcq' | 'rating' | 'structured' | 'code'
 
 export interface User {
-  id: string;
-  name: string;
-  email: string;
-  joinedAt: string;
-  /** Mirrors the backend role hierarchy (user < moderator < admin < owner);
-   * "candidate" stands in for the plain `user` role. */
-  role: "candidate" | "moderator" | "admin" | "owner";
+  id: string
+  name: string
+  username: string
+  email: string
+  role: UserRole
+  status: UserStatus
+  headline: string
+  location: string
+  joinedAt: string
+  lastActiveAt: string
 }
 
-export interface InterviewConfig {
-  domain: string;
-  roleTitle: string;
-  /** Legacy/read-model fields; not collected or sent by the creation wizard. */
-  company?: string;
-  targetedCompany?: string;
-  targetedCompanyOther?: string;
-  experienceLevel: ExperienceLevel;
-  difficulty: Difficulty;
-  type: InterviewType;
-  durationMin: number;
-  /** Read-only compatibility value for existing interview displays. */
-  rounds: number;
-  topics: string[];
-  interviewStyle: InterviewStyle;
-  endingCriteria: EndingCriteria;
-  questionCount?: number;
-}
-
-export interface Interview extends InterviewConfig {
-  id: string;
-  userId: string;
-  status: InterviewStatus;
-  createdAt: string;
-  lastActivityAt: string;
+export interface Interview {
+  id: string
+  code: string
+  roleTitle: string
+  company: string | null
+  field: string
+  type: InterviewType
+  difficulty: Difficulty
+  experienceLevel: ExperienceLevel
+  status: InterviewStatus
+  topics: string[]
+  questionCount: number
+  rounds: number
+  durationMinutes: number
+  score: number | null
+  band: SignalBand | null
+  summary: string | null
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
   /** 0..1 */
-  progress: number;
-  score: number | null;
-  currentRound: number;
-  currentQuestion: number;
+  progress: number
+  currentRound: number
+  answeredCount: number
+  candidateId: string
 }
-
-/** Which answer surface the live room renders for a question. The backend decides this
- * per question (`answerFormat`); code questions get the editor, everything else text. */
-export type QuestionKind = "text" | "code";
 
 export interface Question {
-  id: string;
-  index: number;
-  kind: QuestionKind;
-  category: InterviewType;
-  topic: string;
-  difficulty: Exclude<Difficulty, "Adaptive">;
-  text: string;
-  /** The question's clarifying note, used as the editor's seed/placeholder content. */
-  starter?: string;
-  /** Language the backend suggests for a code answer (e.g. "python"). Absent for text. */
-  codeLanguage?: string;
-  isFollowUp?: boolean;
+  id: string
+  interviewId: string
+  index: number
+  kind: QuestionKind
+  prompt: string
+  topic: string
+  difficulty: Difficulty
+  answer: string | null
+  score: number | null
+  band: SignalBand | null
+  /** Short signal headline, e.g. "Strong technical understanding". */
+  headline: string | null
+  feedback: string | null
+  strengths: string[]
+  improvements: string[]
+  /** Adaptive decision readout, e.g. "Difficulty increased". */
+  decision: string | null
+  durationSeconds: number
+  options?: string[]
+  /**
+   * Answer surface, straight from the question row (`answerFormat`). The backend
+   * decides it per question; `CODE` renders the code editor instead of prose and
+   * is the only signal that maps a question onto `kind: 'code'`.
+   * Absent on older payloads — those render as prose.
+   */
+  answerFormat?: 'TEXT' | 'CODE' | null
+  /** Language recorded alongside a code answer, when one was chosen. */
+  codeLanguage?: string | null
+  /** Clarifying note seeded into the code editor as its placeholder. */
+  starter?: string | null
 }
 
-export interface Evaluation {
-  score: number;
-  signal: SignalTone;
-  feedback: string;
-  strengths: string[];
-  weaknesses: string[];
-  improvedAnswer?: string;
+export interface SkillScore {
+  skill: string
+  score: number
 }
 
-export interface Recommendation {
-  gap: string;
-  resource: string;
+export interface ScorePoint {
+  index: number
+  label: string
+  score: number
+  difficulty: Difficulty
 }
 
 export interface InterviewReport {
-  interviewId: string;
-  overallScore: number;
-  categoryScores: { label: string; value: number }[];
-  strengths: string[];
-  weaknesses: string[];
-  summary: string;
-  recommendations: Recommendation[];
-  difficultyProgression: string[];
-  questions: {
-    question: string;
-    answer: string;
-    level: string;
-    /** From the question row; absent on older payloads, which render as prose. */
-    answerFormat?: "TEXT" | "CODE";
-    /** Language recorded alongside a code answer, when one was chosen. */
-    codeLanguage?: string | null;
-    evaluation: Evaluation;
-  }[];
+  interviewId: string
+  overallScore: number
+  band: SignalBand
+  headline: string
+  summary: string
+  strengths: string[]
+  weaknesses: string[]
+  recommendations: string[]
+  skills: SkillScore[]
+  progression: ScorePoint[]
+  topics: { topic: string; score: number }[]
+  shareToken: string
+  generatedAt: string
+  questions: Question[]
 }
 
-export type TimelineEventType =
-  | "created"
-  | "started"
-  | "question_delivered"
-  | "answer_submitted"
-  | "evaluation_completed"
-  | "difficulty_changed"
-  | "topic_changed"
-  | "followup_generated"
-  | "code_submitted"
-  | "resumed"
-  | "cancelled"
-  | "completed";
-
-export interface TimelineEvent {
-  id: string;
-  type: TimelineEventType;
-  label: string;
-  detail: string;
-  at: string;
+export interface LobbyCheck {
+  id: 'camera' | 'microphone'
+  label: string
+  status: 'idle' | 'checking' | 'ready' | 'error'
+  detail: string
 }
 
-export interface Session {
-  id: string;
-  device: string;
-  location: string;
-  lastActive: string;
-  current: boolean;
+export interface DeviceSession {
+  id: string
+  device: string
+  browser: string
+  os: string
+  location: string
+  ip: string
+  current: boolean
+  createdAt: string
+  lastActiveAt: string
 }
 
-export interface AdminUser {
-  id: string;
-  name: string;
-  email: string;
-  status: "Active" | "Suspended";
-  joinedAt: string;
-  interviewCount: number;
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  kind: 'interview' | 'report' | 'system'
+  read: boolean
+  createdAt: string
 }
 
-/* ---------------- display metadata ---------------- */
+export type LiveStatus = 'idle' | 'listening' | 'evaluating' | 'generating'
 
-export type BadgeVariant =
-  | "default"
-  | "strong"
-  | "good"
-  | "vague"
-  | "weak"
-  | "neutral"
-  | "outline";
+export type InterviewEvent =
+  | { type: 'status'; status: LiveStatus }
+  | { type: 'question'; question: Question }
+  | { type: 'transcript'; text: string; final: boolean }
+  | {
+      type: 'evaluation'
+      questionId: string
+      score: number
+      band: SignalBand
+      headline: string
+      decision: string
+    }
+  | { type: 'timer'; elapsedSeconds: number }
+  | { type: 'connection'; state: 'connected' | 'reconnecting' | 'offline' }
+  | { type: 'complete' }
 
-export const STATUS_META: Record<
-  InterviewStatus,
-  { label: string; variant: BadgeVariant }
-> = {
-  CREATED: { label: "Created", variant: "neutral" },
-  READY: { label: "Ready", variant: "good" },
-  IN_PROGRESS: { label: "In Progress", variant: "default" },
-  COMPLETED: { label: "Completed", variant: "strong" },
-  CANCELLED: { label: "Cancelled", variant: "weak" },
-  ABANDONED: { label: "Abandoned", variant: "weak" },
-  EXPIRED: { label: "Expired", variant: "weak" },
-};
+export interface ContactPayload {
+  name: string
+  email: string
+  topic: string
+  message: string
+}
 
-export const DIFFICULTY_META: Record<Difficulty, { variant: BadgeVariant }> = {
-  Easy: { variant: "strong" },
-  Medium: { variant: "vague" },
-  Hard: { variant: "weak" },
-  Adaptive: { variant: "default" },
-};
+export interface AnalyticsKpi {
+  label: string
+  value: string
+  delta: string
+  trend: 'up' | 'down' | 'flat'
+  hint: string
+}
+
+export interface AnalyticsSummary {
+  kpis: AnalyticsKpi[]
+  scoreOverTime: { label: string; score: number; benchmark: number }[]
+  byCategory: { category: string; score: number; attempts: number }[]
+  byDifficulty: { difficulty: string; score: number; attempts: number }[]
+  skills: { skill: string; score: number; delta: number }[]
+  strengths: string[]
+  gaps: string[]
+}
+
+export interface AdminUserRow {
+  id: string
+  name: string
+  username: string
+  email: string
+  role: UserRole
+  status: UserStatus
+  interviews: number
+  avgScore: number | null
+  joinedAt: string
+  lastActiveAt: string
+}
+
+export interface PlatformStats {
+  kpis: AnalyticsKpi[]
+  signups: { label: string; users: number; interviews: number }[]
+  statusMix: { status: string; count: number }[]
+  scoreBands: { band: string; count: number }[]
+  topRoles: { role: string; count: number; avgScore: number }[]
+}
+
+export interface NewInterviewDraft {
+  field: string
+  roleTitle: string
+  company: string | null
+  companyChoice: string
+  type: InterviewType | null
+  topics: string[]
+  experienceLevel: ExperienceLevel
+  difficulty: Difficulty | null
+  durationMinutes: number
+  rounds: number
+}
+
+export interface InterviewFilters {
+  search?: string
+  status?: InterviewStatus | 'all'
+  type?: InterviewType | 'all'
+  sort?: 'recent' | 'score' | 'role'
+  page?: number
+  pageSize?: number
+}
+
+export interface Paginated<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}

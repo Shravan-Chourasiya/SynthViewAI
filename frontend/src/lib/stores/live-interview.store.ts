@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import type { Evaluation, Question } from "../types";
-import type { BackendInterviewStatus } from "../types/api";
+import type { BackendInterviewStatus } from "../api-types";
 
 export type LiveConnectionState =
   | "idle"
@@ -11,37 +10,65 @@ export type LiveConnectionState =
   | "error";
 export type LiveAiStatus = "idle" | "thinking" | "generating" | "evaluating";
 
+/**
+ * A question as the gateway delivers it (`question:delivered`), before it is
+ * adapted to the room's view model. `kind` is derived from `answerFormat` —
+ * the backend's single source of truth for prose vs. code answers.
+ */
+export type LiveQuestion = {
+  id: string;
+  index: number;
+  /** Display category ("Behavioral" | "Technical" | "Mixed"). */
+  category: string;
+  topic: string;
+  text: string;
+  isFollowUp: boolean;
+  difficulty: string;
+  kind: "text" | "code";
+  answerFormat: "TEXT" | "CODE";
+  /** Clarifying note seeded into the editor as its placeholder. */
+  starter?: string;
+  codeLanguage?: string;
+};
+
+export type Evaluation = {
+  score: number;
+  signal: "strong" | "good" | "vague" | "weak";
+  feedback: string;
+  strengths: string[];
+  weaknesses: string[];
+};
+
 export type LiveInterviewState = {
   interviewId: string | null;
   connectionState: LiveConnectionState;
   interviewStatus: BackendInterviewStatus | null;
+  /** Alias of `interviewStatus` kept for older call sites and tests. */
+  status: BackendInterviewStatus | null;
   timerStartedAt: string | null;
   durationMinutes: number | null;
   remainingSeconds: number;
   /**
    * True from the moment the configured duration runs out. The room pauses on
-   * this: no fetch, no generation, no question advance, and no submit — the
-   * candidate is asked whether to extend or end. Cleared only by an accepted
-   * extension (or by a session reset).
+   * this: no submit, no question advance — the candidate decides whether to
+   * extend or to end. Cleared only by an accepted extension (or a reset).
    */
   timeExpired: boolean;
   /**
-   * A scored answer was waiting to advance when the duration ran out. The pause
-   * swallowed that advance on purpose; this records that it is still owed, so an
-   * accepted extension fetches the next question instead of re-opening a
-   * question the server has already evaluated.
+   * A scored answer was waiting to advance when the duration ran out. Recorded
+   * rather than dropped, so an accepted extension pays the owed advance instead
+   * of re-opening a question the server has already evaluated.
    */
   pendingAdvance: boolean;
-  currentQuestion: Question | null;
+  currentQuestion: LiveQuestion | null;
   questionNumber: number;
   totalQuestions: number | null;
   aiStatus: LiveAiStatus;
-  // The backend is authoritative for all score aggregation and final reports.
-  // Keep only the current evaluation for transport/adaptive-session state; do
-  // not duplicate server-side report aggregation in the browser.
   lastEvaluation: Evaluation | null;
   answeredCount: number;
   answeredQuestionIds: string[];
+  /** Alias of `answeredQuestionIds` kept for older call sites and tests. */
+  answeredQuestions: string[];
   transcript: string[];
   error: string | null;
   /** Runtime-only browser object; never persisted by this store. */
@@ -52,11 +79,12 @@ export type LiveInterviewState = {
     interviewId: string;
     timerStartedAt: string;
     durationMinutes: number;
-    answeredQuestionIds: string[];
+    answeredQuestionIds?: string[];
+    status?: BackendInterviewStatus;
   }) => void;
   applyStateChange: (status: BackendInterviewStatus) => void;
   applyQuestion: (
-    question: Question,
+    question: LiveQuestion,
     questionNumber: number,
     totalQuestions: number | null,
   ) => void;
@@ -66,7 +94,6 @@ export type LiveInterviewState = {
   setRemainingSeconds: (remainingSeconds: number) => void;
   setTimeExpired: (timeExpired: boolean) => void;
   setPendingAdvance: (pendingAdvance: boolean) => void;
-  /** Applies an accepted "add more time" from the server. */
   applyTimerExtended: (payload: {
     timerStartedAt: string;
     durationMinutes: number;
@@ -79,10 +106,13 @@ export type LiveInterviewState = {
   reset: () => void;
 };
 
-// The countdown is always derived from the server-authoritative start time, never
-// accumulated locally — a local tick that drifts or pauses with the tab would
-// show time that the session does not have. Returns 0 once the ceiling is passed.
-export function remainingSecondsFor(timerStartedAt: string, durationMinutes: number): number {
+// The countdown is always derived from the server-authoritative start time,
+// never accumulated locally — a local tick that drifts or pauses with the tab
+// would show time the session does not have. Returns 0 past the ceiling.
+export function remainingSecondsFor(
+  timerStartedAt: string,
+  durationMinutes: number,
+): number {
   const startedMs = Date.parse(timerStartedAt);
   if (!Number.isFinite(startedMs)) return durationMinutes * 60;
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
@@ -90,23 +120,25 @@ export function remainingSecondsFor(timerStartedAt: string, durationMinutes: num
 }
 
 const initialState = {
-  interviewId: null,
+  interviewId: null as string | null,
   connectionState: "idle" as LiveConnectionState,
-  interviewStatus: null,
-  timerStartedAt: null,
-  durationMinutes: null,
+  interviewStatus: null as BackendInterviewStatus | null,
+  status: null as BackendInterviewStatus | null,
+  timerStartedAt: null as string | null,
+  durationMinutes: null as number | null,
   remainingSeconds: 0,
   timeExpired: false,
   pendingAdvance: false,
-  currentQuestion: null,
+  currentQuestion: null as LiveQuestion | null,
   questionNumber: 0,
-  totalQuestions: null,
+  totalQuestions: null as number | null,
   aiStatus: "idle" as LiveAiStatus,
-  lastEvaluation: null,
+  lastEvaluation: null as Evaluation | null,
   answeredCount: 0,
-  answeredQuestionIds: [],
-  transcript: [],
-  error: null,
+  answeredQuestionIds: [] as string[],
+  answeredQuestions: [] as string[],
+  transcript: [] as string[],
+  error: null as string | null,
   mediaStream: null as MediaStream | null,
 };
 
@@ -114,39 +146,34 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
   ...initialState,
   setConnectionState: (connectionState) => set({ connectionState }),
   setInterviewId: (interviewId) => set({ interviewId }),
-  applyJoined: ({ interviewId, timerStartedAt, durationMinutes, answeredQuestionIds }) =>
+  applyJoined: ({ interviewId, timerStartedAt, durationMinutes, answeredQuestionIds, status }) =>
     set({
       interviewId,
       timerStartedAt,
       durationMinutes,
-      // A join can be a resume of a session that is already part-way through, so
-      // the first painted timer must be the real remaining time — the 1 s tick
-      // would otherwise show a full duration for a moment on every reconnect.
+      // A join can resume a session already part-way through, so the first
+      // painted timer must be the real remaining time.
       remainingSeconds: remainingSecondsFor(timerStartedAt, durationMinutes),
       timeExpired: false,
-      answeredQuestionIds,
-      answeredCount: answeredQuestionIds.length,
+      answeredQuestionIds: answeredQuestionIds ?? [],
+      answeredQuestions: answeredQuestionIds ?? [],
+      answeredCount: (answeredQuestionIds ?? []).length,
+      ...(status ? { interviewStatus: status, status } : {}),
     }),
-  applyStateChange: (interviewStatus) => set({ interviewStatus }),
+  applyStateChange: (nextStatus) => set({ interviewStatus: nextStatus, status: nextStatus }),
   applyQuestion: (currentQuestion, questionNumber, totalQuestions) =>
     set((state) => {
       // The server redelivers the *current* question on join (boot, resume and
-      // reconnect all funnel through generateAndDeliverQuestionService). That
-      // echo must not clear the busy state: mid-evaluation it is exactly what
-      // re-enabled the submit button while the server was still scoring the
-      // answer. Only a genuinely new question is the arrival the busy state
-      // waits for.
+      // reconnect all funnel through one delivery path). That echo must not
+      // clear the busy state: mid-evaluation it is exactly what used to
+      // re-enable submit while the server was still scoring. Only a genuinely
+      // new question clears it.
       const isRedelivery = state.currentQuestion?.id === currentQuestion.id;
       if (isRedelivery) {
-        // Keep the existing question object rather than swapping in the freshly
-        // deserialised one. The payload says nothing new about the question, and
-        // replacing the reference re-renders every subscriber for it — which can
-        // restart an in-flight CSS transition (the question reveal, the answer
-        // panel fading in) for a redelivery that changed nothing. Only the two
-        // server-authoritative counters are worth writing, and when they already
-        // match, returning the untouched state object means zustand notifies no
-        // one at all.
-        return state.questionNumber === questionNumber && state.totalQuestions === totalQuestions
+        // Keep the existing object so a redelivery that changed nothing
+        // re-renders nobody.
+        return state.questionNumber === questionNumber &&
+          state.totalQuestions === totalQuestions
           ? state
           : { questionNumber, totalQuestions };
       }
@@ -160,9 +187,16 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
     }),
   setAiStatus: (aiStatus) => set({ aiStatus }),
   applyEvaluation: (lastEvaluation) => set({ lastEvaluation }),
-  markAnswered: (questionId: string) => set((state) => state.answeredQuestionIds.includes(questionId)
-    ? state
-    : { answeredQuestionIds: [...state.answeredQuestionIds, questionId], answeredCount: state.answeredCount + 1 }),
+  markAnswered: (questionId: string) =>
+    set((state) =>
+      state.answeredQuestionIds.includes(questionId)
+        ? state
+        : {
+            answeredQuestionIds: [...state.answeredQuestionIds, questionId],
+            answeredQuestions: [...state.answeredQuestions, questionId],
+            answeredCount: state.answeredCount + 1,
+          },
+    ),
   setRemainingSeconds: (remainingSeconds) => set({ remainingSeconds }),
   setTimeExpired: (timeExpired) => set({ timeExpired }),
   setPendingAdvance: (pendingAdvance) => set({ pendingAdvance }),
@@ -171,14 +205,9 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
       timerStartedAt,
       durationMinutes,
       remainingSeconds: remainingSecondsFor(timerStartedAt, durationMinutes),
-      // The extension is the only thing that un-pauses the room, and the new
-      // total may have grown (see extendInterviewTimeService) so the "Qn of
-      // total" label stays true for the questions the new window affords.
       timeExpired: false,
       pendingAdvance: false,
       ...(totalQuestions !== null ? { totalQuestions } : {}),
-      // Nothing is being generated while paused, so there is no in-flight work
-      // for the busy state to describe once the candidate is cleared to answer.
       aiStatus:
         state.interviewStatus === "INPROGRESS" || state.interviewStatus === null
           ? ("idle" as LiveAiStatus)
@@ -196,7 +225,7 @@ export const useLiveInterviewStore = create<LiveInterviewState>((set) => ({
   reset() {
     set((state) => {
       state.mediaStream?.getTracks().forEach((track) => track.stop());
-      return initialState;
+      return { ...initialState };
     });
   },
 }));

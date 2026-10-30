@@ -3,7 +3,7 @@
 // Import EVENT_VERSION and SOCKET_EVENTS from ../constants/socket-events — never inline strings.
 
 import type { EVENT_VERSION } from "../constants/socket-events";
-import type { BackendInterviewStatus } from "./api";
+import type { BackendInterviewStatus } from "../api-types";
 
 // ── Base ──────────────────────────────────────────────────────────────────────
 
